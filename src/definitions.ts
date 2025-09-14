@@ -73,21 +73,7 @@ export const GAMEPLAY = {
   },
 };
 
-export const INPUT = {
-  keys: {
-    left: ["ArrowLeft", "KeyA"],
-    right: ["ArrowRight", "KeyD"],
-    up: ["ArrowUp", "KeyW"],
-    down: ["ArrowDown", "KeyS"],
-    jump: ["Space"],
-    weapon1: ["Digit1"],
-    weapon2: ["Digit2"],
-    restart: ["KeyR"],
-    nextWorm: ["Tab"],
-  },
-};
 
-export type Vec2 = { x: number; y: number };
 
 export type PredictedPoint = { x: number; y: number; alpha: number };
 
@@ -115,26 +101,17 @@ export type HudState = {
 export const clamp = (v: number, min: number, max: number) =>
   Math.max(min, Math.min(max, v));
 
-export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 export const randRange = (min: number, max: number) =>
   Math.random() * (max - min) + min;
 
-export const randInt = (min: number, max: number) =>
-  Math.floor(randRange(min, max + 1));
 
 export const distance = (x1: number, y1: number, x2: number, y2: number) =>
   Math.hypot(x2 - x1, y2 - y1);
 
-export const angleOf = (dx: number, dy: number) => Math.atan2(dy, dx);
 
-export const toDeg = (rad: number) => (rad * 180) / Math.PI;
 
-export const toRad = (deg: number) => (deg * Math.PI) / 180;
 
-export const sign = (v: number) => (v < 0 ? -1 : v > 0 ? 1 : 0);
 
-export const within = (x: number, a: number, b: number) =>
-  x >= Math.min(a, b) && x <= Math.max(a, b);
 
 export const nowMs = () => performance.now();

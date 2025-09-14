@@ -1,15 +1,13 @@
+import type { TeamId, PredictedPoint } from "./definitions";
 import {
   WORLD,
   COLORS,
   GAMEPLAY,
-  TeamId,
   WeaponType,
   clamp,
   randRange,
   distance,
   nowMs,
-  HudState,
-  PredictedPoint,
 } from "./definitions";
 import { Input, drawArrow, drawRoundedRect, drawAimDots, drawHealthBar, drawText, drawCrosshair } from "./utils";
 import { Terrain, Worm, Projectile, Particle } from "./entities";
@@ -91,9 +89,6 @@ export class Game {
     this.canvas.addEventListener("touchstart", () => this.canvas.focus());
   }
 
-  private randomSpawnX(margin = 60) {
-    return Math.floor(randRange(margin, this.width - margin));
-  }
 
   private findGroundY(x: number) {
     // Scan down from top margin to find first solid
@@ -114,9 +109,9 @@ export class Game {
     // Distribute alternating
     let posIndex = 0;
     for (let teamIndex = 0; teamIndex < this.teams.length; teamIndex++) {
-      const team = this.teams[teamIndex];
+      const team = this.teams[teamIndex]!;
       for (let i = 0; i < GAMEPLAY.teamSize; i++) {
-        const x = positions[posIndex++ % positions.length] + randRange(-30, 30);
+        const x = (positions[posIndex++ % positions.length]!) + randRange(-30, 30);
         const y = this.findGroundY(Math.floor(x));
         const worm = new Worm(x, y, team.id, `${team.id[0]}${i + 1}`);
         team.worms.push(worm);
@@ -125,7 +120,7 @@ export class Game {
   }
 
   get activeTeam(): Team {
-    return this.teams[this.currentTeamIndex];
+    return this.teams[this.currentTeamIndex]!;
   }
 
   get activeWorm(): Worm {
@@ -133,14 +128,14 @@ export class Game {
     // Ensure index points to live worm
     let idx = this.activeWormIndex % team.worms.length;
     for (let i = 0; i < team.worms.length; i++) {
-      const w = team.worms[(idx + i) % team.worms.length];
+      const w = team.worms[(idx + i) % team.worms.length]!;
       if (w.alive) {
         this.activeWormIndex = (idx + i) % team.worms.length;
         return w;
       }
     }
     // Fallback (shouldn't happen if team has living worms)
-    return team.worms[0];
+    return team.worms[0]!;
   }
 
   nextTurn(initial = false) {
@@ -158,7 +153,7 @@ export class Game {
       const team = this.activeTeam;
       let idx = (this.activeWormIndex + 1) % team.worms.length;
       for (let i = 0; i < team.worms.length; i++) {
-        const w = team.worms[(idx + i) % team.worms.length];
+        const w = team.worms[(idx + i) % team.worms.length]!;
         if (w.alive) {
           this.activeWormIndex = (idx + i) % team.worms.length;
           break;
@@ -478,8 +473,8 @@ export class Game {
   }
 
   checkVictory() {
-    const redAlive = this.teams[0].worms.some((w) => w.alive);
-    const blueAlive = this.teams[1].worms.some((w) => w.alive);
+    const redAlive = this.teams[0]!.worms.some((w) => w.alive);
+    const blueAlive = this.teams[1]!.worms.some((w) => w.alive);
     if (!redAlive || !blueAlive) {
       this.phase = "gameover";
       const winner = redAlive ? "Red" : blueAlive ? "Blue" : "Nobody";
@@ -737,9 +732,9 @@ export class Game {
 
     // Worms
     for (let t = 0; t < this.teams.length; t++) {
-      const team = this.teams[t];
+      const team = this.teams[t]!;
       for (let i = 0; i < team.worms.length; i++) {
-        const w = team.worms[i];
+        const w = team.worms[i]!;
         const isActive = team.id === this.activeTeam.id && i === this.activeWormIndex && this.phase !== "gameover";
         w.render(ctx, isActive);
       }

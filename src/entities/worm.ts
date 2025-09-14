@@ -1,6 +1,7 @@
-import { WORLD, TeamId, COLORS } from "../definitions";
+import { WORLD, COLORS } from "../definitions";
+import type { TeamId } from "../definitions";
 import { drawHealthBar } from "../utils";
-import { Terrain } from "./terrain";
+import type { Terrain } from "./terrain";
 
 export class Worm {
   x: number;

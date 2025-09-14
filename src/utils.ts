@@ -1,9 +1,7 @@
-import { clamp, toDeg } from "./definitions";
 
 export class Input {
   private keysDown = new Set<string>();
   private keysPressed = new Set<string>();
-  private keysReleased = new Set<string>();
 
   mouseX = 0;
   mouseY = 0;
@@ -33,7 +31,6 @@ export class Input {
     });
     window.addEventListener("keyup", (e) => {
       this.keysDown.delete(e.code);
-      this.keysReleased.add(e.code);
     });
     canvas.addEventListener("mousemove", (e) => {
       const rect = canvas.getBoundingClientRect();
@@ -68,7 +65,6 @@ export class Input {
     this.mouseJustPressed = false;
     this.mouseJustReleased = false;
     this.keysPressed.clear();
-    this.keysReleased.clear();
   }
 
   isDown(code: string) {
@@ -76,9 +72,6 @@ export class Input {
   }
   pressed(code: string) {
     return this.keysPressed.has(code);
-  }
-  released(code: string) {
-    return this.keysReleased.has(code);
   }
 }
 
@@ -133,36 +126,6 @@ export function drawText(
   ctx.fillText(text, x, y);
 }
 
-export function wrapText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  maxWidth: number,
-  lineHeight: number,
-  color = "#fff",
-  align: CanvasTextAlign = "left"
-) {
-  const words = text.split(" ");
-  let line = "";
-  let yy = y;
-  ctx.textAlign = align;
-  ctx.fillStyle = color;
-  ctx.font = `16px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
-  for (let n = 0; n < words.length; n++) {
-    const testLine = line + words[n] + " ";
-    const metrics = ctx.measureText(testLine);
-    const testWidth = metrics.width;
-    if (testWidth > maxWidth && n > 0) {
-      ctx.fillText(line, x, yy);
-      line = words[n] + " ";
-      yy += lineHeight;
-    } else {
-      line = testLine;
-    }
-  }
-  ctx.fillText(line, x, yy);
-}
 
 export function drawArrow(
   ctx: CanvasRenderingContext2D,
@@ -198,15 +161,7 @@ export function drawArrow(
   ctx.restore();
 }
 
-export function formatSeconds(ms: number) {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  return `${s}s`;
-}
 
-export function smoothstep(edge0: number, edge1: number, x: number) {
-  const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
-  return t * t * (3 - 2 * t);
-}
 
 export function drawAimDots(
   ctx: CanvasRenderingContext2D,
@@ -241,9 +196,6 @@ export function drawHealthBar(
   ctx.fill();
 }
 
-export function degreeLabel(rad: number) {
-  return `${Math.round(toDeg(rad))}°`;
-}
 
 // Simple crosshair drawing
 export function drawCrosshair(

@@ -42,7 +42,7 @@ export class Terrain {
 
     // Build solid mask
     for (let x = 0; x < this.width; x++) {
-      const groundY = Math.floor(this.heightMap[x]);
+      const groundY = Math.floor(this.heightMap[x]!);
       for (let y = 0; y < this.height; y++) {
         this.setSolid(x, y, y >= groundY ? 1 : 0);
       }
@@ -66,7 +66,7 @@ export class Terrain {
     ctx.beginPath();
     ctx.moveTo(0, this.height);
     for (let x = 0; x < this.width; x++) {
-      ctx.lineTo(x, this.heightMap[x]);
+      ctx.lineTo(x, this.heightMap[x]!);
     }
     ctx.lineTo(this.width, this.height);
     ctx.closePath();
@@ -84,7 +84,7 @@ export class Terrain {
     ctx.strokeStyle = COLORS.grassHighlight;
     ctx.beginPath();
     for (let x = 0; x < this.width; x += 1) {
-      const y = Math.floor(this.heightMap[x]) - 1;
+      const y = Math.floor(this.heightMap[x]!) - 1;
       ctx.moveTo(x, y - 1);
       ctx.lineTo(x + 2, y - 1 - Math.random() * 2);
     }
@@ -96,7 +96,7 @@ export class Terrain {
     ctx.fillStyle = COLORS.grass;
     ctx.beginPath();
     for (let x = 0; x < this.width; x++) {
-      const y = Math.floor(this.heightMap[x]);
+      const y = Math.floor(this.heightMap[x]!);
       ctx.rect(x, y - 5, 2, 6);
     }
     ctx.globalAlpha = 0.3;
