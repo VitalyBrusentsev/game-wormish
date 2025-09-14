@@ -71,11 +71,11 @@ export class Game {
     this.activeWormIndex = 0;
 
     this.spawnTeams();
-
+    
     this.nextTurn(true);
-
+    
     // Canvas hover style
-    this.canvas.style.cursor = "crosshair";
+    this.updateCursor();
   }
 
   mount(parent: HTMLElement) {
@@ -145,6 +145,8 @@ export class Game {
     this.weapon = WeaponType.Bazooka;
     this.turnStartMs = nowMs();
     this.message = initial ? "Welcome! Eliminate the other team!" : null;
+    // Ensure cursor matches the newly selected weapon
+    this.updateCursor();
 
     // Move to next team's living worm
     if (!initial) {
@@ -176,6 +178,8 @@ export class Game {
     if (this.keyAny(["Digit1"])) this.weapon = WeaponType.Bazooka;
     if (this.keyAny(["Digit2"])) this.weapon = WeaponType.HandGrenade;
     if (this.keyAny(["Digit3"])) this.weapon = WeaponType.Rifle;
+    // Update cursor visibility when weapon changes
+    this.updateCursor();
 
     // Restart
     if (this.keyAny(["KeyR"])) {
@@ -496,6 +500,13 @@ export class Game {
     this.currentTeamIndex = Math.random() < 0.5 ? 0 : 1;
     this.activeWormIndex = 0;
     this.nextTurn(true);
+  }
+
+  // Update canvas cursor based on selected weapon (hide when Rifle)
+  private updateCursor() {
+    // Hide the OS crosshair cursor when Rifle is selected so only the in-game aiming
+    // crosshair (clamped to a radius) is visible. Otherwise show crosshair.
+    this.canvas.style.cursor = this.weapon === WeaponType.Rifle ? "none" : "crosshair";
   }
 
   keyAny(codes: string[]) {
