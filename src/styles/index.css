@@ -1,0 +1,23 @@
+:root {
+  color-scheme: light dark;
+}
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+body {
+  background: #0a0f1a;
+  overflow: hidden;
+  user-select: none;
+}
+canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  image-rendering: pixelated;
+}
+/* Ensure no focus outline when canvas is focused for keyboard */
+canvas:focus {
+  outline: none;
+}
