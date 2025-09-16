@@ -7,6 +7,15 @@ It allows players to take turns and control squads of whimsical creatures, with 
 
 HTML/CSS, TypeScript, Vite
 
+## Compiling and testing
+
+Use the following console command to verify the compilation is successful:
+```
+tsc -p tsconfig.json --noEmit
+```
+
+When relevant and approved, you can start the server by running the `npm run dev` command and use the browser to test the app.
+
 # Coding Conventions
 
 ## Typescript
