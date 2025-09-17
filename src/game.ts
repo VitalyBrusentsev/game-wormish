@@ -11,8 +11,9 @@ import {
 } from "./definitions";
 import { Input, drawArrow, drawRoundedRect, drawAimDots, drawHealthBar, drawText, drawCrosshair } from "./utils";
 import { Terrain, Worm, Projectile, Particle } from "./entities";
+import { GameState } from "./game-state";
 
-type Phase = "aim" | "projectile" | "post" | "gameover";
+ // phase type managed by GameState
 
 type Team = {
   id: TeamId;
@@ -27,6 +28,7 @@ export class Game {
 
   terrain: Terrain;
   input: Input;
+  state: GameState;
 
   teams: Team[];
   currentTeamIndex: number;
@@ -37,12 +39,7 @@ export class Game {
 
   wind: number = 0;
 
-  phase: Phase = "aim";
-  weapon: WeaponType = WeaponType.Bazooka;
-  turnStartMs: number = 0;
   lastTimeMs: number = 0;
-  charging: boolean = false;
-  chargeStartMs: number = 0;
   message: string | null = null;
 
   constructor(width: number, height: number) {
@@ -72,6 +69,7 @@ export class Game {
 
     this.spawnTeams();
     
+    this.state = new GameState();
     this.nextTurn(true);
     
     // Canvas hover style
@@ -141,9 +139,7 @@ export class Game {
   nextTurn(initial = false) {
     // Set wind each turn
     this.wind = randRange(-WORLD.windMax, WORLD.windMax);
-    this.phase = "aim";
-    this.weapon = WeaponType.Bazooka;
-    this.turnStartMs = nowMs();
+    this.state.startTurn(nowMs(), WeaponType.Bazooka);
     this.message = initial ? "Welcome! Eliminate the other team!" : null;
     // Ensure cursor matches the newly selected weapon
     this.updateCursor();
@@ -166,18 +162,17 @@ export class Game {
 
   handleInput(dt: number) {
     const a = this.activeWorm;
-    const turnElapsed = nowMs() - this.turnStartMs;
-    const timeLeft = Math.max(0, GAMEPLAY.turnTimeMs - turnElapsed);
-    if (timeLeft <= 0 && this.phase === "aim") {
+    const timeLeftMs = this.state.timeLeftMs(nowMs(), GAMEPLAY.turnTimeMs);
+    if (timeLeftMs <= 0 && this.state.phase === "aim") {
       // Auto end turn if no shot
       this.endAimPhaseWithoutShot();
       return;
     }
 
     // Weapon switching
-    if (this.keyAny(["Digit1"])) this.weapon = WeaponType.Bazooka;
-    if (this.keyAny(["Digit2"])) this.weapon = WeaponType.HandGrenade;
-    if (this.keyAny(["Digit3"])) this.weapon = WeaponType.Rifle;
+    if (this.keyAny(["Digit1"])) this.state.setWeapon(WeaponType.Bazooka);
+    if (this.keyAny(["Digit2"])) this.state.setWeapon(WeaponType.HandGrenade);
+    if (this.keyAny(["Digit3"])) this.state.setWeapon(WeaponType.Rifle);
     // Update cursor visibility when weapon changes
     this.updateCursor();
 
@@ -187,7 +182,7 @@ export class Game {
       return;
     }
 
-    if (this.phase === "aim") {
+    if (this.state.phase === "aim") {
       // Movement
       let move = 0;
       if (this.keyDownAny(["ArrowLeft", "KeyA"])) move -= 1;
@@ -202,12 +197,10 @@ export class Game {
 
       // Charge-based weapons (both)
       if (this.input.mouseJustPressed) {
-        this.charging = true;
-        this.chargeStartMs = nowMs();
+        this.state.beginCharge(nowMs());
       }
-      if (this.charging && this.input.mouseJustReleased) {
-        const power01 = this.getCharge01();
-        this.charging = false;
+      if (this.state.charging && this.input.mouseJustReleased) {
+        const power01 = this.state.endCharge(nowMs());
         this.fireChargedWeapon(power01);
         this.endAimPhaseAfterShot();
         return;
@@ -215,21 +208,14 @@ export class Game {
     }
   }
 
-  getCharge01() {
-    const elapsed = nowMs() - this.chargeStartMs;
-    // Ping-pong charge between 0 and 1 over 1.4s
-    const speed = 1 / 1400; // 1/ms
-    const t = elapsed * speed;
-    const frac = t % 2;
-    return frac < 1 ? frac : 2 - frac;
-  }
+  // charge logic moved to GameState.getCharge01(nowMs)
 
   // Compute aiming target and angle; Rifle constrains the target to a 200px circle
   getAimInfo() {
     const a = this.activeWorm;
     let dx = this.input.mouseX - a.x;
     let dy = this.input.mouseY - a.y;
-    if (this.weapon === WeaponType.Rifle) {
+    if (this.state.weapon === WeaponType.Rifle) {
       const len = Math.hypot(dx, dy) || 1;
       const r = GAMEPLAY.rifle.aimRadius;
       if (len > r) {
@@ -250,7 +236,7 @@ export class Game {
     const sx = a.x + Math.cos(angle) * muzzleOffset;
     const sy = a.y + Math.sin(angle) * muzzleOffset;
 
-    if (this.weapon === WeaponType.Bazooka) {
+    if (this.state.weapon === WeaponType.Bazooka) {
       const speed =
         GAMEPLAY.bazooka.minPower +
         (GAMEPLAY.bazooka.maxPower - GAMEPLAY.bazooka.minPower) * power01;
@@ -268,7 +254,7 @@ export class Game {
           (x, y, r, dmg) => this.onExplosion(x, y, r, dmg, WeaponType.Bazooka)
         )
       );
-    } else if (this.weapon === WeaponType.HandGrenade) {
+    } else if (this.state.weapon === WeaponType.HandGrenade) {
       const speed =
         GAMEPLAY.handGrenade.minPower +
         (GAMEPLAY.handGrenade.maxPower - GAMEPLAY.handGrenade.minPower) * power01;
@@ -287,7 +273,7 @@ export class Game {
           { fuse: GAMEPLAY.handGrenade.fuseMs, restitution: GAMEPLAY.handGrenade.restitution }
         )
       );
-    } else if (this.weapon === WeaponType.Rifle) {
+    } else if (this.state.weapon === WeaponType.Rifle) {
       // Straight shot, speed is fixed; no gravity/wind effects
       const speed = GAMEPLAY.rifle.speed;
       const vx = Math.cos(angle) * speed;
@@ -309,14 +295,14 @@ export class Game {
 
   endAimPhaseWithoutShot() {
     // Time ran out, pass
-    this.phase = "post";
+    this.state.expireAimPhase();
     setTimeout(() => {
       this.nextTurn();
     }, 400);
   }
 
   endAimPhaseAfterShot() {
-    this.phase = "projectile";
+    this.state.shotFired();
     this.message = null;
   }
 
@@ -386,7 +372,7 @@ export class Game {
     this.handleInput(dt);
 
     // Update projectiles
-    if (this.phase === "projectile") {
+    if (this.state.phase === "projectile") {
       const specBaz = {
         gravity: WORLD.gravity,
         explosionRadius: GAMEPLAY.bazooka.explosionRadius,
@@ -437,9 +423,9 @@ export class Game {
 
       // If none left, end after short delay or when particles settle
       if (this.projectiles.length === 0) {
-        this.phase = "post";
+        this.state.endProjectilePhase();
         setTimeout(() => {
-          if (this.phase === "post") this.nextTurn();
+          if (this.state.phase === "post") this.nextTurn();
         }, GAMEPLAY.postShotDelayMs);
       }
     }
@@ -451,7 +437,7 @@ export class Game {
     this.particles = this.particles.filter((p) => p.life > 0);
 
     // Apply physics to non-active worms during projectile phase
-    if (this.phase !== "aim") {
+    if (this.state.phase !== "aim") {
       for (const team of this.teams) {
         for (const w of team.worms) {
           if (!w.alive) continue;
@@ -480,7 +466,7 @@ export class Game {
     const redAlive = this.teams[0]!.worms.some((w) => w.alive);
     const blueAlive = this.teams[1]!.worms.some((w) => w.alive);
     if (!redAlive || !blueAlive) {
-      this.phase = "gameover";
+      this.state.phase = "gameover";
       const winner = redAlive ? "Red" : blueAlive ? "Blue" : "Nobody";
       this.message = `${winner} wins! Press R to restart.`;
     }
@@ -506,7 +492,7 @@ export class Game {
   private updateCursor() {
     // Hide the OS crosshair cursor when Rifle is selected so only the in-game aiming
     // crosshair (clamped to a radius) is visible. Otherwise show crosshair.
-    this.canvas.style.cursor = this.weapon === WeaponType.Rifle ? "none" : "crosshair";
+    this.canvas.style.cursor = this.state.weapon === WeaponType.Rifle ? "none" : "crosshair";
   }
 
   keyAny(codes: string[]) {
@@ -527,8 +513,8 @@ export class Game {
   }
 
   predictPath(): PredictedPoint[] {
-    if (this.phase !== "aim") return [];
-    if (!this.charging) return [];
+    if (this.state.phase !== "aim") return [];
+    if (!this.state.charging) return [];
     const a = this.activeWorm;
     const { angle } = this.getAimInfo();
 
@@ -538,7 +524,7 @@ export class Game {
     const sy = a.y + Math.sin(angle) * muzzleOffset;
 
     // Rifle: straight ray until terrain hit or lifetime distance
-    if (this.weapon === WeaponType.Rifle) {
+    if (this.state.weapon === WeaponType.Rifle) {
       const pts: PredictedPoint[] = [];
       const dirx = Math.cos(angle);
       const diry = Math.sin(angle);
@@ -556,9 +542,9 @@ export class Game {
     }
 
     // Bazooka / Hand Grenade: simulate arc with gravity and wind
-    const power01 = this.getCharge01();
+    const power01 = this.state.getCharge01(nowMs());
     const speed =
-      this.weapon === WeaponType.Bazooka
+      this.state.weapon === WeaponType.Bazooka
         ? GAMEPLAY.bazooka.minPower +
           (GAMEPLAY.bazooka.maxPower - GAMEPLAY.bazooka.minPower) * power01
         : GAMEPLAY.handGrenade.minPower +
@@ -642,12 +628,12 @@ export class Game {
     drawHealthBar(ctx, rightX, topY + 16, hbW, hbH, blueHealth / maxTeamHealth, COLORS.healthGreen, COLORS.healthRed);
 
     // Center: current team, weapon, timer
-    const turnElapsed = nowMs() - this.turnStartMs;
-    const timeLeft = Math.max(0, Math.ceil((GAMEPLAY.turnTimeMs - turnElapsed) / 1000));
+    const timeLeftMs = this.state.timeLeftMs(nowMs(), GAMEPLAY.turnTimeMs);
+    const timeLeft = Math.max(0, Math.ceil(timeLeftMs / 1000));
     const centerX = this.width / 2;
 
     const teamStr = `${this.activeTeam.id} Team`;
-    const weaponStr = `Weapon: ${this.weapon}`;
+    const weaponStr = `Weapon: ${this.state.weapon}`;
     const clockStr = `Time: ${timeLeft}s`;
 
     drawText(ctx, teamStr, centerX, topY, COLORS.white, 14, "center");
@@ -665,8 +651,8 @@ export class Game {
     ctx.restore();
 
     // Power bar while charging
-    if (this.phase === "aim" && this.charging) {
-      const charge = this.getCharge01();
+    if (this.state.phase === "aim" && this.state.charging) {
+      const charge = this.state.getCharge01(nowMs());
       const w = 260;
       const h = 16;
       const x = (this.width - w) / 2;
@@ -680,14 +666,70 @@ export class Game {
       drawText(ctx, "Hold and release to fire", this.width / 2, y - 18, COLORS.white, 14, "center");
     }
 
-    // Message
-    if (this.message) {
+    // Message (non-gameover)
+    if (this.message && this.state.phase !== "gameover") {
       drawText(ctx, this.message, this.width / 2, padding + barH + 32, COLORS.white, 16, "center");
     }
   }
 
+  private renderGameOver() {
+    // Show a large centered winning message when the game is over.
+    if (this.state.phase !== "gameover" || !this.message) return;
+    const ctx = this.ctx;
+    const x = this.width / 2;
+    const y = this.height / 2;
+    // ~20mm on a typical 96 DPI screen ≈ 76px. Use a fixed pixel size for consistency.
+    const sizePx = 76;
+    ctx.save();
+    ctx.font = `bold ${sizePx}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const msg = this.message!;
+
+    // Draw a shadow for the whole message to improve contrast
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillText(msg, x + 4, y + 4);
+
+    // Try to specifically highlight the "R" in the "Press R" portion.
+    // The message format is: "<Winner> wins! Press R to restart."
+    const search = "Press ";
+    const idx = msg.indexOf(search);
+    if (idx !== -1 && idx + search.length < msg.length) {
+      const idxR = idx + search.length;
+      const pre = msg.slice(0, idxR); // includes "Press "
+      const rChar = msg[idxR] ?? "";
+      const post = msg.slice(idxR + 1);
+
+      // Measure total width and compute left-aligned start so we can draw segments precisely.
+      const totalWidth = ctx.measureText(msg).width;
+      let startX = x - totalWidth / 2;
+
+      // Draw 'pre' (left segment)
+      ctx.fillStyle = COLORS.white;
+      // For centered drawing of a segment we need to convert the segment position to its center X.
+      const preWidth = ctx.measureText(pre).width;
+      ctx.fillText(pre, startX + preWidth / 2, y);
+
+      // Draw the highlighted 'R'
+      const rWidth = ctx.measureText(rChar).width;
+      ctx.fillStyle = COLORS.red;
+      ctx.fillText(rChar, startX + preWidth + rWidth / 2, y);
+
+      // Draw the 'post' (right segment)
+      const postWidth = ctx.measureText(post).width;
+      ctx.fillStyle = COLORS.white;
+      ctx.fillText(post, startX + preWidth + rWidth + postWidth / 2, y);
+    } else {
+      // Fallback: draw whole message in white centered
+      ctx.fillStyle = COLORS.white;
+      ctx.fillText(msg, x, y);
+    }
+
+    ctx.restore();
+  }
+
   private renderAimHelpers() {
-    if (this.phase !== "aim") return;
+    if (this.state.phase !== "aim") return;
 
     const ctx = this.ctx;
     const a = this.activeWorm;
@@ -704,11 +746,11 @@ export class Game {
 
     // Crosshair at target (rifle constrained inside a circle)
     const chSize = 8;
-    const crossCol = this.weapon === WeaponType.Rifle ? "#ffd84d" : "#fff";
+    const crossCol = this.state.weapon === WeaponType.Rifle ? "#ffd84d" : "#fff";
     drawCrosshair(ctx, targetX, targetY, chSize, crossCol, 2);
 
     // Visualize rifle aim radius
-    if (this.weapon === WeaponType.Rifle) {
+    if (this.state.weapon === WeaponType.Rifle) {
       ctx.save();
       ctx.globalAlpha = 0.15;
       ctx.beginPath();
@@ -746,7 +788,7 @@ export class Game {
       const team = this.teams[t]!;
       for (let i = 0; i < team.worms.length; i++) {
         const w = team.worms[i]!;
-        const isActive = team.id === this.activeTeam.id && i === this.activeWormIndex && this.phase !== "gameover";
+        const isActive = team.id === this.activeTeam.id && i === this.activeWormIndex && this.state.phase !== "gameover";
         w.render(ctx, isActive);
       }
     }
@@ -759,6 +801,9 @@ export class Game {
 
     // HUD
     this.renderHUD();
+
+    // Large centered game-over message (drawn on top of everything)
+    this.renderGameOver();
   }
 
   // Game loop --------------------------------------------------------
