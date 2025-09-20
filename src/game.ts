@@ -12,6 +12,8 @@ import {
 import { Input, drawArrow, drawRoundedRect, drawAimDots, drawHealthBar, drawText, drawCrosshair } from "./utils";
 import { Terrain, Worm, Projectile, Particle } from "./entities";
 import { GameState } from "./game-state";
+import { ElmRuntime } from "./elm/runtime";
+import { initialAppState } from "./elm/init";
 
  // phase type managed by GameState
 
@@ -36,6 +38,8 @@ export class Game {
 
   projectiles: Projectile[] = [];
   particles: Particle[] = [];
+
+  elm: ElmRuntime;
 
   wind: number = 0;
 
@@ -74,6 +78,18 @@ export class Game {
     
     // Canvas hover style
     this.updateCursor();
+
+    // Initialize Elm runtime (immutable model) without affecting current game logic
+    this.elm = new ElmRuntime(
+      initialAppState({
+        width,
+        height,
+        nowMs: nowMs(),
+        seed: 1,
+        windStrength: 0,
+        turnDurationMs: GAMEPLAY.turnTimeMs,
+      })
+    );
   }
 
   mount(parent: HTMLElement) {
@@ -813,6 +829,10 @@ export class Game {
     let dt = (timeMs - this.lastTimeMs) / 1000;
     // Clamp dt to avoid big jumps when tabbed out
     dt = Math.min(dt, 1 / 20);
+    // Drive the Elm-style model tick (no behavior changes yet)
+    if (this.elm) {
+      this.elm.dispatch({ type: "TickAdvanced", nowMs: nowMs(), dtMs: dt * 1000 });
+    }
     this.update(dt);
     this.render();
     this.input.update();
