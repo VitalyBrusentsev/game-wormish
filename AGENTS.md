@@ -9,10 +9,17 @@ HTML/CSS, TypeScript, Vite
 
 ## Compiling and testing
 
-Use the following console command to verify the compilation is successful:
+Use the following console command to verify the saved changes successfully pass the compilation:
 ```
 tsc -p tsconfig.json --noEmit
 ```
+
+If a `dev` task is running (most likely, can be confirmed by the user), all approved changes will already be reflected in the web app, available for the Browser tool to test. If it doesn't, you can start it by executing `npm run dev`.
+
+
+## Command line
+
+The syntax for command line is Windows Powershell, so pay attention to proper syntax. For example, use `;`, not `&&` for combining two commands in one line.
 
 When relevant and approved, you can start the server by running the `npm run dev` command and use the browser to test the app.
 
