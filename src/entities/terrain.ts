@@ -1,4 +1,5 @@
 import { WORLD, COLORS, clamp, randRange } from "../definitions";
+import { groundTiles } from "../assets";
 export class Terrain {
   width: number;
   height: number;
@@ -6,6 +7,7 @@ export class Terrain {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   heightMap: number[];
+  private tilePattern: CanvasPattern | null = null;
 
   constructor(width: number, height: number) {
     this.width = width | 0;
@@ -21,6 +23,11 @@ export class Terrain {
   }
 
   generate(seed = Math.random()) {
+    // Select and start loading a seamless ground tile (bundled by Vite)
+    const idx = Math.floor(Math.random() * groundTiles.length);
+    const tileUrl = groundTiles[idx] ?? groundTiles[0]!;
+    this.loadTile(tileUrl);
+
     // Generate height map using layered sines + jitter
     const base = this.height * randRange(WORLD.minGround, WORLD.maxGround);
     const amp1 = this.height * 0.08;
@@ -72,9 +79,7 @@ export class Terrain {
     ctx.closePath();
     ctx.fill();
 
-    // Sand at bottom
-    ctx.fillStyle = COLORS.sand;
-    ctx.fillRect(0, this.height - 20, this.width, 20);
+    // Tiled pattern overlay will be applied asynchronously once the tile image loads.
   }
 
   private drawGrass() {
@@ -104,7 +109,34 @@ export class Terrain {
     ctx.restore();
   }
 
-  setSolid(x: number, y: number, value: 0 | 1) {
+ // Load tile image and overlay pattern once ready
+ private loadTile(url: string) {
+   const img = new Image();
+   img.onload = () => {
+     const pat = this.ctx.createPattern(img, "repeat");
+     if (pat) {
+       this.tilePattern = pat;
+       // Overlay pattern over existing ground while preserving carved holes
+       this.applyTilePattern();
+     }
+   };
+   img.src = url;
+ }
+
+ private applyTilePattern() {
+   if (!this.tilePattern) return;
+   const ctx = this.ctx;
+   ctx.save();
+   ctx.globalCompositeOperation = "source-in";
+   ctx.fillStyle = this.tilePattern;
+   ctx.fillRect(0, 0, this.width, this.height);
+   ctx.restore();
+
+   // Re-add grass overlay above the tiled fill
+   this.drawGrass();
+ }
+
+ setSolid(x: number, y: number, value: 0 | 1) {
     if (x < 0 || y < 0 || x >= this.width || y >= this.height) return;
     this.solid[y * this.width + x] = value;
   }
