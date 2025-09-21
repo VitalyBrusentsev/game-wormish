@@ -128,6 +128,18 @@ export class Game {
         const x = (positions[posIndex++ % positions.length]!) + randRange(-30, 30);
         const y = this.findGroundY(Math.floor(x));
         const worm = new Worm(x, y, team.id, `${team.id[0]}${i + 1}`);
+
+        // Spawn snap: ensure worms start settled on the terrain even if first dt spikes.
+        // Nudge slightly downward to guarantee overlap, then resolve upward with a slightly higher climb step.
+        {
+          const nudge = 3;
+          const settled = this.terrain.resolveCircle(worm.x, worm.y + nudge, worm.radius, 12);
+          worm.x = settled.x;
+          worm.y = settled.y;
+          worm.vy = 0;
+          worm.onGround = settled.onGround;
+        }
+
         team.worms.push(worm);
       }
     }

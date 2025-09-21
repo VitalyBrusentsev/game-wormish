@@ -15,6 +15,7 @@ export class Worm {
   facing: number; // -1 left, 1 right
   onGround: boolean;
   name: string;
+  age: number;
 
   constructor(x: number, y: number, team: TeamId, name: string) {
     this.x = x;
@@ -28,6 +29,7 @@ export class Worm {
     this.facing = 1;
     this.onGround = false;
     this.name = name;
+    this.age = 0;
   }
 
   applyImpulse(ix: number, iy: number) {
@@ -42,6 +44,7 @@ export class Worm {
 
   update(dt: number, terrain: Terrain, moveX: number, jump: boolean) {
     if (!this.alive) return;
+    this.age += dt;
     // Horizontal input
     const targetVx = moveX * WORLD.walkSpeed;
     const accel = 800;
@@ -62,29 +65,42 @@ export class Worm {
       this.onGround = false;
     }
 
-    // Gravity
-    this.vy += WORLD.gravity * dt;
+    // Gravity is applied after horizontal resolution to avoid ground jitter.
 
     // Integrate with simple terrain collisions
     // Horizontal
     let nx = this.x + this.vx * dt;
     let ny = this.y;
 
-    // Try step-up when hitting wall
-    if (terrain.circleCollides(nx, ny, this.radius)) {
-      let climbed = false;
-      for (let step = 1; step <= 8; step++) {
-        if (!terrain.circleCollides(nx, ny - step, this.radius)) {
-          ny -= step;
-          climbed = true;
-          break;
+        // Try step-up when hitting wall (only when actually moving horizontally)
+        if (nx !== this.x && terrain.circleCollides(nx, ny, this.radius)) {
+          let climbed = false;
+          for (let step = 1; step <= 8; step++) {
+            if (!terrain.circleCollides(nx, ny - step, this.radius)) {
+              ny -= step;
+              climbed = true;
+              break;
+            }
+          }
+          if (!climbed) {
+            nx = this.x; // block horizontal
+            this.vx = 0;
+          }
         }
-      }
-      if (!climbed) {
-        nx = this.x; // block horizontal
-        this.vx = 0;
-      }
-    }
+
+        // Ground support check and gravity after horizontal step to prevent jitter
+        if (this.onGround) {
+          // Tolerant support check to reduce aliasing near flat surfaces
+          const supported =
+            terrain.circleCollides(nx, ny + 1, this.radius) ||
+            terrain.circleCollides(nx, ny + 2, this.radius);
+          if (!supported) this.onGround = false;
+        }
+        if (!this.onGround) {
+          this.vy += WORLD.gravity * dt;
+        } else {
+          this.vy = 0;
+        }
 
     // Vertical
     ny = ny + this.vy * dt;
@@ -110,11 +126,13 @@ export class Worm {
           }
         }
       }
-      // If still colliding, try resolve
-      const res = terrain.resolveCircle(nx, ny, this.radius);
-      nx = res.x;
-      ny = res.y;
-      onGround = onGround || res.onGround;
+      // If still colliding after the step adjustment, try a full resolve
+      if (terrain.circleCollides(nx, ny, this.radius)) {
+        const res = terrain.resolveCircle(nx, ny, this.radius);
+        nx = res.x;
+        ny = res.y;
+        onGround = onGround || res.onGround;
+      }
     }
 
     this.x = nx;
