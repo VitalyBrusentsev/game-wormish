@@ -32,6 +32,10 @@ export class GameState {
     return power;
   }
 
+  cancelCharge() {
+    this.charging = false;
+  }
+
   getCharge01(nowMs: number): number {
     const elapsed = Math.max(0, nowMs - this.chargeStartMs);
     const speed = 1 / 1400; // 1/ms
@@ -42,6 +46,14 @@ export class GameState {
 
   timeLeftMs(nowMs: number, turnTimeMs: number): number {
     return Math.max(0, turnTimeMs - (nowMs - this.turnStartMs));
+  }
+
+  pauseFor(pausedMs: number) {
+    if (pausedMs <= 0) return;
+    this.turnStartMs += pausedMs;
+    if (this.chargeStartMs) {
+      this.chargeStartMs += pausedMs;
+    }
   }
 
   shotFired() {

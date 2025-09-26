@@ -1,41 +1,24 @@
 import type { TeamId, PredictedPoint } from "./definitions";
-import {
-  WORLD,
-  COLORS,
-  GAMEPLAY,
-  WeaponType,
-  clamp,
-  randRange,
-  distance,
-  nowMs,
-} from "./definitions";
-import {
-  Input,
-  drawArrow,
-  drawRoundedRect,
-  drawAimDots,
-  drawHealthBar,
-  drawText,
-  drawCrosshair,
-  drawWrappedText,
-} from "./utils";
+import { WORLD, GAMEPLAY, WeaponType, clamp, randRange, distance, nowMs } from "./definitions";
+import { Input } from "./utils";
 import { Terrain, Worm, Projectile, Particle } from "./entities";
 import { GameState } from "./game-state";
 import { ElmRuntime } from "./elm/runtime";
 import { initialAppState } from "./elm/init";
+import { HelpOverlay } from "./ui/help-overlay";
+import {
+  renderAimHelpers,
+  renderBackground,
+  renderGameOver,
+  renderHUD,
+  type AimInfo,
+} from "./rendering/game-rendering";
 
  // phase type managed by GameState
 
 type Team = {
   id: TeamId;
   worms: Worm[];
-};
-
-type Rect = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
 };
 
 export class Game {
@@ -62,9 +45,7 @@ export class Game {
   lastTimeMs: number = 0;
   message: string | null = null;
 
-  private helpVisible = false;
-  private helpOpenedAtMs: number | null = null;
-  private helpCloseRect: Rect | null = null;
+  private helpOverlay: HelpOverlay;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -98,6 +79,8 @@ export class Game {
     
     // Canvas hover style
     this.updateCursor();
+
+    this.helpOverlay = new HelpOverlay();
 
     // Initialize Elm runtime (immutable model) without affecting current game logic
     this.elm = new ElmRuntime(
@@ -209,50 +192,31 @@ export class Game {
   }
 
   private showHelp() {
-    if (this.helpVisible) return;
-    this.helpVisible = true;
-    this.helpOpenedAtMs = nowMs();
-    if (this.state.charging) {
-      this.state.charging = false;
+    const opened = this.helpOverlay.show(nowMs());
+    if (opened && this.state.charging) {
+      this.state.cancelCharge();
     }
   }
 
   private hideHelp() {
-    if (!this.helpVisible) return;
-    const openedAt = this.helpOpenedAtMs;
-    if (openedAt != null) {
-      const pausedFor = nowMs() - openedAt;
-      this.state.turnStartMs += pausedFor;
-      if (this.state.chargeStartMs) {
-        this.state.chargeStartMs += pausedFor;
-      }
+    const pausedFor = this.helpOverlay.hide(nowMs());
+    if (pausedFor > 0) {
+      this.state.pauseFor(pausedFor);
     }
-    this.helpVisible = false;
-    this.helpOpenedAtMs = null;
-  }
-
-  private pointInRect(x: number, y: number, rect: Rect | null) {
-    if (!rect) return false;
-    return (
-      x >= rect.x &&
-      x <= rect.x + rect.width &&
-      y >= rect.y &&
-      y <= rect.y + rect.height
-    );
   }
 
   handleInput(dt: number) {
     if (this.input.pressed("F1")) {
-      if (this.helpVisible) this.hideHelp();
+      if (this.helpOverlay.isVisible()) this.hideHelp();
       else this.showHelp();
     }
 
-    if (this.helpVisible) {
+    if (this.helpOverlay.isVisible()) {
       if (this.input.pressed("Escape")) {
         this.hideHelp();
       } else if (
         this.input.mouseJustPressed &&
-        this.pointInRect(this.input.mouseX, this.input.mouseY, this.helpCloseRect)
+        this.helpOverlay.isCloseButtonHit(this.input.mouseX, this.input.mouseY)
       ) {
         this.hideHelp();
       }
@@ -309,7 +273,7 @@ export class Game {
   // charge logic moved to GameState.getCharge01(nowMs)
 
   // Compute aiming target and angle; Rifle constrains the target to a 200px circle
-  getAimInfo() {
+  getAimInfo(): AimInfo {
     const a = this.activeWorm;
     let dx = this.input.mouseX - a.x;
     let dy = this.input.mouseY - a.y;
@@ -469,7 +433,7 @@ export class Game {
   update(dt: number) {
     this.handleInput(dt);
 
-    if (this.helpVisible) {
+    if (this.helpOverlay.isVisible()) {
       return;
     }
 
@@ -685,323 +649,57 @@ export class Game {
 
   // Rendering --------------------------------------------------------
 
-  private renderBackground() {
-    const ctx = this.ctx;
-    const g = ctx.createLinearGradient(0, 0, 0, this.height);
-    g.addColorStop(0, COLORS.bgSkyTop);
-    g.addColorStop(1, COLORS.bgSkyBottom);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, this.width, this.height);
-
-    // Water at bottom
-    ctx.fillStyle = COLORS.water;
-    const waterH = 30;
-    ctx.fillRect(0, this.height - waterH, this.width, waterH);
-  }
-
-  private renderHUD() {
-    const ctx = this.ctx;
-    const padding = 10;
-
-    // Top HUD bar
-    const barH = 44;
-    ctx.save();
-    drawRoundedRect(ctx, padding, padding, this.width - padding * 2, barH, 10);
-    ctx.fillStyle = COLORS.hudBg;
-    ctx.fill();
-    ctx.strokeStyle = COLORS.hudPanelBorder;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    // Team health
-    const redHealth = this.getTeamHealth("Red");
-    const blueHealth = this.getTeamHealth("Blue");
-    const maxTeamHealth = GAMEPLAY.teamSize * 100;
-    const hbW = 140;
-    const hbH = 10;
-    const leftX = padding + 12 + hbW / 2;
-    const rightX = this.width - padding - 12 - hbW / 2;
-    const topY = padding + 10;
-
-    drawText(ctx, "RED", padding + 12, topY, COLORS.white, 14);
-    drawHealthBar(ctx, leftX, topY + 16, hbW, hbH, redHealth / maxTeamHealth, COLORS.healthGreen, COLORS.healthRed);
-
-    drawText(ctx, "BLUE", this.width - padding - 12, topY, COLORS.white, 14, "right");
-    drawHealthBar(ctx, rightX, topY + 16, hbW, hbH, blueHealth / maxTeamHealth, COLORS.healthGreen, COLORS.healthRed);
-
-    drawText(ctx, "F1: Help", padding + 12, topY + 30, COLORS.white, 12);
-
-    // Center: current team, weapon, timer
-    const timeLeftMs = this.state.timeLeftMs(nowMs(), GAMEPLAY.turnTimeMs);
-    const timeLeft = Math.max(0, Math.ceil(timeLeftMs / 1000));
-    const centerX = this.width / 2;
-
-    const teamStr = `${this.activeTeam.id} Team`;
-    const weaponStr = `Weapon: ${this.state.weapon}`;
-    const clockStr = `Time: ${timeLeft}s`;
-
-    drawText(ctx, teamStr, centerX, topY, COLORS.white, 14, "center");
-    drawText(ctx, weaponStr, centerX, topY + 16, COLORS.white, 14, "center");
-    drawText(ctx, clockStr, centerX, topY + 30, COLORS.white, 12, "center");
-
-    // Wind indicator below center
-    const windY = padding + barH + 14;
-    const dir = Math.sign(this.wind);
-    const mag = Math.abs(this.wind) / WORLD.windMax;
-    const length = 80 * mag;
-    drawArrow(ctx, centerX - length / 2 * dir, windY, 0, length * dir || 0.0001, COLORS.power, 4);
-    drawText(ctx, "Wind", centerX, windY + 6, COLORS.white, 12, "center", "top", false);
-
-    ctx.restore();
-
-    // Power bar while charging
-    if (this.state.phase === "aim" && this.state.charging) {
-      const charge = this.state.getCharge01(nowMs());
-      const w = 260;
-      const h = 16;
-      const x = (this.width - w) / 2;
-      const y = this.height - h - 18;
-      drawRoundedRect(ctx, x, y, w, h, 8);
-      ctx.fillStyle = COLORS.hudBg;
-      ctx.fill();
-      drawRoundedRect(ctx, x + 2, y + 2, (w - 4) * charge, h - 4, (h - 4) / 2);
-      ctx.fillStyle = COLORS.power;
-      ctx.fill();
-      drawText(ctx, "Hold and release to fire", this.width / 2, y - 18, COLORS.white, 14, "center");
-    }
-
-    // Message (non-gameover)
-    if (this.message && this.state.phase !== "gameover") {
-      drawText(ctx, this.message, this.width / 2, padding + barH + 32, COLORS.white, 16, "center");
-    }
-  }
-
-  private renderHelpOverlay() {
-    if (!this.helpVisible) {
-      this.helpCloseRect = null;
-      return;
-    }
-
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.fillStyle = "rgba(4, 8, 18, 0.6)";
-    ctx.fillRect(0, 0, this.width, this.height);
-
-    let panelW = Math.min(620, Math.max(360, this.width - 120));
-    let panelH = Math.min(420, Math.max(300, this.height - 200));
-    panelW = Math.min(panelW, this.width - 40);
-    panelH = Math.min(panelH, this.height - 40);
-    const x = (this.width - panelW) / 2;
-    const y = (this.height - panelH) / 2;
-
-    drawRoundedRect(ctx, x, y, panelW, panelH, 20);
-    ctx.fillStyle = "rgba(18, 26, 46, 0.94)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    const titleY = y + 44;
-    drawText(
-      ctx,
-      "Worm Commander's Handy Guide",
-      x + panelW / 2,
-      titleY,
-      COLORS.white,
-      24,
-      "center"
-    );
-
-    const subtitleY = titleY + 28;
-    drawText(
-      ctx,
-      "(Pause, sip cocoa, then plan your next shenanigan)",
-      x + panelW / 2,
-      subtitleY,
-      COLORS.white,
-      14,
-      "center"
-    );
-
-    const bulletPoints = [
-      "Move: A / D or ← → for a wiggly parade march.",
-      "Hop: W or Space to vault over suspicious craters.",
-      "Aim: Wiggle the mouse, keep your eyes on the crosshair.",
-      "Charge & Fire: Hold the mouse button, release to unleash mayhem.",
-      "Swap Toys: 1 Bazooka, 2 Grenade, 3 Rifle — choose your chaos.",
-      "Wind Watch: mind the gusts before you light the fuse!",
-    ];
-
-    const contentMargin = 44;
-    const contentX = x + contentMargin;
-    const contentWidth = panelW - contentMargin * 2;
-    let lineY = subtitleY + 36;
-
-    for (const point of bulletPoints) {
-      const consumed = drawWrappedText(
-        ctx,
-        `• ${point}`,
-        contentX,
-        lineY,
-        COLORS.white,
-        contentWidth,
-        16,
-        26
-      );
-      lineY += consumed + 10;
-    }
-
-    const buttonSize = 32;
-    const buttonPadding = 18;
-    const buttonX = x + panelW - buttonPadding - buttonSize;
-    const buttonY = y + buttonPadding;
-    drawRoundedRect(ctx, buttonX, buttonY, buttonSize, buttonSize, 10);
-    ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-    ctx.stroke();
-    drawText(ctx, "✕", buttonX + buttonSize / 2, buttonY + buttonSize / 2, COLORS.white, 20, "center", "middle");
-
-    this.helpCloseRect = { x: buttonX, y: buttonY, width: buttonSize, height: buttonSize };
-
-    ctx.restore();
-  }
-
-  private renderGameOver() {
-    // Show a large centered winning message when the game is over.
-    if (this.state.phase !== "gameover" || !this.message) return;
-    const ctx = this.ctx;
-    const x = this.width / 2;
-    const y = this.height / 2;
-    // ~20mm on a typical 96 DPI screen ≈ 76px. Use a fixed pixel size for consistency.
-    const sizePx = 76;
-    ctx.save();
-    ctx.font = `bold ${sizePx}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    const msg = this.message!;
-
-    // Draw a shadow for the whole message to improve contrast
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
-    ctx.fillText(msg, x + 4, y + 4);
-
-    // Try to specifically highlight the "R" in the "Press R" portion.
-    // The message format is: "<Winner> wins! Press R to restart."
-    const search = "Press ";
-    const idx = msg.indexOf(search);
-    if (idx !== -1 && idx + search.length < msg.length) {
-      const idxR = idx + search.length;
-      const pre = msg.slice(0, idxR); // includes "Press "
-      const rChar = msg[idxR] ?? "";
-      const post = msg.slice(idxR + 1);
-
-      // Measure total width and compute left-aligned start so we can draw segments precisely.
-      const totalWidth = ctx.measureText(msg).width;
-      let startX = x - totalWidth / 2;
-
-      // Draw 'pre' (left segment)
-      ctx.fillStyle = COLORS.white;
-      // For centered drawing of a segment we need to convert the segment position to its center X.
-      const preWidth = ctx.measureText(pre).width;
-      ctx.fillText(pre, startX + preWidth / 2, y);
-
-      // Draw the highlighted 'R'
-      const rWidth = ctx.measureText(rChar).width;
-      ctx.fillStyle = COLORS.red;
-      ctx.fillText(rChar, startX + preWidth + rWidth / 2, y);
-
-      // Draw the 'post' (right segment)
-      const postWidth = ctx.measureText(post).width;
-      ctx.fillStyle = COLORS.white;
-      ctx.fillText(post, startX + preWidth + rWidth + postWidth / 2, y);
-    } else {
-      // Fallback: draw whole message in white centered
-      ctx.fillStyle = COLORS.white;
-      ctx.fillText(msg, x, y);
-    }
-
-    ctx.restore();
-  }
-
-  private renderAimHelpers() {
-    if (this.state.phase !== "aim") return;
-
-    const ctx = this.ctx;
-    const a = this.activeWorm;
-    const { targetX, targetY, angle } = this.getAimInfo();
-
-    // Predicted path dots while charging
-    const pts = this.predictPath();
-    if (pts.length > 0) {
-      ctx.save();
-      ctx.globalAlpha = 0.9;
-      drawAimDots(ctx, pts, COLORS.white);
-      ctx.restore();
-    }
-
-    // Crosshair at target (rifle constrained inside a circle)
-    const chSize = 8;
-    const crossCol = this.state.weapon === WeaponType.Rifle ? "#ffd84d" : "#fff";
-    drawCrosshair(ctx, targetX, targetY, chSize, crossCol, 2);
-
-    // Visualize rifle aim radius
-    if (this.state.weapon === WeaponType.Rifle) {
-      ctx.save();
-      ctx.globalAlpha = 0.15;
-      ctx.beginPath();
-      ctx.arc(a.x, a.y, GAMEPLAY.rifle.aimRadius, 0, Math.PI * 2);
-      ctx.fillStyle = "#ffd84d";
-      ctx.fill();
-      ctx.restore();
-    }
-
-    // Small muzzle direction indicator
-    const muzzleOffset = WORLD.wormRadius + 10;
-    const mx = a.x + Math.cos(angle) * muzzleOffset;
-    const my = a.y + Math.sin(angle) * muzzleOffset;
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.6)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(mx, my);
-    ctx.stroke();
-    ctx.restore();
-  }
-
   render() {
     const ctx = this.ctx;
-    // Background and terrain
-    this.renderBackground();
+    renderBackground(ctx, this.width, this.height);
     this.terrain.render(ctx);
 
-    // Particles below worms if desired
     for (const p of this.particles) p.render(ctx);
 
-    // Worms
     for (let t = 0; t < this.teams.length; t++) {
       const team = this.teams[t]!;
       for (let i = 0; i < team.worms.length; i++) {
         const w = team.worms[i]!;
-        const isActive = team.id === this.activeTeam.id && i === this.activeWormIndex && this.state.phase !== "gameover";
+        const isActive =
+          team.id === this.activeTeam.id &&
+          i === this.activeWormIndex &&
+          this.state.phase !== "gameover";
         w.render(ctx, isActive);
       }
     }
 
-    // Projectiles
     for (const pr of this.projectiles) pr.render(ctx);
 
-    // Aim helpers
-    this.renderAimHelpers();
+    renderAimHelpers({
+      ctx,
+      state: this.state,
+      activeWorm: this.activeWorm,
+      aim: this.getAimInfo(),
+      predictedPath: this.predictPath(),
+    });
 
-    // HUD
-    this.renderHUD();
+    renderHUD({
+      ctx,
+      width: this.width,
+      height: this.height,
+      state: this.state,
+      now: nowMs(),
+      activeTeamId: this.activeTeam.id,
+      getTeamHealth: (teamId) => this.getTeamHealth(teamId),
+      wind: this.wind,
+      message: this.message,
+      turnDurationMs: GAMEPLAY.turnTimeMs,
+    });
 
-    // Large centered game-over message (drawn on top of everything)
-    this.renderGameOver();
+    renderGameOver({
+      ctx,
+      width: this.width,
+      height: this.height,
+      message: this.message,
+      isGameOver: this.state.phase === "gameover",
+    });
 
-    // Help overlay (pauses gameplay and sits atop everything)
-    this.renderHelpOverlay();
+    this.helpOverlay.render(ctx, this.width, this.height);
   }
 
   // Game loop --------------------------------------------------------
