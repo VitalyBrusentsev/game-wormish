@@ -11,7 +11,7 @@ HTML/CSS, TypeScript, Vite
 
 Use the following console command to verify the saved changes successfully pass the compilation:
 ```
-tsc -p tsconfig.json --noEmit
+npx tsc -p tsconfig.json --noEmit
 ```
 
 If a `dev` task is running (most likely, can be confirmed by the user), all approved changes will already be reflected in the web app, available for the Browser tool to test. If it doesn't, you can start it by executing `npm run dev`.
