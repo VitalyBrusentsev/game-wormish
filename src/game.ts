@@ -9,7 +9,16 @@ import {
   distance,
   nowMs,
 } from "./definitions";
-import { Input, drawArrow, drawRoundedRect, drawAimDots, drawHealthBar, drawText, drawCrosshair } from "./utils";
+import {
+  Input,
+  drawArrow,
+  drawRoundedRect,
+  drawAimDots,
+  drawHealthBar,
+  drawText,
+  drawCrosshair,
+  drawWrappedText,
+} from "./utils";
 import { Terrain, Worm, Projectile, Particle } from "./entities";
 import { GameState } from "./game-state";
 import { ElmRuntime } from "./elm/runtime";
@@ -20,6 +29,13 @@ import { initialAppState } from "./elm/init";
 type Team = {
   id: TeamId;
   worms: Worm[];
+};
+
+type Rect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 export class Game {
@@ -45,6 +61,10 @@ export class Game {
 
   lastTimeMs: number = 0;
   message: string | null = null;
+
+  private helpVisible = false;
+  private helpOpenedAtMs: number | null = null;
+  private helpCloseRect: Rect | null = null;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -188,7 +208,57 @@ export class Game {
     }
   }
 
+  private showHelp() {
+    if (this.helpVisible) return;
+    this.helpVisible = true;
+    this.helpOpenedAtMs = nowMs();
+    if (this.state.charging) {
+      this.state.charging = false;
+    }
+  }
+
+  private hideHelp() {
+    if (!this.helpVisible) return;
+    const openedAt = this.helpOpenedAtMs;
+    if (openedAt != null) {
+      const pausedFor = nowMs() - openedAt;
+      this.state.turnStartMs += pausedFor;
+      if (this.state.chargeStartMs) {
+        this.state.chargeStartMs += pausedFor;
+      }
+    }
+    this.helpVisible = false;
+    this.helpOpenedAtMs = null;
+  }
+
+  private pointInRect(x: number, y: number, rect: Rect | null) {
+    if (!rect) return false;
+    return (
+      x >= rect.x &&
+      x <= rect.x + rect.width &&
+      y >= rect.y &&
+      y <= rect.y + rect.height
+    );
+  }
+
   handleInput(dt: number) {
+    if (this.input.pressed("F1")) {
+      if (this.helpVisible) this.hideHelp();
+      else this.showHelp();
+    }
+
+    if (this.helpVisible) {
+      if (this.input.pressed("Escape")) {
+        this.hideHelp();
+      } else if (
+        this.input.mouseJustPressed &&
+        this.pointInRect(this.input.mouseX, this.input.mouseY, this.helpCloseRect)
+      ) {
+        this.hideHelp();
+      }
+      return;
+    }
+
     const a = this.activeWorm;
     const timeLeftMs = this.state.timeLeftMs(nowMs(), GAMEPLAY.turnTimeMs);
     if (timeLeftMs <= 0 && this.state.phase === "aim") {
@@ -398,6 +468,10 @@ export class Game {
 
   update(dt: number) {
     this.handleInput(dt);
+
+    if (this.helpVisible) {
+      return;
+    }
 
     // Update projectiles
     if (this.state.phase === "projectile") {
@@ -655,6 +729,8 @@ export class Game {
     drawText(ctx, "BLUE", this.width - padding - 12, topY, COLORS.white, 14, "right");
     drawHealthBar(ctx, rightX, topY + 16, hbW, hbH, blueHealth / maxTeamHealth, COLORS.healthGreen, COLORS.healthRed);
 
+    drawText(ctx, "F1: Help", padding + 12, topY + 30, COLORS.white, 12);
+
     // Center: current team, weapon, timer
     const timeLeftMs = this.state.timeLeftMs(nowMs(), GAMEPLAY.turnTimeMs);
     const timeLeft = Math.max(0, Math.ceil(timeLeftMs / 1000));
@@ -698,6 +774,97 @@ export class Game {
     if (this.message && this.state.phase !== "gameover") {
       drawText(ctx, this.message, this.width / 2, padding + barH + 32, COLORS.white, 16, "center");
     }
+  }
+
+  private renderHelpOverlay() {
+    if (!this.helpVisible) {
+      this.helpCloseRect = null;
+      return;
+    }
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = "rgba(4, 8, 18, 0.6)";
+    ctx.fillRect(0, 0, this.width, this.height);
+
+    let panelW = Math.min(620, Math.max(360, this.width - 120));
+    let panelH = Math.min(420, Math.max(300, this.height - 200));
+    panelW = Math.min(panelW, this.width - 40);
+    panelH = Math.min(panelH, this.height - 40);
+    const x = (this.width - panelW) / 2;
+    const y = (this.height - panelH) / 2;
+
+    drawRoundedRect(ctx, x, y, panelW, panelH, 20);
+    ctx.fillStyle = "rgba(18, 26, 46, 0.94)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const titleY = y + 44;
+    drawText(
+      ctx,
+      "Worm Commander's Handy Guide",
+      x + panelW / 2,
+      titleY,
+      COLORS.white,
+      24,
+      "center"
+    );
+
+    const subtitleY = titleY + 28;
+    drawText(
+      ctx,
+      "(Pause, sip cocoa, then plan your next shenanigan)",
+      x + panelW / 2,
+      subtitleY,
+      COLORS.white,
+      14,
+      "center"
+    );
+
+    const bulletPoints = [
+      "Move: A / D or ← → for a wiggly parade march.",
+      "Hop: W or Space to vault over suspicious craters.",
+      "Aim: Wiggle the mouse, keep your eyes on the crosshair.",
+      "Charge & Fire: Hold the mouse button, release to unleash mayhem.",
+      "Swap Toys: 1 Bazooka, 2 Grenade, 3 Rifle — choose your chaos.",
+      "Wind Watch: mind the gusts before you light the fuse!",
+    ];
+
+    const contentMargin = 44;
+    const contentX = x + contentMargin;
+    const contentWidth = panelW - contentMargin * 2;
+    let lineY = subtitleY + 36;
+
+    for (const point of bulletPoints) {
+      const consumed = drawWrappedText(
+        ctx,
+        `• ${point}`,
+        contentX,
+        lineY,
+        COLORS.white,
+        contentWidth,
+        16,
+        26
+      );
+      lineY += consumed + 10;
+    }
+
+    const buttonSize = 32;
+    const buttonPadding = 18;
+    const buttonX = x + panelW - buttonPadding - buttonSize;
+    const buttonY = y + buttonPadding;
+    drawRoundedRect(ctx, buttonX, buttonY, buttonSize, buttonSize, 10);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+    ctx.stroke();
+    drawText(ctx, "✕", buttonX + buttonSize / 2, buttonY + buttonSize / 2, COLORS.white, 20, "center", "middle");
+
+    this.helpCloseRect = { x: buttonX, y: buttonY, width: buttonSize, height: buttonSize };
+
+    ctx.restore();
   }
 
   private renderGameOver() {
@@ -832,6 +999,9 @@ export class Game {
 
     // Large centered game-over message (drawn on top of everything)
     this.renderGameOver();
+
+    // Help overlay (pauses gameplay and sits atop everything)
+    this.renderHelpOverlay();
   }
 
   // Game loop --------------------------------------------------------
