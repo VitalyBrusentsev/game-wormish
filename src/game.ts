@@ -3,8 +3,6 @@ import { WORLD, GAMEPLAY, WeaponType, clamp, randRange, distance, nowMs } from "
 import { Input } from "./utils";
 import { Terrain, Worm, Projectile, Particle } from "./entities";
 import { GameState } from "./game-state";
-import { ElmRuntime } from "./elm/runtime";
-import { initialAppState } from "./elm/init";
 import { HelpOverlay } from "./ui/help-overlay";
 import {
   renderAimHelpers,
@@ -37,8 +35,6 @@ export class Game {
 
   projectiles: Projectile[] = [];
   particles: Particle[] = [];
-
-  elm: ElmRuntime;
 
   wind: number = 0;
 
@@ -82,17 +78,6 @@ export class Game {
 
     this.helpOverlay = new HelpOverlay();
 
-    // Initialize Elm runtime (immutable model) without affecting current game logic
-    this.elm = new ElmRuntime(
-      initialAppState({
-        width,
-        height,
-        nowMs: nowMs(),
-        seed: 1,
-        windStrength: 0,
-        turnDurationMs: GAMEPLAY.turnTimeMs,
-      })
-    );
   }
 
   mount(parent: HTMLElement) {
@@ -709,10 +694,6 @@ export class Game {
     let dt = (timeMs - this.lastTimeMs) / 1000;
     // Clamp dt to avoid big jumps when tabbed out
     dt = Math.min(dt, 1 / 20);
-    // Drive the Elm-style model tick (no behavior changes yet)
-    if (this.elm) {
-      this.elm.dispatch({ type: "TickAdvanced", nowMs: nowMs(), dtMs: dt * 1000 });
-    }
     this.update(dt);
     this.render();
     this.input.update();
