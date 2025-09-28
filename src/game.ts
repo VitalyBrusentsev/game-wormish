@@ -553,6 +553,8 @@ export class Game {
   private onWeaponChanged(previous: WeaponType, next: WeaponType) {
     if (next === WeaponType.Rifle && previous !== WeaponType.Rifle) {
       this.snapRifleAimToDefault();
+    } else if (previous === WeaponType.Rifle && next !== WeaponType.Rifle) {
+      this.input.clearMouseWarp();
     }
   }
 
@@ -573,8 +575,7 @@ export class Game {
 
     const radius = GAMEPLAY.rifle.aimRadius;
     const offset = radius / Math.sqrt(2);
-    this.input.mouseX = worm.x + direction * offset;
-    this.input.mouseY = worm.y - offset;
+    this.input.warpMouseTo(worm.x + direction * offset, worm.y - offset);
   }
 
   keyAny(codes: string[]) {
