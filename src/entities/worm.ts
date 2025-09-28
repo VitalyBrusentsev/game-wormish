@@ -103,6 +103,7 @@ export class Worm {
         }
 
     // Vertical
+    const wasSupported = this.onGround;
     ny = ny + this.vy * dt;
     let onGround = false;
     if (terrain.circleCollides(nx, ny, this.radius)) {
@@ -137,7 +138,7 @@ export class Worm {
 
     this.x = nx;
     this.y = ny;
-    this.onGround = onGround;
+    this.onGround = wasSupported || onGround;
   }
 
   render(ctx: CanvasRenderingContext2D, highlight = false) {
