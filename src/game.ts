@@ -19,6 +19,8 @@ type Team = {
   worms: Worm[];
 };
 
+let initialHelpShown = false;
+
 export class Game {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
@@ -77,6 +79,11 @@ export class Game {
     this.updateCursor();
 
     this.helpOverlay = new HelpOverlay();
+
+    if (!initialHelpShown) {
+      this.showHelp();
+      initialHelpShown = true;
+    }
 
   }
 
