@@ -177,11 +177,12 @@ export function renderAimHelpers({
     ctx.restore();
   }
 
-  const chSize = 8;
-  const crossCol = state.weapon === WeaponType.Rifle ? "#ffd84d" : "#fff";
-  drawCrosshair(ctx, aim.targetX, aim.targetY, chSize, crossCol, 2);
+  const isRifle = state.weapon === WeaponType.Rifle;
 
-  if (state.weapon === WeaponType.Rifle) {
+  if (isRifle) {
+    const chSize = 8;
+    const crossColor = COLORS.blue;
+    drawCrosshair(ctx, aim.targetX, aim.targetY, chSize, crossColor, 2);
     ctx.save();
     ctx.globalAlpha = 0.15;
     ctx.beginPath();
