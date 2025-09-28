@@ -217,9 +217,13 @@ export class Game {
     }
 
     // Weapon switching
+    const previousWeapon = this.state.weapon;
     if (this.keyAny(["Digit1"])) this.state.setWeapon(WeaponType.Bazooka);
     if (this.keyAny(["Digit2"])) this.state.setWeapon(WeaponType.HandGrenade);
     if (this.keyAny(["Digit3"])) this.state.setWeapon(WeaponType.Rifle);
+    if (this.state.weapon !== previousWeapon) {
+      this.onWeaponChanged(previousWeapon, this.state.weapon);
+    }
     // Update cursor visibility when weapon changes
     this.updateCursor();
 
@@ -544,6 +548,33 @@ export class Game {
     // Hide the OS crosshair cursor when Rifle is selected so only the in-game aiming
     // crosshair (clamped to a radius) is visible. Otherwise show crosshair.
     this.canvas.style.cursor = this.state.weapon === WeaponType.Rifle ? "none" : "crosshair";
+  }
+
+  private onWeaponChanged(previous: WeaponType, next: WeaponType) {
+    if (next === WeaponType.Rifle && previous !== WeaponType.Rifle) {
+      this.snapRifleAimToDefault();
+    }
+  }
+
+  private snapRifleAimToDefault() {
+    const worm = this.activeWorm;
+    const dx = this.input.mouseX - worm.x;
+    const dy = this.input.mouseY - worm.y;
+    const distanceFromWorm = Math.hypot(dx, dy);
+    const horizontalFraction = distanceFromWorm > 0 ? Math.abs(dx) / distanceFromWorm : 0;
+
+    let direction = 0;
+    if (horizontalFraction > 0.2) {
+      direction = dx >= 0 ? 1 : -1;
+    }
+    if (direction === 0) {
+      direction = Math.random() < 0.5 ? -1 : 1;
+    }
+
+    const radius = GAMEPLAY.rifle.aimRadius;
+    const offset = radius / Math.sqrt(2);
+    this.input.mouseX = worm.x + direction * offset;
+    this.input.mouseY = worm.y - offset;
   }
 
   keyAny(codes: string[]) {
