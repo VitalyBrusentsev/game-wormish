@@ -155,21 +155,91 @@ export class Projectile {
       ctx.arc(10, 0, 3, 0, Math.PI * 2);
       ctx.fill();
     } else if (this.type === WeaponType.HandGrenade) {
-      // Hand Grenade
-      ctx.fillStyle = "#2e8b57";
-      ctx.strokeStyle = "#1b4f32";
+      const radius = this.r;
+      // Hand Grenade body with subtle highlight
+      const bodyGradient = ctx.createRadialGradient(
+        -radius * 0.35,
+        -radius * 0.35,
+        radius * 0.15,
+        0,
+        0,
+        radius
+      );
+      bodyGradient.addColorStop(0, "#5a5a5a");
+      bodyGradient.addColorStop(0.4, "#2b2b2b");
+      bodyGradient.addColorStop(1, "#050505");
+      ctx.fillStyle = bodyGradient;
+      ctx.strokeStyle = "#0a0a0a";
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(0, 0, this.r, 0, Math.PI * 2);
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      // Fuse
-      ctx.strokeStyle = "#888";
-      ctx.lineWidth = 2;
+
+      // Glint highlight to emphasize the spherical surface
+      ctx.save();
+      ctx.rotate(-Math.PI / 8);
       ctx.beginPath();
-      ctx.moveTo(0, -this.r);
-      ctx.lineTo(4, -this.r - 6);
+      ctx.ellipse(-radius * 0.35, -radius * 0.4, radius * 0.45, radius * 0.2, 0, 0, Math.PI * 2);
+      const glintGradient = ctx.createRadialGradient(
+        -radius * 0.4,
+        -radius * 0.4,
+        0,
+        -radius * 0.35,
+        -radius * 0.35,
+        radius * 0.45
+      );
+      glintGradient.addColorStop(0, "rgba(255, 255, 255, 0.35)");
+      glintGradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = glintGradient;
+      ctx.fill();
+      ctx.restore();
+
+      // Fuse with glowing particles
+      const fuseStartX = 0;
+      const fuseStartY = -radius;
+      const fuseEndX = 4;
+      const fuseEndY = -radius - 6;
+      ctx.strokeStyle = "#3c3c3c";
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(fuseStartX, fuseStartY);
+      ctx.lineTo(fuseEndX, fuseEndY);
       ctx.stroke();
+
+      const flicker = (Math.sin(this.age * 40) + 1) / 2;
+      const emberRadius = 2.4 + flicker * 0.8;
+      const emberGradient = ctx.createRadialGradient(
+        fuseEndX,
+        fuseEndY,
+        0,
+        fuseEndX,
+        fuseEndY,
+        emberRadius
+      );
+      emberGradient.addColorStop(0, "#fff9c4");
+      emberGradient.addColorStop(0.5, "#ffb347");
+      emberGradient.addColorStop(1, "rgba(255, 69, 0, 0)");
+      ctx.fillStyle = emberGradient;
+      ctx.beginPath();
+      ctx.arc(fuseEndX, fuseEndY, emberRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Glowing particles flying off the fuse
+      for (let i = 0; i < 4; i++) {
+        const t = this.age * 60 + i * 1.7;
+        const particleDist = 2.2 + i * 0.6 + flicker * 0.8;
+        const particleSize = 0.9 + (3 - i) * 0.2;
+        const px = fuseEndX + Math.cos(t) * particleDist;
+        const py = fuseEndY + Math.sin(t) * particleDist * 0.6;
+        ctx.globalAlpha = 0.8 - i * 0.15;
+        ctx.fillStyle = i === 0 ? "#ffe082" : "#ff8a50";
+        ctx.beginPath();
+        ctx.arc(px, py, particleSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
     } else {
       // Rifle bullet (small tracer)
       ctx.strokeStyle = "#ffd84d";
