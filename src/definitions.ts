@@ -26,6 +26,7 @@ export const COLORS = {
   healthRed: "#ff5555",
   healthGreen: "#5aff7a",
   power: "#ffcc00",
+  helpTitle: "#ffd85c",
 };
 
 export const WORLD = {
