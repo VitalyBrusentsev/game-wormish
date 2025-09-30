@@ -124,15 +124,40 @@ export class Game {
         const y = this.findGroundY(Math.floor(x));
         const worm = new Worm(x, y, team.id, `${team.id[0]}${i + 1}`);
 
-        // Spawn snap: ensure worms start settled on the terrain even if first dt spikes.
-        // Nudge slightly downward to guarantee overlap, then resolve upward with a slightly higher climb step.
+        // Spawn settle: deterministically find first contact below and resolve upward to rest.
+        // This avoids starting just above a jagged edge and missing support on the first frame.
         {
-          const nudge = 3;
-          const settled = this.terrain.resolveCircle(worm.x, worm.y + nudge, worm.radius, 12);
-          worm.x = settled.x;
-          worm.y = settled.y;
-          worm.vy = 0;
-          worm.onGround = settled.onGround;
+          const maxDrop = 240;
+          const step = 2;
+          let sy = worm.y - 6; // start slightly above computed ground to be robust
+          let hit = false;
+          for (let d = 0; d <= maxDrop; d += step) {
+            const ty = sy + d;
+            if (this.terrain.circleCollides(worm.x, ty, worm.radius)) {
+              sy = ty;
+              hit = true;
+              break;
+            }
+          }
+          if (hit) {
+            const res = this.terrain.resolveCircle(
+              worm.x,
+              sy,
+              worm.radius,
+              Math.max(32, worm.radius + 32)
+            );
+            worm.x = res.x;
+            worm.y = res.y;
+            worm.vy = 0;
+            worm.onGround = true;
+          } else {
+            // Fallback: original nudge + resolve if no contact found in reasonable range
+            const res = this.terrain.resolveCircle(worm.x, worm.y + 3, worm.radius, 12);
+            worm.x = res.x;
+            worm.y = res.y;
+            worm.vy = 0;
+            worm.onGround = res.onGround;
+          }
         }
 
         team.worms.push(worm);

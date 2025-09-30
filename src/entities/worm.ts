@@ -59,10 +59,16 @@ export class Worm {
     }
     if (moveX !== 0) this.facing = Math.sign(moveX);
 
+    // Snapshot previous on-ground state for this frame and use a sticky latch
+    const prevOnGround = this.onGround;
+    let grounded = prevOnGround;      // working flag used for support + gravity gating this frame
+    let latchPrev = prevOnGround;     // preserved previous-frame support unless an explicit jump occurs
+
     // Jump
-    if (this.onGround && jump) {
+    if (prevOnGround && jump) {
       this.vy = -WORLD.jumpSpeed;
-      this.onGround = false;
+      grounded = false;
+      latchPrev = false; // jumping clears the previous support latch for this frame
     }
 
     // Gravity is applied after horizontal resolution to avoid ground jitter.
@@ -89,50 +95,89 @@ export class Worm {
         }
 
         // Ground support check and gravity after horizontal step to prevent jitter
-        if (this.onGround) {
-          // Tolerant support check to reduce aliasing near flat surfaces
-          const supported =
-            terrain.circleCollides(nx, ny + 1, this.radius) ||
-            terrain.circleCollides(nx, ny + 2, this.radius);
-          if (!supported) this.onGround = false;
+        if (grounded) {
+          // Tolerant support check to reduce aliasing near jagged surfaces
+          let supported = false;
+          for (let off = 1; off <= 6; off++) {
+            if (terrain.circleCollides(nx, ny + off, this.radius)) {
+              supported = true;
+              break;
+            }
+          }
+          if (!supported) grounded = false;
         }
-        if (!this.onGround) {
+        if (!grounded) {
           this.vy += WORLD.gravity * dt;
         } else {
           this.vy = 0;
         }
 
     // Vertical
-    const wasSupported = this.onGround;
+    const wasSupported = latchPrev;
     ny = ny + this.vy * dt;
     let onGround = false;
     if (terrain.circleCollides(nx, ny, this.radius)) {
       if (this.vy > 0) {
         // Falling: push up
-        for (let step = 0; step <= 14; step++) {
-          if (!terrain.circleCollides(nx, ny - step, this.radius)) {
-            ny -= step;
-            onGround = true;
-            this.vy = 0;
-            break;
+        {
+          const maxStep = Math.max(20, this.radius + 32);
+          for (let step = 0; step <= maxStep; step++) {
+            if (!terrain.circleCollides(nx, ny - step, this.radius)) {
+              ny -= step;
+              onGround = true;
+              this.vy = 0;
+              break;
+            }
           }
         }
       } else if (this.vy < 0) {
         // ascending: push down
-        for (let step = 0; step <= 14; step++) {
-          if (!terrain.circleCollides(nx, ny + step, this.radius)) {
-            ny += step;
-            this.vy = 0;
-            break;
+        {
+          const maxStep = Math.max(20, this.radius + 32);
+          for (let step = 0; step <= maxStep; step++) {
+            if (!terrain.circleCollides(nx, ny + step, this.radius)) {
+              ny += step;
+              this.vy = 0;
+              break;
+            }
           }
         }
       }
       // If still colliding after the step adjustment, try a full resolve
       if (terrain.circleCollides(nx, ny, this.radius)) {
-        const res = terrain.resolveCircle(nx, ny, this.radius);
+        const res = terrain.resolveCircle(nx, ny, this.radius, Math.max(32, this.radius + 32));
         nx = res.x;
         ny = res.y;
         onGround = onGround || res.onGround;
+ 
+        // Escalate if still colliding (rare steep steps due to height jitter)
+        if (terrain.circleCollides(nx, ny, this.radius)) {
+          const res2 = terrain.resolveCircle(nx, ny, this.radius, Math.max(64, this.radius + 48));
+          nx = res2.x;
+          ny = res2.y;
+          onGround = onGround || res2.onGround;
+ 
+          // Give up this frame to avoid sinking deeper
+          if (terrain.circleCollides(nx, ny, this.radius)) {
+            nx = this.x;
+            ny = this.y;
+            this.vy = 0;
+          }
+        }
+      }
+    } else if (this.vy > 0) {
+      // Proximity catch: if we're descending and narrowly missing the ground this frame,
+      // snap to the nearest support within a small band below to avoid initial tunneling.
+      const catchRange = Math.max(8, Math.ceil(this.vy * dt) + 6);
+      for (let s = 1; s <= catchRange; s++) {
+        if (terrain.circleCollides(nx, ny + s, this.radius)) {
+          const res = terrain.resolveCircle(nx, ny + s, this.radius, Math.max(32, this.radius + 32));
+          nx = res.x;
+          ny = res.y;
+          onGround = onGround || res.onGround || true;
+          this.vy = 0;
+          break;
+        }
       }
     }
 

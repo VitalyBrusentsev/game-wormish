@@ -197,14 +197,32 @@ export class Terrain {
   }
 
   circleCollides(cx: number, cy: number, r: number): boolean {
-    // Sample around the circle perimeter and center
-    const steps = 16;
-    if (this.isSolid(Math.round(cx), Math.round(cy))) return true;
-    for (let i = 0; i < steps; i++) {
-      const a = (i / steps) * Math.PI * 2;
-      const x = Math.round(cx + Math.cos(a) * r);
-      const y = Math.round(cy + Math.sin(a) * r);
-      if (this.isSolid(x, y)) return true;
+    // Robust method: grid-overlap scan in the circle AABB
+    return this.circleOverlapsSolidGrid(cx, cy, r);
+  }
+
+  // Robust circle-vs-grid overlap: scans solid pixels within the circle's bounding box.
+  // Uses cell-center distance check, consistent with carveCircle.
+  private circleOverlapsSolidGrid(cx: number, cy: number, r: number): boolean {
+    // Robust rectangle-distance check: for each solid cell intersecting the circle's AABB,
+    // compute the closest point on the cell rectangle to the circle center and compare distance.
+    const x0 = Math.max(0, Math.floor(cx - r - 1));
+    const y0 = Math.max(0, Math.floor(cy - r - 1));
+    const x1 = Math.min(this.width - 1, Math.ceil(cx + r + 1));
+    const y1 = Math.min(this.height - 1, Math.ceil(cy + r + 1));
+    const rr = r * r;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        if (!this.isSolid(x, y)) continue;
+        // Cell rectangle [x, x+1] x [y, y+1]
+        const closestX = clamp(cx, x, x + 1);
+        const closestY = clamp(cy, y, y + 1);
+        const dx = cx - closestX;
+        const dy = cy - closestY;
+        if (dx * dx + dy * dy <= rr) {
+          return true;
+        }
+      }
     }
     return false;
   }
