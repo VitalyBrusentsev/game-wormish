@@ -1,5 +1,5 @@
 import { COLORS } from "../definitions";
-import { drawRoundedRect, drawText, drawWrappedText } from "../utils";
+import { drawRoundedRect, drawText } from "../utils";
 
 type Rect = {
   x: number;
@@ -91,13 +91,31 @@ export class HelpOverlay {
       "center"
     );
 
-    const bulletPoints = [
-      "Move: A / D or ← → for a wiggly parade march.",
-      "Hop: W or Space to vault over suspicious craters.",
-      "Aim: Wiggle the mouse, keep your eyes on the crosshair.",
-      "Charge & Fire: Hold the mouse button, release to unleash mayhem.",
-      "Swap Toys: 1 Bazooka, 2 Grenade, 3 Rifle — choose your chaos.",
-      "Wind Watch: mind the gusts before you light the fuse!",
+    const helpTopics: { title: string; text: string }[] = [
+      {
+        title: "Move",
+        text: "A / D or ← → for a wiggly parade march.",
+      },
+      {
+        title: "Hop",
+        text: "W or Space to vault over suspicious craters.",
+      },
+      {
+        title: "Aim",
+        text: "Wiggle the mouse, keep your eyes on the crosshair.",
+      },
+      {
+        title: "Charge & Fire",
+        text: "Hold the mouse button, release to unleash mayhem.",
+      },
+      {
+        title: "Swap Toys",
+        text: "1 Bazooka, 2 Grenade, 3 Rifle — choose your chaos.",
+      },
+      {
+        title: "Wind Watch",
+        text: "Mind the gusts before you light the fuse!",
+      },
     ];
 
     const contentMargin = 44;
@@ -105,18 +123,112 @@ export class HelpOverlay {
     const contentWidth = panelW - contentMargin * 2;
     let lineY = subtitleY + 36;
 
-    for (const point of bulletPoints) {
-      const consumed = drawWrappedText(
-        ctx,
-        `• ${point}`,
-        contentX,
-        lineY,
-        COLORS.white,
-        contentWidth,
-        16,
-        26
+    const bulletIndent = 24;
+    const textStartX = contentX + bulletIndent;
+    const fontSize = 16;
+    const lineHeight = 26;
+    const descriptionWidth = contentWidth - bulletIndent;
+    const bodyFont = `bold ${fontSize}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+
+    const wrapDescription = (
+      text: string,
+      firstLineWidth: number,
+      subsequentWidth: number
+    ) => {
+      const words = text.split(/\s+/).filter((w) => w.length > 0);
+      const lines: string[] = [];
+      let currentLine = "";
+      let currentLimit = firstLineWidth;
+
+      const pushCurrent = () => {
+        if (currentLine.length === 0) return;
+        lines.push(currentLine);
+        currentLine = "";
+        currentLimit = subsequentWidth;
+      };
+
+      while (words.length > 0) {
+        const nextWord = words.shift()!;
+        const candidate = currentLine
+          ? `${currentLine} ${nextWord}`
+          : nextWord;
+
+        if (ctx.measureText(candidate).width <= currentLimit) {
+          currentLine = candidate;
+          continue;
+        }
+
+        pushCurrent();
+
+        if (ctx.measureText(nextWord).width <= currentLimit) {
+          currentLine = nextWord;
+          continue;
+        }
+
+        let fragment = "";
+        for (const char of nextWord) {
+          const extended = fragment + char;
+          if (ctx.measureText(extended).width > currentLimit && fragment) {
+            lines.push(fragment);
+            currentLimit = subsequentWidth;
+            fragment = char;
+          } else {
+            fragment = extended;
+          }
+        }
+        currentLine = fragment;
+      }
+
+      pushCurrent();
+      return lines;
+    };
+
+    for (const topic of helpTopics) {
+      const bulletX = contentX;
+      const titleText = `${topic.title}:`;
+
+      drawText(ctx, "•", bulletX, lineY, COLORS.white, fontSize);
+      drawText(ctx, titleText, textStartX, lineY, COLORS.helpTitle, fontSize);
+
+      ctx.font = bodyFont;
+      const titleWidth = ctx.measureText(`${titleText} `).width;
+      const firstLineStartX = textStartX + titleWidth;
+      let firstLineWidth = descriptionWidth - titleWidth;
+      if (firstLineWidth <= 0) firstLineWidth = descriptionWidth;
+
+      const lines = wrapDescription(
+        topic.text,
+        firstLineWidth,
+        descriptionWidth
       );
-      lineY += consumed + 10;
+
+      const lineCount = Math.max(1, lines.length);
+
+      const firstLine = lines[0];
+      if (firstLine) {
+        drawText(
+          ctx,
+          firstLine,
+          firstLineStartX,
+          lineY,
+          COLORS.white,
+          fontSize
+        );
+      }
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line) continue;
+        drawText(
+          ctx,
+          line,
+          textStartX,
+          lineY + lineHeight * i,
+          COLORS.white,
+          fontSize
+        );
+      }
+
+      lineY += lineHeight * lineCount + 10;
     }
 
     const buttonSize = 32;
