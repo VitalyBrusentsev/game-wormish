@@ -69,7 +69,7 @@ export class HelpOverlay {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    const titleY = y + 44;
+    const titleY = y + 24;
     drawText(
       ctx,
       "Worm Commander's Handy Guide",
@@ -110,7 +110,7 @@ export class HelpOverlay {
       },
       {
         title: "Swap Toys",
-        text: "1 Bazooka, 2 Grenade, 3 Rifle — choose your chaos.",
+        text: "1 - Bazooka, 2 - Grenade, 3 - Rifle; Choose your chaos.",
       },
       {
         title: "Wind Watch",
@@ -121,7 +121,7 @@ export class HelpOverlay {
     const contentMargin = 44;
     const contentX = x + contentMargin;
     const contentWidth = panelW - contentMargin * 2;
-    let lineY = subtitleY + 36;
+    let lineY = subtitleY + 64;
 
     const bulletIndent = 24;
     const textStartX = contentX + bulletIndent;
