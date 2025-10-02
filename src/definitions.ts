@@ -36,7 +36,6 @@ export const WORLD = {
   jumpSpeed: 300, // px/s
   wormRadius: 12, // px
   projectileRadius: 6,
-  terrainMarginTop: 140,
   minGround: 0.5, // fraction of height for min ground level
   maxGround: 0.8, // fraction of height for max ground level
 };
@@ -51,7 +50,6 @@ export const GAMEPLAY = {
     maxPower: 1150,  // was 2300
     explosionRadius: 42,
     damage: 75,
-    trail: true,
   },
   // Hand Grenade: flies ~1.5x shorter distance than bazooka
   // Distance ~ v^2, so speed factor ~ sqrt(1/1.5) ≈ 0.82 of bazooka speeds.
