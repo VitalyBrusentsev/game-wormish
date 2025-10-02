@@ -53,7 +53,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     environment:
-      name: github-pages
+      name: ${{ github.event_name == 'pull_request' && format('github-pages-pr-{0}', github.event.pull_request.number) || 'github-pages' }}
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Configure Pages
