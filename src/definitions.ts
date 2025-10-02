@@ -76,27 +76,6 @@ export const GAMEPLAY = {
 
 export type PredictedPoint = { x: number; y: number; alpha: number };
 
-export type WormSnapshot = {
-  x: number;
-  y: number;
-  health: number;
-  team: TeamId;
-  alive: boolean;
-};
-
-export type HudState = {
-  currentTeam: TeamId;
-  weapon: WeaponType;
-  turnTimeLeftMs: number;
-  wind: number;
-  charging: boolean;
-  charge01: number;
-  redTeamHealth: number;
-  blueTeamHealth: number;
-  message: string | null;
-  predicted: PredictedPoint[];
-};
-
 export const clamp = (v: number, min: number, max: number) =>
   Math.max(min, Math.min(max, v));
 
