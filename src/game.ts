@@ -11,13 +11,17 @@ import {
   renderHUD,
   type AimInfo,
 } from "./rendering/game-rendering";
+import { TeamManager, type Team } from "./game/team-manager";
+import {
+  computeAimInfo,
+  fireWeapon,
+  handleWeaponChanged,
+  predictTrajectory,
+  resolveCharge01,
+  shouldPredictPath,
+} from "./game/weapon-system";
 
  // phase type managed by GameState
-
-type Team = {
-  id: TeamId;
-  worms: Worm[];
-};
 
 let initialHelpShown = false;
 
@@ -31,9 +35,7 @@ export class Game {
   input: Input;
   state: GameState;
 
-  teams: Team[];
-  currentTeamIndex: number;
-  activeWormIndex: number;
+  private teamManager: TeamManager;
 
   projectiles: Projectile[] = [];
   particles: Particle[] = [];
@@ -62,16 +64,9 @@ export class Game {
     this.terrain = new Terrain(width, height);
     this.terrain.generate();
 
-    // Create teams
-    this.teams = [
-      { id: "Red", worms: [] },
-      { id: "Blue", worms: [] },
-    ];
-    this.currentTeamIndex = 0;
-    this.activeWormIndex = 0;
+    this.teamManager = new TeamManager(width, height);
+    this.teamManager.initialize(this.terrain);
 
-    this.spawnTeams();
-    
     this.state = new GameState();
     this.nextTurn(true);
     
@@ -98,90 +93,20 @@ export class Game {
     this.canvas.addEventListener("touchstart", () => this.canvas.focus());
   }
 
-
-  private findGroundY(x: number) {
-    // Scan down from top margin to find first solid
-    for (let y = 0; y < this.height; y++) {
-      if (this.terrain.isSolid(x, y)) {
-        return y - WORLD.wormRadius - 2;
-      }
-    }
-    return this.height * 0.5;
-  }
-
-  private spawnTeams() {
-    const positions: number[] = [];
-    const lanes = GAMEPLAY.teamSize * 2 + 2;
-    for (let i = 1; i <= lanes; i++) {
-      positions.push(Math.floor((i / (lanes + 1)) * this.width));
-    }
-    // Distribute alternating
-    let posIndex = 0;
-    for (let teamIndex = 0; teamIndex < this.teams.length; teamIndex++) {
-      const team = this.teams[teamIndex]!;
-      for (let i = 0; i < GAMEPLAY.teamSize; i++) {
-        const x = (positions[posIndex++ % positions.length]!) + randRange(-30, 30);
-        const y = this.findGroundY(Math.floor(x));
-        const worm = new Worm(x, y, team.id, `${team.id[0]}${i + 1}`);
-
-        // Spawn settle: deterministically find first contact below and resolve upward to rest.
-        // This avoids starting just above a jagged edge and missing support on the first frame.
-        {
-          const maxDrop = 240;
-          const step = 2;
-          let sy = worm.y - 6; // start slightly above computed ground to be robust
-          let hit = false;
-          for (let d = 0; d <= maxDrop; d += step) {
-            const ty = sy + d;
-            if (this.terrain.circleCollides(worm.x, ty, worm.radius)) {
-              sy = ty;
-              hit = true;
-              break;
-            }
-          }
-          if (hit) {
-            const res = this.terrain.resolveCircle(
-              worm.x,
-              sy,
-              worm.radius,
-              Math.max(32, worm.radius + 32)
-            );
-            worm.x = res.x;
-            worm.y = res.y;
-            worm.vy = 0;
-            worm.onGround = true;
-          } else {
-            // Fallback: original nudge + resolve if no contact found in reasonable range
-            const res = this.terrain.resolveCircle(worm.x, worm.y + 3, worm.radius, 12);
-            worm.x = res.x;
-            worm.y = res.y;
-            worm.vy = 0;
-            worm.onGround = res.onGround;
-          }
-        }
-
-        team.worms.push(worm);
-      }
-    }
-  }
-
   get activeTeam(): Team {
-    return this.teams[this.currentTeamIndex]!;
+    return this.teamManager.activeTeam;
   }
 
   get activeWorm(): Worm {
-    const team = this.activeTeam;
-    // Ensure index points to live worm
-    let idx = this.activeWormIndex % team.worms.length;
-    for (let i = 0; i < team.worms.length; i++) {
-      const w = team.worms[(idx + i) % team.worms.length]!;
-      if (w.alive) {
-        this.activeWormIndex = (idx + i) % team.worms.length;
-        return w;
-      }
-    }
-    // Fallback (shouldn't happen if team has living worms)
-    return team.worms[0]!;
+    return this.teamManager.activeWorm;
+  }
+
+  private get activeWormIndex() {
+    return this.teamManager.activeWormIndex;
+  }
+
+  private get teams() {
+    return this.teamManager.teams;
   }
 
   nextTurn(initial = false) {
@@ -193,19 +118,8 @@ export class Game {
     this.updateCursor();
 
     // Move to next team's living worm
-    if (!initial) {
-      this.currentTeamIndex = (this.currentTeamIndex + 1) % this.teams.length;
-      // Select next living worm index for that team
-      const team = this.activeTeam;
-      let idx = (this.activeWormIndex + 1) % team.worms.length;
-      for (let i = 0; i < team.worms.length; i++) {
-        const w = team.worms[(idx + i) % team.worms.length]!;
-        if (w.alive) {
-          this.activeWormIndex = (idx + i) % team.worms.length;
-          break;
-        }
-      }
-    }
+    if (initial) this.teamManager.resetActiveWormIndex();
+    else this.teamManager.advanceToNextTeam();
   }
 
   private showHelp() {
@@ -254,7 +168,12 @@ export class Game {
     if (this.keyAny(["Digit2"])) this.state.setWeapon(WeaponType.HandGrenade);
     if (this.keyAny(["Digit3"])) this.state.setWeapon(WeaponType.Rifle);
     if (this.state.weapon !== previousWeapon) {
-      this.onWeaponChanged(previousWeapon, this.state.weapon);
+      handleWeaponChanged({
+        previous: previousWeapon,
+        next: this.state.weapon,
+        input: this.input,
+        activeWorm: this.activeWorm,
+      });
     }
     // Update cursor visibility when weapon changes
     this.updateCursor();
@@ -295,85 +214,24 @@ export class Game {
 
   // Compute aiming target and angle; Rifle constrains the target to a 200px circle
   getAimInfo(): AimInfo {
-    const a = this.activeWorm;
-    let dx = this.input.mouseX - a.x;
-    let dy = this.input.mouseY - a.y;
-    if (this.state.weapon === WeaponType.Rifle) {
-      const len = Math.hypot(dx, dy) || 1;
-      const r = GAMEPLAY.rifle.aimRadius;
-      if (len > r) {
-        dx = (dx / len) * r;
-        dy = (dy / len) * r;
-      }
-    }
-    const targetX = a.x + dx;
-    const targetY = a.y + dy;
-    const angle = Math.atan2(targetY - a.y, targetX - a.x);
-    return { targetX, targetY, angle };
+    return computeAimInfo({
+      input: this.input,
+      state: this.state,
+      activeWorm: this.activeWorm,
+    });
   }
 
-  fireChargedWeapon(power01: number) {
-    const a = this.activeWorm;
-    const { angle } = this.getAimInfo();
-    const muzzleOffset = WORLD.wormRadius + 10;
-    const sx = a.x + Math.cos(angle) * muzzleOffset;
-    const sy = a.y + Math.sin(angle) * muzzleOffset;
-
-    if (this.state.weapon === WeaponType.Bazooka) {
-      const speed =
-        GAMEPLAY.bazooka.minPower +
-        (GAMEPLAY.bazooka.maxPower - GAMEPLAY.bazooka.minPower) * power01;
-      const vx = Math.cos(angle) * speed;
-      const vy = Math.sin(angle) * speed;
-      this.projectiles.push(
-        new Projectile(
-          sx,
-          sy,
-          vx,
-          vy,
-          WORLD.projectileRadius,
-          WeaponType.Bazooka,
-          this.wind,
-          (x, y, r, dmg) => this.onExplosion(x, y, r, dmg, WeaponType.Bazooka)
-        )
-      );
-    } else if (this.state.weapon === WeaponType.HandGrenade) {
-      const speed =
-        GAMEPLAY.handGrenade.minPower +
-        (GAMEPLAY.handGrenade.maxPower - GAMEPLAY.handGrenade.minPower) * power01;
-      const vx = Math.cos(angle) * speed;
-      const vy = Math.sin(angle) * speed;
-      this.projectiles.push(
-        new Projectile(
-          sx,
-          sy,
-          vx,
-          vy,
-          WORLD.projectileRadius,
-          WeaponType.HandGrenade,
-          this.wind,
-          (x, y, r, dmg) => this.onExplosion(x, y, r, dmg, WeaponType.HandGrenade),
-          { fuse: GAMEPLAY.handGrenade.fuseMs, restitution: GAMEPLAY.handGrenade.restitution }
-        )
-      );
-    } else if (this.state.weapon === WeaponType.Rifle) {
-      // Straight shot, speed is fixed; no gravity/wind effects
-      const speed = GAMEPLAY.rifle.speed;
-      const vx = Math.cos(angle) * speed;
-      const vy = Math.sin(angle) * speed;
-      this.projectiles.push(
-        new Projectile(
-          sx,
-          sy,
-          vx,
-          vy,
-          GAMEPLAY.rifle.projectileRadius,
-          WeaponType.Rifle,
-          0, // ignore wind
-          (x, y, r, dmg) => this.onExplosion(x, y, r, dmg, WeaponType.Rifle)
-        )
-      );
-    }
+  private fireChargedWeapon(power01: number) {
+    const aim = this.getAimInfo();
+    fireWeapon({
+      weapon: this.state.weapon,
+      activeWorm: this.activeWorm,
+      aim,
+      power01,
+      wind: this.wind,
+      projectiles: this.projectiles,
+      onExplosion: (x, y, r, dmg, cause) => this.onExplosion(x, y, r, dmg, cause),
+    });
   }
 
   endAimPhaseWithoutShot() {
@@ -550,8 +408,8 @@ export class Game {
   }
 
   checkVictory() {
-    const redAlive = this.teams[0]!.worms.some((w) => w.alive);
-    const blueAlive = this.teams[1]!.worms.some((w) => w.alive);
+    const redAlive = this.teamManager.isTeamAlive("Red");
+    const blueAlive = this.teamManager.isTeamAlive("Blue");
     if (!redAlive || !blueAlive) {
       this.state.phase = "gameover";
       const winner = redAlive ? "Red" : blueAlive ? "Blue" : "Nobody";
@@ -563,15 +421,10 @@ export class Game {
     // Reset everything
     this.terrain = new Terrain(this.width, this.height);
     this.terrain.generate();
-    this.teams = [
-      { id: "Red", worms: [] },
-      { id: "Blue", worms: [] },
-    ];
-    this.spawnTeams();
+    this.teamManager.initialize(this.terrain);
     this.projectiles = [];
     this.particles = [];
-    this.currentTeamIndex = Math.random() < 0.5 ? 0 : 1;
-    this.activeWormIndex = 0;
+    this.teamManager.setCurrentTeamIndex(Math.random() < 0.5 ? 0 : 1);
     this.nextTurn(true);
   }
 
@@ -580,34 +433,6 @@ export class Game {
     // Hide the OS crosshair cursor when Rifle is selected so only the in-game aiming
     // crosshair (clamped to a radius) is visible. Otherwise show crosshair.
     this.canvas.style.cursor = this.state.weapon === WeaponType.Rifle ? "none" : "crosshair";
-  }
-
-  private onWeaponChanged(previous: WeaponType, next: WeaponType) {
-    if (next === WeaponType.Rifle && previous !== WeaponType.Rifle) {
-      this.snapRifleAimToDefault();
-    } else if (previous === WeaponType.Rifle && next !== WeaponType.Rifle) {
-      this.input.clearMouseWarp();
-    }
-  }
-
-  private snapRifleAimToDefault() {
-    const worm = this.activeWorm;
-    const dx = this.input.mouseX - worm.x;
-    const dy = this.input.mouseY - worm.y;
-    const distanceFromWorm = Math.hypot(dx, dy);
-    const horizontalFraction = distanceFromWorm > 0 ? Math.abs(dx) / distanceFromWorm : 0;
-
-    let direction = 0;
-    if (horizontalFraction > 0.2) {
-      direction = dx >= 0 ? 1 : -1;
-    }
-    if (direction === 0) {
-      direction = Math.random() < 0.5 ? -1 : 1;
-    }
-
-    const radius = GAMEPLAY.rifle.aimRadius;
-    const offset = radius / Math.sqrt(2);
-    this.input.warpMouseTo(worm.x + direction * offset, worm.y - offset);
   }
 
   keyAny(codes: string[]) {
@@ -623,77 +448,23 @@ export class Game {
   }
 
   getTeamHealth(id: TeamId) {
-    const team = this.teams.find((t) => t.id === id)!;
-    return team.worms.reduce((sum, w) => sum + (w.alive ? w.health : 0), 0);
+    return this.teamManager.getTeamHealth(id);
   }
 
   predictPath(): PredictedPoint[] {
-    if (this.state.phase !== "aim") return [];
-    if (!this.state.charging) return [];
-    const a = this.activeWorm;
-    const { angle } = this.getAimInfo();
-
-    // Start at muzzle
-    const muzzleOffset = WORLD.wormRadius + 10;
-    const sx = a.x + Math.cos(angle) * muzzleOffset;
-    const sy = a.y + Math.sin(angle) * muzzleOffset;
-
-    // Rifle: straight ray until terrain hit or lifetime distance
-    if (this.state.weapon === WeaponType.Rifle) {
-      const pts: PredictedPoint[] = [];
-      const dirx = Math.cos(angle);
-      const diry = Math.sin(angle);
-      // Raycast to terrain
-      const hit = this.terrain.raycast(sx, sy, dirx, diry, 2000, 3);
-      const maxDist = hit ? hit.dist : 800;
-      const step = 16;
-      for (let d = 0; d <= maxDist; d += step) {
-        const x = sx + dirx * d;
-        const y = sy + diry * d;
-        const alpha = clamp(1 - d / maxDist, 0.1, 1);
-        pts.push({ x, y, alpha });
-      }
-      return pts;
-    }
-
-    // Bazooka / Hand Grenade: simulate arc with gravity and wind
-    const power01 = this.state.getCharge01(nowMs());
-    const speed =
-      this.state.weapon === WeaponType.Bazooka
-        ? GAMEPLAY.bazooka.minPower +
-          (GAMEPLAY.bazooka.maxPower - GAMEPLAY.bazooka.minPower) * power01
-        : GAMEPLAY.handGrenade.minPower +
-          (GAMEPLAY.handGrenade.maxPower - GAMEPLAY.handGrenade.minPower) * power01;
-    let vx = Math.cos(angle) * speed;
-    let vy = Math.sin(angle) * speed;
-    const ax = this.wind; // wind accel (px/s^2)
-    const ay = WORLD.gravity;
-
-    const pts: PredictedPoint[] = [];
-    let x = sx;
-    let y = sy;
-    const dt = 1 / 60;
-    const maxT = 3.0; // seconds
-    const steps = Math.floor(maxT / dt);
-    for (let i = 0; i < steps; i++) {
-      // advance
-      vy += ay * dt;
-      vx += ax * dt;
-      x += vx * dt;
-      y += vy * dt;
-
-      // record every few steps
-      if (i % 2 === 0) {
-        const t = i * dt;
-        const alpha = clamp(1 - t / maxT, 0.15, 1);
-        pts.push({ x, y, alpha });
-      }
-
-      // stop on terrain hit or offscreen
-      if (this.terrain.circleCollides(x, y, WORLD.projectileRadius)) break;
-      if (x < -50 || x > this.width + 50 || y > this.height + 50) break;
-    }
-    return pts;
+    if (!shouldPredictPath(this.state)) return [];
+    const aim = this.getAimInfo();
+    const power01 = resolveCharge01(this.state);
+    return predictTrajectory({
+      weapon: this.state.weapon,
+      activeWorm: this.activeWorm,
+      aim,
+      power01,
+      wind: this.wind,
+      terrain: this.terrain,
+      width: this.width,
+      height: this.height,
+    });
   }
 
   // Rendering --------------------------------------------------------
