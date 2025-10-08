@@ -1,6 +1,15 @@
 import type { TeamId, PredictedPoint } from "./definitions";
-import { WORLD, GAMEPLAY, WeaponType, clamp, randRange, distance, nowMs } from "./definitions";
-import { Input } from "./utils";
+import {
+  WORLD,
+  GAMEPLAY,
+  WeaponType,
+  clamp,
+  randRange,
+  distance,
+  nowMs,
+  COLORS,
+} from "./definitions";
+import { Input, drawText } from "./utils";
 import { Terrain, Worm, Projectile, Particle } from "./entities";
 import { GameState } from "./game-state";
 import { HelpOverlay } from "./ui/help-overlay";
@@ -46,6 +55,11 @@ export class Game {
   message: string | null = null;
 
   private helpOverlay: HelpOverlay;
+
+  private readonly frameTimes: number[] = [];
+  private frameTimeSum = 0;
+  private fps = 0;
+  private readonly frameSampleSize = 60;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -520,6 +534,9 @@ export class Game {
     });
 
     this.helpOverlay.render(ctx, this.width, this.height);
+
+    const fpsText = `FPS: ${this.fps.toFixed(1)}`;
+    drawText(ctx, fpsText, this.width - 12, 12, COLORS.white, 14, "right");
   }
 
   // Game loop --------------------------------------------------------
@@ -527,6 +544,17 @@ export class Game {
   frame(timeMs: number) {
     if (!this.lastTimeMs) this.lastTimeMs = timeMs;
     let dt = (timeMs - this.lastTimeMs) / 1000;
+    if (dt > 0) {
+      this.frameTimes.push(dt);
+      this.frameTimeSum += dt;
+      if (this.frameTimes.length > this.frameSampleSize) {
+        const removed = this.frameTimes.shift();
+        if (removed !== undefined) this.frameTimeSum -= removed;
+      }
+      if (this.frameTimeSum > 0) {
+        this.fps = this.frameTimes.length / this.frameTimeSum;
+      }
+    }
     // Clamp dt to avoid big jumps when tabbed out
     dt = Math.min(dt, 1 / 20);
     this.update(dt);
