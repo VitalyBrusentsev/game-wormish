@@ -11,19 +11,19 @@ function main(): void {
     resizeScheduled = false;
     const width = window.innerWidth | 0;
     const height = window.innerHeight | 0;
-    if (game && width === lastWidth && height === lastHeight) {
-      return;
+    const dimensionsChanged = width !== lastWidth || height !== lastHeight;
+    if (!game || dimensionsChanged) {
+      lastWidth = width;
+      lastHeight = height;
+      if (game) {
+        game.dispose();
+        game = null;
+      }
+      const newGame = new Game(width, height);
+      newGame.mount(canvasContainer);
+      newGame.start();
+      game = newGame;
     }
-    lastWidth = width;
-    lastHeight = height;
-    if (game) {
-      game.dispose();
-      game = null;
-    }
-    const newGame = new Game(width, height);
-    newGame.mount(canvasContainer);
-    newGame.start();
-    game = newGame;
   };
 
   const scheduleResize = () => {

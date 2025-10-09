@@ -577,7 +577,6 @@ export class Game {
   // Game loop --------------------------------------------------------
 
   frame(timeMs: number) {
-    if (!this.running) return;
     if (!this.lastTimeMs) this.lastTimeMs = timeMs;
     let dt = (timeMs - this.lastTimeMs) / 1000;
     if (dt > 0) {
@@ -597,6 +596,8 @@ export class Game {
     this.render();
     this.input.update();
     this.lastTimeMs = timeMs;
-    this.frameHandle = requestAnimationFrame(this.frameCallback);
+    if (this.running) {
+      this.frameHandle = requestAnimationFrame(this.frameCallback);
+    }
   }
 }

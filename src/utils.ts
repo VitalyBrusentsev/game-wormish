@@ -42,12 +42,13 @@ export class Input {
 
   private readonly mouseMoveHandler = (e: MouseEvent) => {
     const canvas = this.canvas;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    this.rawMouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
-    this.rawMouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
-    this.mouseX = this.rawMouseX + this.mouseOffsetX;
-    this.mouseY = this.rawMouseY + this.mouseOffsetY;
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      this.rawMouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+      this.rawMouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+      this.mouseX = this.rawMouseX + this.mouseOffsetX;
+      this.mouseY = this.rawMouseY + this.mouseOffsetY;
+    }
   };
 
   private readonly mouseDownHandler = (e: MouseEvent) => {
