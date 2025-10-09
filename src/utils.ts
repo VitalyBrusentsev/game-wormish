@@ -8,66 +8,109 @@ export class Input {
   private mouseOffsetX = 0;
   private mouseOffsetY = 0;
 
+  private canvas: HTMLCanvasElement | null = null;
+
   mouseX = 0;
   mouseY = 0;
   mouseDown = false;
   mouseJustPressed = false;
   mouseJustReleased = false;
 
-  attach(canvas: HTMLCanvasElement) {
-    window.addEventListener("keydown", (e) => {
-      if (!this.keysDown.has(e.code)) {
-        this.keysPressed.add(e.code);
-      }
-      this.keysDown.add(e.code);
-      // Prevent default behaviors that can steal focus or scroll the page
-      if (
-        [
-          "Space",
-          "ArrowUp",
-          "ArrowDown",
-          "ArrowLeft",
-          "ArrowRight",
-          "Tab",
-          "F1",
-        ].includes(e.code)
-      ) {
-        e.preventDefault();
-      }
-    });
-    window.addEventListener("keyup", (e) => {
-      this.keysDown.delete(e.code);
-    });
-    canvas.addEventListener("mousemove", (e) => {
+  private readonly keyDownHandler = (e: KeyboardEvent) => {
+    if (!this.keysDown.has(e.code)) {
+      this.keysPressed.add(e.code);
+    }
+    this.keysDown.add(e.code);
+    if (
+      [
+        "Space",
+        "ArrowUp",
+        "ArrowDown",
+        "ArrowLeft",
+        "ArrowRight",
+        "Tab",
+        "F1",
+      ].includes(e.code)
+    ) {
+      e.preventDefault();
+    }
+  };
+
+  private readonly keyUpHandler = (e: KeyboardEvent) => {
+    this.keysDown.delete(e.code);
+  };
+
+  private readonly mouseMoveHandler = (e: MouseEvent) => {
+    const canvas = this.canvas;
+    if (canvas) {
       const rect = canvas.getBoundingClientRect();
       this.rawMouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
       this.rawMouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
       this.mouseX = this.rawMouseX + this.mouseOffsetX;
       this.mouseY = this.rawMouseY + this.mouseOffsetY;
-    });
-    canvas.addEventListener("mousedown", (e) => {
-      this.mouseDown = true;
-      this.mouseJustPressed = true;
-      // Ensure canvas keeps focus for keyboard controls
-      canvas.focus();
-      e.preventDefault();
-    });
-    // Also ensure focus on touch
-    canvas.addEventListener("touchstart", () => {
-      canvas.focus();
-    });
-    window.addEventListener("mouseup", () => {
-      this.mouseDown = false;
-      this.mouseJustReleased = true;
-    });
-    canvas.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-    });
-    window.addEventListener("blur", () => {
-      this.keysDown.clear();
-      this.mouseDown = false;
-      this.clearMouseWarp();
-    });
+    }
+  };
+
+  private readonly mouseDownHandler = (e: MouseEvent) => {
+    this.mouseDown = true;
+    this.mouseJustPressed = true;
+    this.canvas?.focus();
+    e.preventDefault();
+  };
+
+  private readonly touchStartHandler = () => {
+    this.canvas?.focus();
+  };
+
+  private readonly mouseUpHandler = () => {
+    this.mouseDown = false;
+    this.mouseJustReleased = true;
+  };
+
+  private readonly contextMenuHandler = (e: MouseEvent) => {
+    e.preventDefault();
+  };
+
+  private readonly blurHandler = () => {
+    this.keysDown.clear();
+    this.mouseDown = false;
+    this.clearMouseWarp();
+  };
+
+  attach(canvas: HTMLCanvasElement) {
+    if (this.canvas) {
+      this.detach();
+    }
+    this.canvas = canvas;
+    window.addEventListener("keydown", this.keyDownHandler);
+    window.addEventListener("keyup", this.keyUpHandler);
+    window.addEventListener("mouseup", this.mouseUpHandler);
+    window.addEventListener("blur", this.blurHandler);
+    canvas.addEventListener("mousemove", this.mouseMoveHandler);
+    canvas.addEventListener("mousedown", this.mouseDownHandler);
+    canvas.addEventListener("touchstart", this.touchStartHandler);
+    canvas.addEventListener("contextmenu", this.contextMenuHandler);
+  }
+
+  detach() {
+    const canvas = this.canvas;
+    window.removeEventListener("keydown", this.keyDownHandler);
+    window.removeEventListener("keyup", this.keyUpHandler);
+    window.removeEventListener("mouseup", this.mouseUpHandler);
+    window.removeEventListener("blur", this.blurHandler);
+    if (canvas) {
+      canvas.removeEventListener("mousemove", this.mouseMoveHandler);
+      canvas.removeEventListener("mousedown", this.mouseDownHandler);
+      canvas.removeEventListener("touchstart", this.touchStartHandler);
+      canvas.removeEventListener("contextmenu", this.contextMenuHandler);
+    }
+    this.canvas = null;
+    this.keysDown.clear();
+    this.keysPressed.clear();
+    this.mouseDown = false;
+    this.mouseJustPressed = false;
+    this.mouseJustReleased = false;
+    this.clearMouseWarp();
   }
 
   update() {

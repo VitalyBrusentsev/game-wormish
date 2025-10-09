@@ -61,6 +61,14 @@ export class Game {
   private fps = 0;
   private readonly frameSampleSize = 60;
 
+  private running = false;
+  private frameHandle: number | null = null;
+  private readonly frameCallback: FrameRequestCallback;
+
+  private readonly pointerDownFocusHandler = () => this.canvas.focus();
+  private readonly mouseDownFocusHandler = () => this.canvas.focus();
+  private readonly touchStartFocusHandler = () => this.canvas.focus();
+
   constructor(width: number, height: number) {
     this.width = width;
     this.height = height;
@@ -94,6 +102,8 @@ export class Game {
       initialHelpShown = true;
     }
 
+    this.frameCallback = (t) => this.frame(t);
+
   }
 
   mount(parent: HTMLElement) {
@@ -102,9 +112,34 @@ export class Game {
     this.canvas.tabIndex = 0;
     this.canvas.focus();
     // Keep focus on interaction
-    this.canvas.addEventListener("pointerdown", () => this.canvas.focus());
-    this.canvas.addEventListener("mousedown", () => this.canvas.focus());
-    this.canvas.addEventListener("touchstart", () => this.canvas.focus());
+    this.canvas.addEventListener("pointerdown", this.pointerDownFocusHandler);
+    this.canvas.addEventListener("mousedown", this.mouseDownFocusHandler);
+    this.canvas.addEventListener("touchstart", this.touchStartFocusHandler);
+  }
+
+  start() {
+    if (this.running) return;
+    this.running = true;
+    this.lastTimeMs = 0;
+    this.frameTimes.length = 0;
+    this.frameTimeSum = 0;
+    this.fps = 0;
+    this.frameHandle = requestAnimationFrame(this.frameCallback);
+  }
+
+  dispose() {
+    if (this.frameHandle !== null) {
+      cancelAnimationFrame(this.frameHandle);
+      this.frameHandle = null;
+    }
+    this.running = false;
+    this.input.detach();
+    this.canvas.removeEventListener("pointerdown", this.pointerDownFocusHandler);
+    this.canvas.removeEventListener("mousedown", this.mouseDownFocusHandler);
+    this.canvas.removeEventListener("touchstart", this.touchStartFocusHandler);
+    if (this.canvas.parentElement) {
+      this.canvas.parentElement.removeChild(this.canvas);
+    }
   }
 
   get activeTeam(): Team {
@@ -561,6 +596,8 @@ export class Game {
     this.render();
     this.input.update();
     this.lastTimeMs = timeMs;
-    requestAnimationFrame((t) => this.frame(t));
+    if (this.running) {
+      this.frameHandle = requestAnimationFrame(this.frameCallback);
+    }
   }
 }
