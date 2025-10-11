@@ -33,13 +33,6 @@ export type TrajectoryContext = {
   height: number;
 };
 
-export type WeaponChangeContext = {
-  previous: WeaponType;
-  next: WeaponType;
-  input: Input;
-  activeWorm: Worm;
-};
-
 export function computeAimInfo({ input, state, activeWorm }: AimContext): AimInfo {
   const aimWorm = activeWorm;
   let dx = input.mouseX - aimWorm.x;
@@ -192,14 +185,6 @@ export function predictTrajectory({
   return pts;
 }
 
-export function handleWeaponChanged({ previous, next, input, activeWorm }: WeaponChangeContext) {
-  if (next === WeaponType.Rifle && previous !== WeaponType.Rifle) {
-    snapRifleAimToDefault(input, activeWorm);
-  } else if (previous === WeaponType.Rifle && next !== WeaponType.Rifle) {
-    input.clearMouseWarp();
-  }
-}
-
 export function shouldPredictPath(state: GameState): boolean {
   return state.phase === "aim" && state.charging;
 }
@@ -208,21 +193,3 @@ export function resolveCharge01(state: GameState): number {
   return state.getCharge01(nowMs());
 }
 
-function snapRifleAimToDefault(input: Input, worm: Worm) {
-  const dx = input.mouseX - worm.x;
-  const dy = input.mouseY - worm.y;
-  const distanceFromWorm = Math.hypot(dx, dy);
-  const horizontalFraction = distanceFromWorm > 0 ? Math.abs(dx) / distanceFromWorm : 0;
-
-  let direction = 0;
-  if (horizontalFraction > 0.2) {
-    direction = dx >= 0 ? 1 : -1;
-  }
-  if (direction === 0) {
-    direction = Math.random() < 0.5 ? -1 : 1;
-  }
-
-  const radius = GAMEPLAY.rifle.aimRadius;
-  const offset = radius / Math.sqrt(2);
-  input.warpMouseTo(worm.x + direction * offset, worm.y - offset);
-}

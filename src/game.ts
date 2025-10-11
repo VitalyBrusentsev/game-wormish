@@ -24,7 +24,6 @@ import { TeamManager, type Team } from "./game/team-manager";
 import {
   computeAimInfo,
   fireWeapon,
-  handleWeaponChanged,
   predictTrajectory,
   resolveCharge01,
   shouldPredictPath,
@@ -212,18 +211,9 @@ export class Game {
     }
 
     // Weapon switching
-    const previousWeapon = this.state.weapon;
     if (this.keyAny(["Digit1"])) this.state.setWeapon(WeaponType.Bazooka);
     if (this.keyAny(["Digit2"])) this.state.setWeapon(WeaponType.HandGrenade);
     if (this.keyAny(["Digit3"])) this.state.setWeapon(WeaponType.Rifle);
-    if (this.state.weapon !== previousWeapon) {
-      handleWeaponChanged({
-        previous: previousWeapon,
-        next: this.state.weapon,
-        input: this.input,
-        activeWorm: this.activeWorm,
-      });
-    }
     // Update cursor visibility when weapon changes
     this.updateCursor();
 
