@@ -3,11 +3,6 @@ export class Input {
   private keysDown = new Set<string>();
   private keysPressed = new Set<string>();
 
-  private rawMouseX = 0;
-  private rawMouseY = 0;
-  private mouseOffsetX = 0;
-  private mouseOffsetY = 0;
-
   private canvas: HTMLCanvasElement | null = null;
 
   mouseX = 0;
@@ -44,10 +39,8 @@ export class Input {
     const canvas = this.canvas;
     if (canvas) {
       const rect = canvas.getBoundingClientRect();
-      this.rawMouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
-      this.rawMouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
-      this.mouseX = this.rawMouseX + this.mouseOffsetX;
-      this.mouseY = this.rawMouseY + this.mouseOffsetY;
+      this.mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+      this.mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
     }
   };
 
@@ -74,7 +67,6 @@ export class Input {
   private readonly blurHandler = () => {
     this.keysDown.clear();
     this.mouseDown = false;
-    this.clearMouseWarp();
   };
 
   attach(canvas: HTMLCanvasElement) {
@@ -110,27 +102,12 @@ export class Input {
     this.mouseDown = false;
     this.mouseJustPressed = false;
     this.mouseJustReleased = false;
-    this.clearMouseWarp();
   }
 
   update() {
     this.mouseJustPressed = false;
     this.mouseJustReleased = false;
     this.keysPressed.clear();
-  }
-
-  warpMouseTo(x: number, y: number) {
-    this.mouseOffsetX = x - this.rawMouseX;
-    this.mouseOffsetY = y - this.rawMouseY;
-    this.mouseX = x;
-    this.mouseY = y;
-  }
-
-  clearMouseWarp() {
-    this.mouseOffsetX = 0;
-    this.mouseOffsetY = 0;
-    this.mouseX = this.rawMouseX;
-    this.mouseY = this.rawMouseY;
   }
 
   isDown(code: string) {
