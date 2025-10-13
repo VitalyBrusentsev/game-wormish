@@ -55,6 +55,13 @@ export class Game {
 
   private helpOverlay: HelpOverlay;
 
+  private readonly cameraPadding = 48;
+  private cameraOffsetX = 0;
+  private cameraOffsetY = 0;
+  private cameraShakeTime = 0;
+  private cameraShakeDuration = 0;
+  private cameraShakeMagnitude = 0;
+
   private readonly frameTimes: number[] = [];
   private frameTimeSum = 0;
   private fps = 0;
@@ -82,7 +89,7 @@ export class Game {
     this.input.attach(this.canvas);
 
     // Create terrain
-    this.terrain = new Terrain(width, height);
+    this.terrain = new Terrain(width, height, { horizontalPadding: this.cameraPadding });
     this.terrain.generate();
 
     this.teamManager = new TeamManager(width, height);
@@ -195,7 +202,10 @@ export class Game {
         this.hideHelp();
       } else if (
         this.input.mouseJustPressed &&
-        this.helpOverlay.isCloseButtonHit(this.input.mouseX, this.input.mouseY)
+        this.helpOverlay.isCloseButtonHit(
+          this.input.mouseX - this.cameraOffsetX,
+          this.input.mouseY - this.cameraOffsetY
+        )
       ) {
         this.hideHelp();
       }
@@ -257,6 +267,8 @@ export class Game {
       input: this.input,
       state: this.state,
       activeWorm: this.activeWorm,
+      cameraOffsetX: this.cameraOffsetX,
+      cameraOffsetY: this.cameraOffsetY,
     });
   }
 
@@ -289,6 +301,10 @@ export class Game {
   onExplosion(x: number, y: number, radius: number, damage: number, cause: WeaponType) {
     // Terrain hole
     this.terrain.carveCircle(x, y, radius);
+
+    if (cause === WeaponType.Bazooka || cause === WeaponType.HandGrenade) {
+      this.triggerCameraShake(radius * 0.7);
+    }
 
     // Particles/smoke
     const particleCount = cause === WeaponType.Rifle ? 12 : 50;
@@ -352,6 +368,7 @@ export class Game {
     this.handleInput(dt);
 
     if (this.helpOverlay.isVisible()) {
+      this.updateCameraShake(dt);
       return;
     }
 
@@ -444,6 +461,8 @@ export class Game {
 
     // Victory check
     this.checkVictory();
+
+    this.updateCameraShake(dt);
   }
 
   checkVictory() {
@@ -458,13 +477,57 @@ export class Game {
 
   restart() {
     // Reset everything
-    this.terrain = new Terrain(this.width, this.height);
+    this.terrain = new Terrain(this.width, this.height, { horizontalPadding: this.cameraPadding });
     this.terrain.generate();
     this.teamManager.initialize(this.terrain);
     this.projectiles = [];
     this.particles = [];
     this.teamManager.setCurrentTeamIndex(Math.random() < 0.5 ? 0 : 1);
+    this.resetCameraShake();
     this.nextTurn(true);
+  }
+
+  private resetCameraShake() {
+    this.cameraShakeTime = 0;
+    this.cameraShakeDuration = 0;
+    this.cameraShakeMagnitude = 0;
+    this.cameraOffsetX = 0;
+    this.cameraOffsetY = 0;
+  }
+
+  private triggerCameraShake(magnitude: number, duration = 0.4) {
+    const clamped = Math.min(Math.abs(magnitude), this.cameraPadding * 0.9);
+    this.cameraShakeMagnitude = Math.max(this.cameraShakeMagnitude, clamped);
+    this.cameraShakeDuration = Math.max(this.cameraShakeDuration, duration);
+    this.cameraShakeTime = Math.max(this.cameraShakeTime, duration);
+  }
+
+  private updateCameraShake(dt: number) {
+    if (this.cameraShakeTime <= 0) {
+      if (this.cameraOffsetX !== 0 || this.cameraOffsetY !== 0) {
+        this.cameraOffsetX = 0;
+        this.cameraOffsetY = 0;
+      }
+      this.cameraShakeMagnitude = 0;
+      this.cameraShakeDuration = 0;
+      return;
+    }
+
+    this.cameraShakeTime = Math.max(0, this.cameraShakeTime - dt);
+    const denom = this.cameraShakeDuration > 0 ? this.cameraShakeDuration : 1;
+    const progress = this.cameraShakeTime / denom;
+    const damping = progress * progress;
+    const magnitude = this.cameraShakeMagnitude * damping;
+    const angle = Math.random() * Math.PI * 2;
+    this.cameraOffsetX = Math.cos(angle) * magnitude;
+    this.cameraOffsetY = Math.sin(angle) * magnitude;
+
+    if (this.cameraShakeTime === 0) {
+      this.cameraShakeMagnitude = 0;
+      this.cameraShakeDuration = 0;
+      this.cameraOffsetX = 0;
+      this.cameraOffsetY = 0;
+    }
   }
 
   // Update canvas cursor based on selected weapon (hide when Rifle)
@@ -510,7 +573,9 @@ export class Game {
 
   render() {
     const ctx = this.ctx;
-    renderBackground(ctx, this.width, this.height);
+    ctx.save();
+    ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
+    renderBackground(ctx, this.width, this.height, this.cameraPadding);
     this.terrain.render(ctx);
 
     for (const p of this.particles) p.render(ctx);
@@ -562,6 +627,7 @@ export class Game {
 
     const fpsText = `FPS: ${this.fps.toFixed(1)}`;
     drawText(ctx, fpsText, this.width - 12, 12, COLORS.white, 14, "right");
+    ctx.restore();
   }
 
   // Game loop --------------------------------------------------------

@@ -20,17 +20,22 @@ export type AimInfo = {
 export function renderBackground(
   ctx: CanvasRenderingContext2D,
   width: number,
-  height: number
+  height: number,
+  padding = 0
 ) {
-  const g = ctx.createLinearGradient(0, 0, 0, height);
+  const left = -padding;
+  const top = -padding;
+  const drawWidth = width + padding * 2;
+  const drawHeight = height + padding * 2;
+  const g = ctx.createLinearGradient(0, top, 0, top + drawHeight);
   g.addColorStop(0, COLORS.bgSkyTop);
   g.addColorStop(1, COLORS.bgSkyBottom);
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, width, height);
+  ctx.fillRect(left, top, drawWidth, drawHeight);
 
   ctx.fillStyle = COLORS.water;
   const waterH = 30;
-  ctx.fillRect(0, height - waterH, width, waterH);
+  ctx.fillRect(left, height - waterH, drawWidth, waterH + padding);
 }
 
 export type RenderHudOptions = {
