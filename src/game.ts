@@ -302,7 +302,7 @@ export class Game {
     // Terrain hole
     this.terrain.carveCircle(x, y, radius);
 
-    if (cause === WeaponType.Bazooka || cause === WeaponType.HandGrenade) {
+    if (cause === WeaponType.HandGrenade) {
       this.triggerCameraShake(radius * 0.7);
     }
 
