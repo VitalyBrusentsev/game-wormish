@@ -58,8 +58,8 @@ export const GAMEPLAY = {
     maxPower: 940,
     fuseMs: 3000,
     restitution: 0.35,
-    explosionRadius: 52,
-    damage: 90,
+    explosionRadius: 68,
+    damage: 108,
   },
   // Rifle: straight-line shot (no gravity), small ground dent, heavy direct damage
   rifle: {
