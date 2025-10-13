@@ -10,6 +10,8 @@ export type AimContext = {
   input: Input;
   state: GameState;
   activeWorm: Worm;
+  cameraOffsetX?: number;
+  cameraOffsetY?: number;
 };
 
 export type FireContext = {
@@ -33,10 +35,18 @@ export type TrajectoryContext = {
   height: number;
 };
 
-export function computeAimInfo({ input, state, activeWorm }: AimContext): AimInfo {
+export function computeAimInfo({
+  input,
+  state,
+  activeWorm,
+  cameraOffsetX,
+  cameraOffsetY,
+}: AimContext): AimInfo {
   const aimWorm = activeWorm;
-  let dx = input.mouseX - aimWorm.x;
-  let dy = input.mouseY - aimWorm.y;
+  const pointerX = input.mouseX - (cameraOffsetX ?? 0);
+  const pointerY = input.mouseY - (cameraOffsetY ?? 0);
+  let dx = pointerX - aimWorm.x;
+  let dy = pointerY - aimWorm.y;
   if (state.weapon === WeaponType.Rifle) {
     const len = Math.hypot(dx, dy) || 1;
     const r = GAMEPLAY.rifle.aimRadius;
