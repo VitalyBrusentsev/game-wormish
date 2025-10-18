@@ -37,6 +37,14 @@ export class TeamManager {
     this.ensureActiveWorm();
   }
 
+  setActiveWormIndex(index: number) {
+    const team = this.teams[this.currentTeamIndex];
+    if (!team || team.worms.length === 0) return;
+    const normalized = ((index % team.worms.length) + team.worms.length) % team.worms.length;
+    this.currentWormIndex = normalized;
+    this.ensureActiveWorm();
+  }
+
   advanceToNextTeam() {
     if (this.teams.length === 0) return;
     this.currentTeamIndex = (this.currentTeamIndex + 1) % this.teams.length;
