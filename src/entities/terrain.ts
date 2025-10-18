@@ -85,6 +85,10 @@ export class Terrain {
     else this.drawGrass();
   }
 
+  syncHeightMapFromSolid() {
+    this.updateHeightMapRange(0, this.totalWidth - 1, true);
+  }
+
   private redrawVisual() {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, this.totalWidth, this.height);
@@ -204,6 +208,10 @@ export class Terrain {
         }
       }
     }
+    this.updateHeightMapRange(
+      Math.max(0, Math.floor(x0 + this.horizontalPadding)),
+      Math.min(this.totalWidth - 1, Math.ceil(x1 + this.horizontalPadding))
+    );
     // Visual erase
     this.ctx.save();
     this.ctx.globalCompositeOperation = "destination-out";
@@ -211,6 +219,30 @@ export class Terrain {
     this.ctx.arc(cx + this.horizontalPadding, cy, r, 0, Math.PI * 2);
     this.ctx.fill();
     this.ctx.restore();
+  }
+
+  private updateHeightMapRange(ixStart: number, ixEnd: number, preserveExisting = false) {
+    const start = Math.max(0, Math.min(ixStart, ixEnd));
+    const end = Math.min(this.totalWidth - 1, Math.max(ixStart, ixEnd));
+    for (let ix = start; ix <= end; ix++) {
+      const topRow = this.findTopSolidRow(ix);
+      if (preserveExisting) {
+        const current = this.heightMap[ix];
+        if (current !== undefined && Math.floor(current) === topRow) {
+          continue;
+        }
+      }
+      this.heightMap[ix] = topRow;
+    }
+  }
+
+  private findTopSolidRow(ix: number) {
+    for (let y = 0; y < this.height; y++) {
+      if (this.solid[y * this.totalWidth + ix] === 1) {
+        return y;
+      }
+    }
+    return this.height;
   }
 
   // Simple raycast against solid cells; returns hit point or null

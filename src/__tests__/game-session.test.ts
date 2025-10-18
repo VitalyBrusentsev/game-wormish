@@ -167,4 +167,23 @@ describe("GameSession snapshots", () => {
 
     expect(sessionA.toSnapshot()).toEqual(sessionB.toSnapshot());
   });
+
+  it("captures carved terrain changes in snapshots", () => {
+    const rng = createRng(7);
+    const session = new GameSession(320, 240, { random: rng, now: createNow(0, 1000) });
+
+    const beforeHeightMap = [...session.terrain.heightMap];
+    session.terrain.carveCircle(160, 120, 25);
+
+    expect(session.terrain.heightMap).not.toEqual(beforeHeightMap);
+
+    const damagedSnapshot = session.toSnapshot();
+
+    expect(damagedSnapshot.terrain.heightMap).toEqual(session.terrain.heightMap);
+
+    const restored = new GameSession(320, 240, { random: createRng(13), now: createNow(0, 1000) });
+    restored.loadSnapshot(damagedSnapshot);
+
+    expect(restored.toSnapshot()).toEqual(damagedSnapshot);
+  });
 });

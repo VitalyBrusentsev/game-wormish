@@ -378,6 +378,7 @@ export class GameSession {
 
     this.terrain.solid = new Uint8Array(snapshot.terrain.solid);
     this.terrain.heightMap = [...snapshot.terrain.heightMap];
+    this.terrain.syncHeightMapFromSolid();
     this.terrain.repaint();
 
     const restoredTeams: Team[] = snapshot.teams.map((teamData) => {
