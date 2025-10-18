@@ -4,7 +4,6 @@ import {
   GAMEPLAY,
   WeaponType,
   clamp,
-  randRange,
   distance,
   nowMs,
 } from "../definitions";
@@ -91,6 +90,8 @@ export class GameSession {
   private readonly teamManager: TeamManager;
   private readonly callbacks: SessionCallbacks;
   private readonly horizontalPadding: number;
+  private readonly random: () => number;
+  private readonly now: () => number;
 
   projectiles: Projectile[] = [];
   particles: Particle[] = [];
@@ -100,19 +101,27 @@ export class GameSession {
   constructor(
     width: number,
     height: number,
-    options?: { horizontalPadding?: number; callbacks?: SessionCallbacks }
+    options?: {
+      horizontalPadding?: number;
+      callbacks?: SessionCallbacks;
+      random?: () => number;
+      now?: () => number;
+    }
   ) {
     this.width = width;
     this.height = height;
     this.horizontalPadding = Math.max(0, options?.horizontalPadding ?? 0);
     this.callbacks = options?.callbacks ?? {};
+    this.random = options?.random ?? Math.random;
+    this.now = options?.now ?? nowMs;
 
     this.terrain = new Terrain(width, height, {
       horizontalPadding: this.horizontalPadding,
+      random: this.random,
     });
     this.terrain.generate();
 
-    this.teamManager = new TeamManager(width, height);
+    this.teamManager = new TeamManager(width, height, this.random);
     this.teamManager.initialize(this.terrain);
 
     this.state = new GameState();
@@ -136,8 +145,8 @@ export class GameSession {
   }
 
   nextTurn(initial = false) {
-    this.wind = randRange(-WORLD.windMax, WORLD.windMax);
-    this.state.startTurn(nowMs(), WeaponType.Bazooka);
+    this.wind = this.randomRange(-WORLD.windMax, WORLD.windMax);
+    this.state.startTurn(this.now(), WeaponType.Bazooka);
     this.message = initial ? "Welcome! Eliminate the other team!" : null;
 
     if (initial) this.teamManager.resetActiveWormIndex();
@@ -150,7 +159,7 @@ export class GameSession {
     camera: { offsetX: number; offsetY: number }
   ) {
     const active = this.activeWorm;
-    const timeLeftMs = this.state.timeLeftMs(nowMs(), GAMEPLAY.turnTimeMs);
+    const timeLeftMs = this.state.timeLeftMs(this.now(), GAMEPLAY.turnTimeMs);
     if (timeLeftMs <= 0 && this.state.phase === "aim") {
       this.endAimPhaseWithoutShot();
       return;
@@ -176,10 +185,10 @@ export class GameSession {
       active.facing = aim.targetX < active.x ? -1 : 1;
 
       if (input.mouseJustPressed) {
-        this.state.beginCharge(nowMs());
+        this.state.beginCharge(this.now());
       }
       if (this.state.charging && input.mouseJustReleased) {
-        const power01 = this.state.endCharge(nowMs());
+        const power01 = this.state.endCharge(this.now());
         this.fireChargedWeapon(power01, input, camera);
         this.endAimPhaseAfterShot();
       }
@@ -307,7 +316,7 @@ export class GameSession {
     this.teamManager.initialize(this.terrain);
     this.projectiles = [];
     this.particles = [];
-    this.teamManager.setCurrentTeamIndex(Math.random() < 0.5 ? 0 : 1);
+    this.teamManager.setCurrentTeamIndex(this.random() < 0.5 ? 0 : 1);
     this.nextTurn(true);
     this.callbacks.onRestart?.();
   }
@@ -369,6 +378,8 @@ export class GameSession {
 
     this.terrain.solid = new Uint8Array(snapshot.terrain.solid);
     this.terrain.heightMap = [...snapshot.terrain.heightMap];
+    this.terrain.syncHeightMapFromSolid();
+    this.terrain.repaint();
 
     const restoredTeams: Team[] = snapshot.teams.map((teamData) => {
       const team: Team = { id: teamData.id, worms: [] };
@@ -400,6 +411,10 @@ export class GameSession {
     this.particles = [];
   }
 
+  private randomRange(min: number, max: number) {
+    return this.random() * (max - min) + min;
+  }
+
   private fireChargedWeapon(
     power01: number,
     input: Input,
@@ -428,14 +443,16 @@ export class GameSession {
 
     const particleCount = cause === WeaponType.Rifle ? 12 : 50;
     for (let i = 0; i < particleCount; i++) {
-      const ang = Math.random() * Math.PI * 2;
+      const ang = this.random() * Math.PI * 2;
       const spd =
-        cause === WeaponType.Rifle ? randRange(60, 180) : randRange(100, 400);
+        cause === WeaponType.Rifle
+          ? this.randomRange(60, 180)
+          : this.randomRange(100, 400);
       const vx = Math.cos(ang) * spd;
       const vy =
         Math.sin(ang) * spd - (cause === WeaponType.Rifle ? 30 : 50);
-      const life = randRange(0.3, cause === WeaponType.Rifle ? 0.6 : 0.9);
-      const r = randRange(1, cause === WeaponType.Rifle ? 3 : 6);
+      const life = this.randomRange(0.3, cause === WeaponType.Rifle ? 0.6 : 0.9);
+      const r = this.randomRange(1, cause === WeaponType.Rifle ? 3 : 6);
       const col =
         i % 2 === 0 ? "rgba(120,120,120,0.8)" : "rgba(200,180,120,0.8)";
       this.particles.push(new Particle(x, y, vx, vy, life, r, col));
@@ -459,8 +476,8 @@ export class GameSession {
 
               if (wasAlive && !worm.alive) {
                 for (let i = 0; i < 12; i++) {
-                  const ang = Math.random() * Math.PI * 2;
-                  const spd = randRange(30, 120);
+                  const ang = this.random() * Math.PI * 2;
+                  const spd = this.randomRange(30, 120);
                   const vx = Math.cos(ang) * spd;
                   const vy = Math.sin(ang) * spd - 40;
                   this.particles.push(
@@ -469,8 +486,8 @@ export class GameSession {
                       worm.y,
                       vx,
                       vy,
-                      randRange(0.5, 0.8),
-                      randRange(2, 3),
+                      this.randomRange(0.5, 0.8),
+                      this.randomRange(2, 3),
                       "rgba(200,80,80,0.8)"
                     )
                   );

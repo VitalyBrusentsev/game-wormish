@@ -1,4 +1,4 @@
-import { WORLD, COLORS, clamp, randRange } from "../definitions";
+import { WORLD, COLORS, clamp } from "../definitions";
 import { groundTiles } from "../assets";
 
 export class Terrain {
@@ -11,8 +11,13 @@ export class Terrain {
   private tilePattern: CanvasPattern | null = null;
   private readonly horizontalPadding: number;
   private readonly totalWidth: number;
+  private readonly random: () => number;
 
-  constructor(width: number, height: number, options?: { horizontalPadding?: number }) {
+  constructor(
+    width: number,
+    height: number,
+    options?: { horizontalPadding?: number; random?: () => number }
+  ) {
     this.width = width | 0;
     this.height = height | 0;
     this.horizontalPadding = Math.max(0, Math.floor(options?.horizontalPadding ?? 0));
@@ -25,6 +30,7 @@ export class Terrain {
     if (!ctx) throw new Error("Terrain 2D context missing");
     this.ctx = ctx;
     this.heightMap = new Array(this.totalWidth).fill(this.height * 0.7);
+    this.random = options?.random ?? Math.random;
   }
 
   get worldLeft() {
@@ -35,20 +41,20 @@ export class Terrain {
     return this.width + this.horizontalPadding;
   }
 
-  generate(seed = Math.random()) {
+  generate(seed = this.random()) {
     // Select and start loading a seamless ground tile (bundled by Vite)
-    const idx = Math.floor(Math.random() * groundTiles.length);
+    const idx = Math.floor(this.random() * groundTiles.length);
     const tileUrl = groundTiles[idx] ?? groundTiles[0]!;
     this.loadTile(tileUrl);
 
     // Generate height map using layered sines + jitter
-    const base = this.height * randRange(WORLD.minGround, WORLD.maxGround);
+    const base = this.height * this.randomRange(WORLD.minGround, WORLD.maxGround);
     const amp1 = this.height * 0.08;
     const amp2 = this.height * 0.04;
     const amp3 = this.height * 0.02;
-    const k1 = randRange(0.005, 0.01);
-    const k2 = randRange(0.01, 0.02);
-    const k3 = randRange(0.02, 0.04);
+    const k1 = this.randomRange(0.005, 0.01);
+    const k2 = this.randomRange(0.01, 0.02);
+    const k3 = this.randomRange(0.02, 0.04);
 
     for (let x = 0; x < this.totalWidth; x++) {
       const worldX = x - this.horizontalPadding;
@@ -57,7 +63,7 @@ export class Terrain {
         Math.sin(worldX * k1 + seed * 10) * amp1 +
         Math.sin(worldX * k2 + seed * 20) * amp2 +
         Math.sin(worldX * k3 + seed * 30) * amp3 +
-        randRange(-10, 10);
+        this.randomRange(-10, 10);
       this.heightMap[x] = clamp(h, this.height * 0.35, this.height * 0.9);
     }
 
@@ -70,9 +76,17 @@ export class Terrain {
     }
 
     // Draw terrain visuals
+    this.repaint();
+  }
+
+  repaint() {
     this.redrawVisual();
-    // Add grass edge
-    this.drawGrass();
+    if (this.tilePattern) this.applyTilePattern();
+    else this.drawGrass();
+  }
+
+  syncHeightMapFromSolid() {
+    this.updateHeightMapRange(0, this.totalWidth - 1, true);
   }
 
   private redrawVisual() {
@@ -105,7 +119,7 @@ export class Terrain {
     for (let x = 0; x < this.totalWidth; x += 1) {
       const y = Math.floor(this.heightMap[x]!) - 1;
       ctx.moveTo(x, y - 1);
-      ctx.lineTo(x + 2, y - 1 - Math.random() * 2);
+      ctx.lineTo(x + 2, y - 1 - this.random() * 2);
     }
     ctx.stroke();
     ctx.restore();
@@ -135,6 +149,10 @@ export class Terrain {
       }
     };
     img.src = url;
+  }
+
+  private randomRange(min: number, max: number) {
+    return this.random() * (max - min) + min;
   }
 
   private applyTilePattern() {
@@ -190,6 +208,10 @@ export class Terrain {
         }
       }
     }
+    this.updateHeightMapRange(
+      Math.max(0, Math.floor(x0 + this.horizontalPadding)),
+      Math.min(this.totalWidth - 1, Math.ceil(x1 + this.horizontalPadding))
+    );
     // Visual erase
     this.ctx.save();
     this.ctx.globalCompositeOperation = "destination-out";
@@ -197,6 +219,30 @@ export class Terrain {
     this.ctx.arc(cx + this.horizontalPadding, cy, r, 0, Math.PI * 2);
     this.ctx.fill();
     this.ctx.restore();
+  }
+
+  private updateHeightMapRange(ixStart: number, ixEnd: number, preserveExisting = false) {
+    const start = Math.max(0, Math.min(ixStart, ixEnd));
+    const end = Math.min(this.totalWidth - 1, Math.max(ixStart, ixEnd));
+    for (let ix = start; ix <= end; ix++) {
+      const topRow = this.findTopSolidRow(ix);
+      if (preserveExisting) {
+        const current = this.heightMap[ix];
+        if (current !== undefined && Math.floor(current) === topRow) {
+          continue;
+        }
+      }
+      this.heightMap[ix] = topRow;
+    }
+  }
+
+  private findTopSolidRow(ix: number) {
+    for (let y = 0; y < this.height; y++) {
+      if (this.solid[y * this.totalWidth + ix] === 1) {
+        return y;
+      }
+    }
+    return this.height;
   }
 
   // Simple raycast against solid cells; returns hit point or null

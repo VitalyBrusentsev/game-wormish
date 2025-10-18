@@ -1,5 +1,5 @@
 import type { TeamId } from "../definitions";
-import { GAMEPLAY, WORLD, randRange } from "../definitions";
+import { GAMEPLAY, WORLD } from "../definitions";
 import { Terrain, Worm } from "../entities";
 
 export type Team = {
@@ -13,7 +13,11 @@ export class TeamManager {
   private currentTeamIndex = 0;
   private currentWormIndex = 0;
 
-  constructor(private readonly width: number, private readonly height: number) {}
+  constructor(
+    private readonly width: number,
+    private readonly height: number,
+    private readonly random: () => number = Math.random
+  ) {}
 
   initialize(terrain: Terrain) {
     this.teams = [
@@ -134,7 +138,7 @@ export class TeamManager {
     for (let teamIndex = 0; teamIndex < this.teams.length; teamIndex++) {
       const team = this.teams[teamIndex]!;
       for (let i = 0; i < GAMEPLAY.teamSize; i++) {
-        const x = positions[posIndex++ % positions.length]! + randRange(-30, 30);
+        const x = positions[posIndex++ % positions.length]! + this.randomRange(-30, 30);
         const y = this.findGroundY(terrain, Math.floor(x));
         const worm = new Worm(x, y, team.id, `${team.id[0]}${i + 1}`);
         this.settleSpawn(terrain, worm);
@@ -183,5 +187,9 @@ export class TeamManager {
       worm.vy = 0;
       worm.onGround = res.onGround;
     }
+  }
+
+  private randomRange(min: number, max: number) {
+    return this.random() * (max - min) + min;
   }
 }
