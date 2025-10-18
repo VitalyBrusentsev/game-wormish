@@ -20,6 +20,11 @@ import {
   shouldPredictPath,
 } from "./weapon-system";
 
+/**
+ * Hooks that allow the host environment (e.g. the DOM-oriented `Game` wrapper)
+ * to react to important simulation events coming from the DOM-free session
+ * core.
+ */
 export interface SessionCallbacks {
   onExplosion?: (info: {
     x: number;
