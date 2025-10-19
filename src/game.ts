@@ -15,6 +15,10 @@ import {
   GameSession,
   type SessionCallbacks,
 } from "./game/session";
+import {
+  LocalTurnController,
+  type TurnDriver,
+} from "./game/turn-driver";
 
 let initialHelpShown = false;
 
@@ -56,6 +60,8 @@ export class Game {
     onRestart: () => this.resetCameraShake(),
   };
 
+  private readonly turnControllers = new Map<TeamId, TurnDriver>();
+
   constructor(width: number, height: number) {
     this.width = width;
     this.height = height;
@@ -74,6 +80,8 @@ export class Game {
       callbacks: this.sessionCallbacks,
     });
 
+    this.initializeTurnControllers();
+
     this.helpOverlay = new HelpOverlay();
 
     if (!initialHelpShown) {
@@ -84,6 +92,19 @@ export class Game {
     this.updateCursor();
 
     this.frameCallback = (t) => this.frame(t);
+  }
+
+  private initializeTurnControllers() {
+    this.turnControllers.clear();
+    for (const team of this.session.teams) {
+      this.turnControllers.set(team.id, new LocalTurnController());
+    }
+    this.session.setTurnControllers(this.turnControllers);
+  }
+
+  setTurnController(teamId: TeamId, controller: TurnDriver) {
+    this.turnControllers.set(teamId, controller);
+    this.session.setTurnControllers(this.turnControllers);
   }
 
   mount(parent: HTMLElement) {
@@ -150,7 +171,7 @@ export class Game {
     }
   }
 
-  private processInput(dt: number) {
+  private processInput() {
     if (this.input.pressed("F1")) {
       if (this.helpOverlay.isVisible()) this.hideHelp();
       else this.showHelp();
@@ -170,14 +191,10 @@ export class Game {
       ) {
         this.hideHelp();
         this.updateCursor();
+        this.input.consumeMousePress();
       }
       return;
     }
-
-    this.session.handleInput(this.input, dt, {
-      offsetX: this.cameraOffsetX,
-      offsetY: this.cameraOffsetY,
-    });
 
     this.updateCursor();
   }
@@ -333,7 +350,12 @@ export class Game {
     }
     dt = Math.min(dt, 1 / 20);
 
-    this.processInput(dt);
+    this.processInput();
+    this.session.updateActiveTurnDriver(dt, {
+      allowInput: !this.helpOverlay.isVisible(),
+      input: this.input,
+      camera: { offsetX: this.cameraOffsetX, offsetY: this.cameraOffsetY },
+    });
     if (!this.helpOverlay.isVisible()) {
       this.session.update(dt);
     }
