@@ -25,6 +25,11 @@ import type {
   TurnResolution,
   WormHealthChange,
 } from "./network/turn-payload";
+import type {
+  TurnDriver,
+  TurnDriverUpdateOptions,
+  TurnContext,
+} from "./turn-driver";
 
 /**
  * Hooks that allow the host environment (e.g. the DOM-oriented `Game` wrapper)
@@ -122,6 +127,11 @@ export class GameSession {
   private projectileIds = new Map<Projectile, number>();
   private terminatedProjectiles = new Set<number>();
   private nextProjectileId = 1;
+  private turnControllers = new Map<TeamId, TurnDriver>();
+  private currentTurnDriver: TurnDriver | null = null;
+  private currentTurnContext: TurnContext | null = null;
+  private waitingForRemoteResolution = false;
+  private currentTurnInitial = true;
 
   constructor(
     width: number,
@@ -153,6 +163,27 @@ export class GameSession {
 
     this.state = new GameState();
     this.nextTurn(true);
+  }
+
+  setTurnControllers(controllers: Map<TeamId, TurnDriver>) {
+    this.turnControllers = new Map(controllers);
+    this.configureTurnDriver(this.currentTurnInitial);
+  }
+
+  updateActiveTurnDriver(
+    dt: number,
+    options: TurnDriverUpdateOptions
+  ) {
+    if (!this.currentTurnDriver || !this.currentTurnContext) return;
+    this.currentTurnDriver.update(this.currentTurnContext, dt, options);
+  }
+
+  isLocalTurnActive() {
+    return !this.waitingForRemoteResolution;
+  }
+
+  isWaitingForRemoteResolution() {
+    return this.waitingForRemoteResolution;
   }
 
   get activeTeam(): Team {
@@ -198,6 +229,7 @@ export class GameSession {
     this.terminatedProjectiles.clear();
     this.nextProjectileId = 1;
     this.beginTurnLog();
+    this.configureTurnDriver(initial);
   }
 
   handleInput(
@@ -205,6 +237,7 @@ export class GameSession {
     dt: number,
     camera: { offsetX: number; offsetY: number }
   ) {
+    if (!this.isLocalTurnActive()) return;
     const active = this.activeWorm;
     const timeLeftMs = this.state.timeLeftMs(this.now(), GAMEPLAY.turnTimeMs);
     if (timeLeftMs <= 0 && this.state.phase === "aim") {
@@ -481,6 +514,9 @@ export class GameSession {
     }
     const resolution = this.pendingTurnResolution;
     this.pendingTurnResolution = null;
+    if (this.currentTurnDriver && this.currentTurnContext) {
+      this.currentTurnDriver.endTurn?.(this.currentTurnContext, resolution);
+    }
     return resolution;
   }
 
@@ -516,6 +552,67 @@ export class GameSession {
       if (worm.alive !== change.wasAlive) {
         throw new Error("Worm alive state mismatch before applying resolution change");
       }
+      if (Math.abs(change.before + change.delta - change.after) > 1e-3) {
+        throw new Error("Worm health delta mismatch in resolution change");
+      }
+    }
+
+    const knownTeamIds = new Set(this.teams.map((t) => t.id));
+    const snapshotTerrain = resolution.snapshot.terrain;
+    if (snapshotTerrain.horizontalPadding !== this.horizontalPadding) {
+      throw new Error("Resolution terrain padding mismatch");
+    }
+    const expectedTotalWidth =
+      snapshotTerrain.width + snapshotTerrain.horizontalPadding * 2;
+    if (snapshotTerrain.solid.length !== expectedTotalWidth * snapshotTerrain.height) {
+      throw new Error("Resolution terrain mask size mismatch");
+    }
+    if (snapshotTerrain.heightMap.length !== expectedTotalWidth) {
+      throw new Error("Resolution terrain height map size mismatch");
+    }
+
+    const worldLeft = this.terrain.worldLeft;
+    const worldRight = this.terrain.worldRight;
+    const minY = -this.height;
+    const maxY = this.height * 2;
+
+    for (const teamSnapshot of resolution.snapshot.teams) {
+      if (!knownTeamIds.has(teamSnapshot.id)) {
+        throw new Error(`Unknown team found in resolution snapshot: ${teamSnapshot.id}`);
+      }
+      for (const worm of teamSnapshot.worms) {
+        if (!Number.isFinite(worm.x) || !Number.isFinite(worm.y)) {
+          throw new Error("Non-finite worm coordinates in resolution snapshot");
+        }
+        if (worm.x < worldLeft || worm.x > worldRight) {
+          throw new Error("Worm position exceeds horizontal world bounds");
+        }
+        if (worm.y < minY || worm.y > maxY) {
+          throw new Error("Worm position exceeds vertical world bounds");
+        }
+      }
+    }
+
+    const maxRadius = Math.max(this.width, this.height);
+    for (const operation of resolution.terrainOperations) {
+      if (operation.type !== "carve-circle") {
+        throw new Error("Unknown terrain operation in resolution");
+      }
+      if (!Number.isFinite(operation.x) || !Number.isFinite(operation.y)) {
+        throw new Error("Non-finite terrain operation coordinates");
+      }
+      if (!Number.isFinite(operation.radius)) {
+        throw new Error("Non-finite terrain operation radius");
+      }
+      if (operation.radius < 0 || operation.radius > maxRadius) {
+        throw new Error("Terrain operation radius out of range");
+      }
+      if (operation.x < worldLeft || operation.x > worldRight) {
+        throw new Error("Terrain operation outside horizontal map limits");
+      }
+      if (operation.y < minY || operation.y > maxY) {
+        throw new Error("Terrain operation outside vertical map limits");
+      }
     }
 
     this.loadSnapshot(resolution.snapshot);
@@ -526,6 +623,10 @@ export class GameSession {
     this.nextProjectileId = 1;
     this.beginTurnLog();
     this.pendingTurnResolution = null;
+    this.waitingForRemoteResolution = false;
+    if (this.currentTurnDriver && this.currentTurnContext) {
+      this.currentTurnDriver.endTurn?.(this.currentTurnContext, resolution);
+    }
   }
 
   private createEmptyTurnLog(): TurnLog {
@@ -548,6 +649,24 @@ export class GameSession {
     this.turnLog.actingTeamIndex = this.teamManager.activeTeamIndex;
     this.turnLog.actingWormIndex = this.teamManager.activeWormIndex;
     this.turnLog.windAtStart = this.wind;
+  }
+
+  private configureTurnDriver(initial: boolean) {
+    this.currentTurnInitial = initial;
+    this.currentTurnContext = {
+      session: this,
+      team: this.activeTeam,
+      teamIndex: this.teamManager.activeTeamIndex,
+      initial,
+    };
+    const driver = this.turnControllers.get(this.activeTeam.id) ?? null;
+    this.currentTurnDriver = driver;
+    if (!driver) {
+      this.waitingForRemoteResolution = false;
+      return;
+    }
+    driver.beginTurn(this.currentTurnContext);
+    this.waitingForRemoteResolution = driver.type === "remote";
   }
 
   private turnTimestampMs(): number {

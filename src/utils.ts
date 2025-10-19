@@ -110,6 +110,11 @@ export class Input {
     this.keysPressed.clear();
   }
 
+  consumeMousePress() {
+    this.mouseJustPressed = false;
+    this.mouseJustReleased = false;
+  }
+
   isDown(code: string) {
     return this.keysDown.has(code);
   }
