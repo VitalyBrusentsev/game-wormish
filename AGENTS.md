@@ -9,19 +9,16 @@ HTML/CSS, TypeScript, Vite
 
 ## Compiling and testing
 
-Use the following console command to verify the saved changes successfully pass the compilation:
+You can study `package.json` to determine the useful scripts available to you. The most important ones are: compilation, unit tests and local dev run.
+
+Use the following console command to verify the changes compile successfully:
 ```
 npx tsc -p tsconfig.json --noEmit
 ```
+To validate the tests are still passing after making changes, use `npm run test:run`, which will run the test suite once, using vitest.
 
-If a `dev` task is running (most likely, can be confirmed by the user), all approved changes will already be reflected in the web app, available for the Browser tool to test. If it doesn't, you can start it by executing `npm run dev`.
+If the `npm run dev` script is launched, the changes will be reflected in the web app, available for the Browser tool to test and / or screenshot.
 
-
-## Command line
-
-The syntax for command line is Windows Powershell, so pay attention to proper syntax. For example, use `;`, not `&&` for combining two commands in one line.
-
-When relevant and approved, you can start the server by running the `npm run dev` command and use the browser to test the app.
 
 # Coding Conventions
 
@@ -33,7 +30,7 @@ Try to keep files under 500 lines. Larger files usually are a code smell: maybe 
 
 Avoid using 'any' and similar type hacks. Always try to establish the reason behind compiler errors and look for the way to carefully alter the applications types to satisfy the requirements.
 
-Comments should be kept to a minimum. Prefer code readability and clean structure instead. Never add a comment to an already descriptively named function or type. Avoid commenting on a tricky block of code: prefer extracting it into a descriptive function, method or a class.
+Comments should be kept to a minimum. Prefer code readability and clean structure instead. Never add a comment to an already descriptively named function or type. Avoid commenting on a tricky block of code: prefer extracting it into a clearly named function, method or a class.
 
 ## Game architecture
 
