@@ -3,6 +3,7 @@ import { GAMEPLAY, WeaponType, nowMs, COLORS } from "./definitions";
 import { Input, drawText } from "./utils";
 import type { Worm } from "./entities";
 import { HelpOverlay } from "./ui/help-overlay";
+import { StartMenuOverlay } from "./ui/start-menu-overlay";
 import {
   renderAimHelpers,
   renderBackground,
@@ -20,7 +21,7 @@ import {
   type TurnDriver,
 } from "./game/turn-driver";
 
-let initialHelpShown = false;
+let initialMenuDismissed = false;
 
 export class Game {
   canvas: HTMLCanvasElement;
@@ -32,6 +33,8 @@ export class Game {
   session: GameSession;
 
   private helpOverlay: HelpOverlay;
+  private startMenu: StartMenuOverlay;
+  private helpOpenedFromMenu = false;
 
   private readonly cameraPadding = 48;
   private cameraOffsetX = 0;
@@ -83,10 +86,9 @@ export class Game {
     this.initializeTurnControllers();
 
     this.helpOverlay = new HelpOverlay();
-
-    if (!initialHelpShown) {
-      this.showHelp();
-      initialHelpShown = true;
+    this.startMenu = new StartMenuOverlay();
+    if (!initialMenuDismissed) {
+      this.startMenu.show();
     }
 
     this.updateCursor();
@@ -166,6 +168,13 @@ export class Game {
 
   private hideHelp() {
     const pausedFor = this.helpOverlay.hide(nowMs());
+    if (this.helpOpenedFromMenu) {
+      this.helpOpenedFromMenu = false;
+      if (!initialMenuDismissed) {
+        this.startMenu.show();
+      }
+      return;
+    }
     if (pausedFor > 0) {
       this.session.state.pauseFor(pausedFor);
     }
@@ -173,8 +182,12 @@ export class Game {
 
   private processInput() {
     if (this.input.pressed("F1")) {
-      if (this.helpOverlay.isVisible()) this.hideHelp();
-      else this.showHelp();
+      if (this.helpOverlay.isVisible()) {
+        this.hideHelp();
+      } else {
+        this.helpOpenedFromMenu = this.startMenu.isVisible();
+        this.showHelp();
+      }
       this.updateCursor();
     }
 
@@ -193,6 +206,32 @@ export class Game {
         this.updateCursor();
         this.input.consumeMousePress();
       }
+      return;
+    }
+
+    if (this.startMenu.isVisible()) {
+      const pointerX = this.input.mouseX - this.cameraOffsetX;
+      const pointerY = this.input.mouseY - this.cameraOffsetY;
+      this.startMenu.updateLayout(this.width, this.height);
+      this.startMenu.updatePointer(pointerX, pointerY, this.input.mouseDown);
+
+      if (this.input.mouseJustPressed) {
+        this.startMenu.handlePress();
+      }
+
+      if (this.input.mouseJustReleased) {
+        this.startMenu.updatePointer(pointerX, pointerY, this.input.mouseDown);
+        const action = this.startMenu.handleRelease(pointerX, pointerY);
+        if (action === "help") {
+          this.helpOpenedFromMenu = true;
+          this.showHelp();
+        } else if (action === "start") {
+          this.startMenu.hide();
+          initialMenuDismissed = true;
+        }
+      }
+
+      this.updateCursor();
       return;
     }
 
@@ -244,6 +283,10 @@ export class Game {
   private updateCursor() {
     if (this.helpOverlay.isVisible()) {
       this.canvas.style.cursor = "default";
+      return;
+    }
+    if (this.startMenu.isVisible()) {
+      this.canvas.style.cursor = this.startMenu.getCursor();
       return;
     }
     if (this.session.state.weapon === WeaponType.Rifle && !this.session.state.charging) {
@@ -327,6 +370,7 @@ export class Game {
       isGameOver: this.session.state.phase === "gameover",
     });
 
+    this.startMenu.render(ctx, this.width, this.height);
     this.helpOverlay.render(ctx, this.width, this.height);
 
     const fpsText = `FPS: ${this.fps.toFixed(1)}`;
@@ -351,12 +395,14 @@ export class Game {
     dt = Math.min(dt, 1 / 20);
 
     this.processInput();
+    const overlaysBlocking =
+      this.helpOverlay.isVisible() || this.startMenu.isVisible();
     this.session.updateActiveTurnDriver(dt, {
-      allowInput: !this.helpOverlay.isVisible(),
+      allowInput: !overlaysBlocking,
       input: this.input,
       camera: { offsetX: this.cameraOffsetX, offsetY: this.cameraOffsetY },
     });
-    if (!this.helpOverlay.isVisible()) {
+    if (!overlaysBlocking) {
       this.session.update(dt);
     }
     this.updateCameraShake(dt);
