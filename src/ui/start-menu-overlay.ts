@@ -281,19 +281,6 @@ export class StartMenuOverlay {
         false
       );
 
-      if (!item.enabled) {
-        drawText(
-          ctx,
-          "Coming soon",
-          drawRect.x + drawRect.width / 2,
-          drawRect.y + drawRect.height / 2 + 24,
-          "rgba(200, 205, 220, 0.35)",
-          14,
-          "center",
-          "middle",
-          false
-        );
-      }
     }
 
     ctx.restore();

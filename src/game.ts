@@ -170,9 +170,7 @@ export class Game {
     const pausedFor = this.helpOverlay.hide(nowMs());
     if (this.helpOpenedFromMenu) {
       this.helpOpenedFromMenu = false;
-      if (!initialMenuDismissed) {
-        this.startMenu.show();
-      }
+      this.startMenu.show();
       return;
     }
     if (pausedFor > 0) {
@@ -207,6 +205,21 @@ export class Game {
         this.input.consumeMousePress();
       }
       return;
+    }
+
+    const escapePressed = this.input.pressed("Escape");
+    if (escapePressed) {
+      if (this.startMenu.isVisible()) {
+        if (initialMenuDismissed) {
+          this.startMenu.hide();
+          this.updateCursor();
+          return;
+        }
+      } else {
+        this.startMenu.show();
+        this.updateCursor();
+        return;
+      }
     }
 
     if (this.startMenu.isVisible()) {
