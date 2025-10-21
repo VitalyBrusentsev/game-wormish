@@ -10,20 +10,23 @@ type Rect = {
 
 type MenuItemId = "help" | "start" | "friends";
 
+type MenuMode = "start" | "pause";
+
 type MenuItem = {
   id: MenuItemId;
   label: string;
   enabled: boolean;
-  action: "help" | "start" | null;
+  action: "help" | "start" | "restart" | null;
 };
 
-export type MenuAction = "help" | "start" | null;
+export type MenuAction = "help" | "start" | "restart" | null;
 
 export class StartMenuOverlay {
   private visible = false;
   private hovered: MenuItemId | null = null;
   private active: MenuItemId | null = null;
   private panelRect: Rect | null = null;
+  private mode: MenuMode = "start";
   private readonly itemRects = new Map<MenuItemId, Rect>();
 
   private readonly items: MenuItem[] = [
@@ -32,7 +35,21 @@ export class StartMenuOverlay {
     { id: "friends", label: "Play With Friends", enabled: false, action: null },
   ];
 
-  show() {
+  private setMode(mode: MenuMode) {
+    this.mode = mode;
+    const startItem = this.items.find((item) => item.id === "start");
+    if (!startItem) return;
+    if (mode === "start") {
+      startItem.label = "Start";
+      startItem.action = "start";
+    } else {
+      startItem.label = "Restart";
+      startItem.action = "restart";
+    }
+  }
+
+  show(mode: MenuMode = this.mode) {
+    this.setMode(mode);
     if (this.visible) return;
     this.visible = true;
     this.hovered = null;
