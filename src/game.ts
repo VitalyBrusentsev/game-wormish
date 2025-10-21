@@ -88,7 +88,7 @@ export class Game {
     this.helpOverlay = new HelpOverlay();
     this.startMenu = new StartMenuOverlay();
     if (!initialMenuDismissed) {
-      this.startMenu.show();
+      this.startMenu.show("start");
     }
 
     this.updateCursor();
@@ -216,7 +216,7 @@ export class Game {
           return;
         }
       } else {
-        this.startMenu.show();
+        this.startMenu.show(initialMenuDismissed ? "pause" : "start");
         this.updateCursor();
         return;
       }
@@ -241,6 +241,10 @@ export class Game {
         } else if (action === "start") {
           this.startMenu.hide();
           initialMenuDismissed = true;
+        } else if (action === "restart") {
+          this.startMenu.hide();
+          initialMenuDismissed = true;
+          this.session.restart();
         }
       }
 

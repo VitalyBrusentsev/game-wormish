@@ -249,7 +249,7 @@ export class GameSession {
     if (input.pressed("Digit2")) this.state.setWeapon(WeaponType.HandGrenade);
     if (input.pressed("Digit3")) this.state.setWeapon(WeaponType.Rifle);
 
-    if (input.pressed("KeyR")) {
+    if (input.pressed("KeyR") && this.state.phase === "gameover") {
       this.restart();
       return;
     }
