@@ -1,53 +1,111 @@
 # Cloudflare “Registry” API — Functional Requirements
 
 ## Goal
-A minimal, secure signaling backend for 2-player WebRTC rooms. Stores SDP offers/answers and ICE candidates with short TTLs; never carries game data.
+A minimal, secure signaling backend for 2‑player WebRTC rooms. Stores SDP offers/answers and ICE candidates with short TTLs; never carries game data.
 
----
+This proposal relies on a **human‑friendly, short‑lived room & join codes**. The host creates a room (with very short TTL, about 30-60 seconds, unless it's joined) with unique room code, which generates a unique join code. The host shares the room code and the join code out‑of‑band (chat/voice). The guest redeems the join code to obtain a scoped write capability, and both peers exchange their ICE candidates to establish the WebRTC connection for actual network gameplay data exchange.
 
 ## Platform & Bindings
 - **Cloudflare Worker** (HTTP JSON API).
-- **KV Namespace**: `REGISTRY_KV`  
+- **KV Namespace**: `REGISTRY_KV`
   - Keys auto-expire via **per-key TTL**.
+  - **Cloudflare WAF/rate limiting**: blanket rate limits on sensitive endpoints, and additional IP address based rate limits, to prevent abuse / DoS.
 - Optional:
-  - **Turnstile** (captcha) for room creation.
-  - **Ratelimits** via Cloudflare WAF rules.
+  - **Turnstile** (captcha) on room creation, or requesting a trusted identity JWT (Google?)
+  - **Durable Object** (optional) for strict room serialization.
 
----
+
+## Threat Model Summary
+- **Registry abuse**: mitigated via unguessable room codes, short TTLs, strict payload caps, scoped access capabilities, and rate limits.
+- **Rando guessing**: short‑lived join code + rate limits keep risk low.
 
 ## Data Model (KV)
-- `room:<code>` → JSON  
-  ```json
-  {
-    "code": "ABCD12",
-    "writeToken": "<opaque random>",
-    "offer": { "type":"offer","sdp":"..." },         // optional
-    "answer": { "type":"answer","sdp":"..." },       // optional
-    "createdAt": 1739999999999,
-    "expiresAt": 1740001799999,
-    "status": "open|paired|closed"
-  }
-  ```
-- `ice:<code>:<peer>` → JSON array of RTCIceCandidateInit  
-  Example key: `ice:ABCD12:host` or `ice:ABCD12:guest`.
 
-**TTL defaults**
-- Rooms: **30 minutes** (configurable).
-- ICE buckets: **15 minutes** (configurable).
+### Room record
+Key: `room:<code>` → JSON
+```json
+{
+  "code": "ABCD12",
+  "joinCode": "123-456",                  // exchanged out of band
+  "hostName": "Alice1996",                // provided by the host UI upon creation
+  "guestName": "Bob1993",                 // optional, provided by the guest UI upon joining
+  "ownerToken": "<opaque random>",        // access cap for host
+  "guestToken": "<opaque random>",        // access cap for guest
+  "offer": { "type": "offer", "sdp": "..." },    // optional, updated by host for SDP exchange
+  "answer": { "type": "answer", "sdp": "..." },  // optional, updated by guest for SDP exchange
+  "createdAt": 1739999999999,
+  "updatedAt": 1739999999999,
+  "expiresAt": 1740001799999,
+  "status": "open|joined|paired|closed"
+}
+```
 
----
+### ICE buckets
+  - Key: `ice:<code>:host` → JSON array of RTCIceCandidateInit
+  - Key: `ice:<code>:guest` → same
+
+### TTL defaults
+- Room key: 
+  - Open: **30-60 seconds** (configurable),
+  - Joined: **2-5 minutes**
+  - Paired: **24 hours**
+  - Closed: TTL is set to expire ASAP.
+- ICE buckets: **3 minutes**.
+
 
 ## Security & Access
-- **Room codes**: 6–8 char base36 (or noun-adjective-animal words). Not enumerable.
-- **Write token**: Required for any mutating call (header `X-Write-Token`).
-- **CORS**: Restrict to allowed origins (env var `ALLOWED_ORIGINS`).
-- **No listing endpoints**; access by exact code only.
-- **Size limits**: body ≤ 64 KB; reject oversize (413).
-- **Input validation**: Only accept well-formed SDP/candidate JSON.
-- **Abuse controls**:
-  - Per-IP create limit (e.g., **5/min**).
-  - Per-room write cap (e.g., **200 writes/5 min**).
-  - Optional **Turnstile** on `POST /rooms`.
+- **Room codes**: 6–8 chars base36. Not enumerable; no "list rooms" API. Knowing a room code only gives public information about an open room, you need to know the join code at the right time window for the rest of the exchange.
+- **Access tokens**: Opaque/random, **room‑scoped**, **short‑lived** (≤ room TTL). Required for all writes via header `X-Access-Token`.
+- **CORS**: lock to `ALLOWED_ORIGINS`.
+- **Strict validation & caps**:
+  - SDP size ≤ **20 KB**; candidate size ≤ **1 KB**; ≤ **200** candidates/peer.
+  - JSON schema check for known fields.
+- **Rate limits**:
+  - Create: **≤5/min/IP**.
+  - Per-room mutations: **≤200/5 min** (both roles combined).
+  - Join attempts: **≤10/min/IP** and **≤10/min/room**.
+- **TTL touch**: Mutations may extend room TTL; Changing room states applies different types of TTL.
+- **Observability**: counters for creates/joins/offers/answers/ice_appends/closes and 4xx/5xx/429.
+
+## User Flow (Host + Guest)
+
+1. **Host creates room**  
+   `POST /rooms` with body `{ "name": "Alice1996" }` → returns:
+   ```json
+   {
+     "code": "ABCD12",
+     "joinCode": "123-456",
+     "ownerToken": "<host capability>",
+     "expiresAt": 1740001799999
+   }
+   ```
+   Host shares **code** and **joinCode** with friend out‑of‑band.
+
+2. **Guest searches for a room by code**
+   `GET /rooms/:code/public` -> 200 would return only a currently open room, otherwise 404
+
+3. **Guest sees the expected hostName (e.g., "Alice1996"), enters and redeems joinCode** 
+   `POST /rooms/:code/join` with body `{ "joinCode": "ABCD12", "name": "Bob1997" }` → returns:
+   ```json
+   { "guestToken": "<guest capability>", "expiresAt": 1740001799999 }
+   ```
+   Server marks room as "joined" (or rejects on reuse/expiry).
+
+   Both parties poll the room status by using the polling endpoint:
+   `GET /rooms/:code` (`X-Access-Token: ownerToken|guestToken`)
+
+4. **Offer/Answer**  
+   - Host posts offer: `POST /rooms/:code/offer` (`X-Access-Token: ownerToken`)
+   - Guest posts answer: `POST /rooms/:code/answer` (`X-Access-Token: guestToken`)
+   - Server sets `status:"paired"` after valid answer.
+
+5. **ICE exchange (both sides)**  
+   Each side posts candidates with their respective token:  
+   `POST /rooms/:code/candidate` (`X-Access-Token: ownerToken|guestToken`) → appends to `ice:<code>:host|guest`.
+   Reader drains via `GET /rooms/:code/candidates?peer=host|guest` with `X-Access-Token` mandatory.
+
+6. **Close (optional)**  
+   Host can close the room early: `POST /rooms/:code/close` (`X-Access-Token: ownerToken`) → `status:"closed"`, shrink TTL to acceptable destruction ASAP.
 
 ---
 
@@ -55,17 +113,31 @@ A minimal, secure signaling backend for 2-player WebRTC rooms. Stores SDP offers
 
 ### 1) Create Room
 `POST /rooms`
-- **Headers**: `CF-Connecting-IP` (implicit), optional Turnstile.
-- **Body** (optional): `{ "ttlSeconds": 1800 }`
-- **Responses**
-  - `201` `{ "code","writeToken","expiresAt" }`
-  - `429` if rate limited
-  - `400/401` on Turnstile failure
-- **Effects**: Create `room:<code>` with TTL; `status:"open"`.
+- **Headers**: optional Turnstile / JWT.
+- **Body**: `{ "name": "Alice1996" }` -> provides `hostName`
+- **201**
+  ```json
+  { "code","ownerToken","joinCode","expiresAt" }
+  ```
+- Errors: `429`, `400/401` (Turnstile / JWT).
 
-### 2) Put Offer
+### 2) Get Public Room information by code
+`GET /rooms/:code/public` 
+- **200** { "status":"open", "expiresAt":..., "hostName": "" }
+- **404** - in case the room doesn't exist, or not in an open state
+
+### 3) Redeem Join Code → Guest Token
+`POST /rooms/:code/join`
+- **Body**: `{ "joinCode": "...", "name": "" }` -> provides `guestName`
+- **200**
+  ```json
+  { "guestToken": "...", "expiresAt": 1740001799999 }
+  ```
+- Errors: `404` (room/expired), `409` (already paired or join code consumed), `400` (invalid), `429` (rate limited).
+
+### 4) Put Offer (Host)
 `POST /rooms/:code/offer`
-- **Headers**: `X-Write-Token`
+- **Headers**: `X-Access-Token: ownerToken`
 - **Body**: `{ "sdp": "<base64 or raw SDP string>", "type": "offer" }`
 - **Responses**
   - `204` no content
@@ -74,87 +146,63 @@ A minimal, secure signaling backend for 2-player WebRTC rooms. Stores SDP offers
   - `409` if offer already set and room not reset
 - **Effect**: Merge `offer`; refresh TTL.
 
-### 3) Put Answer
+### 4) Put Answer (Guest)
 `POST /rooms/:code/answer`
-- **Headers**: `X-Write-Token`
-- **Body**: `{ "sdp": "...", "type": "answer" }`
-- **Responses**: same as **Put Offer**
-- **Effect**: Merge `answer`; set `status:"paired"`; refresh TTL.
+- **Headers**: `X-Access-Token: guestToken`
+- **Body**: `{ "type":"answer", "sdp":"..." }`
+- **204**; sets `status:"paired"`; errors as above.
 
-### 4) Append ICE Candidate
+### 5) Append ICE Candidate (Both)
 `POST /rooms/:code/candidate`
-- **Headers**: `X-Write-Token`
-- **Body** (single candidate):  
-  `{ "candidate":"...", "sdpMid":"data", "sdpMLineIndex":0 }`
-- **Responses**
-  - `204`
-  - `403/404`
-- **Effect**: Push to `ice:<code>:<derivedPeer>`; ICE TTL applies.
+- **Headers**: `X-Access-Token: ownerToken|guestToken`
+- **Body**: `{ "candidate":"...", "sdpMid":"...", "sdpMLineIndex":0, "peer":"host|guest" }`
+  - `peer` optional; server can infer from token claims/role.
+- **204**; errors: `403/404/413`.
 
-> **Peer attribution**: derive `"host"` vs `"guest"` from first writer for this token, or require client to send `peer:"host"|"guest"`.
-
-### 5) Fetch Room Snapshot (poll)
+### 6) Fetch Room Snapshot (Poll)
 `GET /rooms/:code`
-- **Query**: optional `since=<msEpoch>` to reduce payload.
-- **Response `200`**
+- **Headers**: `X-Access-Token: ownerToken|guestToken`
+- **200**
   ```json
-  {
-    "offer": {...} | null,
-    "answer": {...} | null,
-    "status": "open|paired|closed",
-    "expiresAt": 1740001799999,
-    "updatedAt": 1739999999999
-  }
+  { "offer": {...} | null, "answer": {...} | null, "status": "open|joined|paired", "expiresAt": 1740001799999, "updatedAt": 1739999999999 }
   ```
-- **404** if expired/missing.
+- **404** if expired/missing/closed.
 
-### 6) Drain ICE (batch read)
+### 7) Drain ICE (Batch Read)
 `GET /rooms/:code/candidates?peer=host|guest&after=<cursor>`
-- **Response `200`**
-  ```json
-  { "items":[{...},{...}], "next": "<cursor or null>" }
-  ```
-- **Notes**: Simple cursor = last index; server is free to GC.
+- **Headers**: `X-Access-Token: ownerToken|guestToken`
+- **200** `{ "items":[...], "next": "<cursor|null>" }`
 
-### 7) Close Room (optional)
+### 8) Close Room (Optional)
 `POST /rooms/:code/close`
-- **Headers**: `X-Write-Token`
-- **Response**: `204` or `403/404`
-- **Effect**: Set `status:"closed"`, shorten TTL to e.g. 60s.
+- **Headers**: `X-Access-Token: ownerToken`
+- **204**; marks closed and shortens TTL.
 
 ---
 
-## Behaviors & Rules
-- **Idempotency**: Reposting same SDP is allowed; replace value.
-- **TTL touch**: Any mutating call extends room TTL (configurable).
-- **Two-peer constraint**: First writer becomes `host`; first `answer` sets `guest`; reject a third distinct writer (`409`).
-- **No history** for SDP; ICE is append-only with natural expiry.
-- **Privacy**: Store only SDP/ICE + minimal metadata. No IPs.
+## Validation & Limits (Server‑Side)
+- **SDP**: presence/length/type fields; length ≤ 20 KB.
+- **Candidates**: required fields; length ≤ 1 KB; **≤200** per peer; body ≤ 64 KB total.
+- **Room state constraints**: only one answer; error if already paired and another guest tries to join.
+- **Join code**: must match, single use.
 
 ---
 
-## Errors (JSON)
+## Optional App‑Level Handshake (HMAC)
+After DataChannel opens, each side can send:
 ```json
-{ "error": "BadRequest", "message": "invalid SDP" }
+{ "type": "hello", "proof": "HMAC_SHA256(<token>, <nonce>)", "nonce": "<random>" }
 ```
-- `400` BadRequest (validation)
-- `401` Unauthorized (Turnstile)
-- `403` Forbidden (token)
-- `404` NotFound (room/expired)
-- `409` Conflict (capacity/duplicate peer)
-- `413` PayloadTooLarge
-- `429` TooManyRequests
-- `500` InternalError (opaque)
+Close on failure or timeout. Prevents non‑Registry peers from completing the app protocol.
 
 ---
 
 ## Config (Env)
-- `ROOM_TTL_SEC` (default 1800)
-- `ICE_TTL_SEC` (default 900)
-- `ALLOWED_ORIGINS` (CSV)
-- `TURNSTILE_SECRET` (optional)
-- `MAX_ROOM_WRITES_PER_5M` (e.g., 200)
-
+- `ROOM_TTL_SEC` default **60**
+- `ICE_TTL_SEC` default **180**
+- `ALLOWED_ORIGINS`
+- `MAX_ROOM_WRITES_PER_5M` default **200**
+- (Optional) `TURNSTILE_SECRET`
 ---
 
 ## Observability
@@ -163,21 +211,22 @@ A minimal, secure signaling backend for 2-player WebRTC rooms. Stores SDP offers
 
 ---
 
-## Dev & Test Notes
-- **Local**: `wrangler dev` with KV bindings.
-- **Happy path e2e**: Create → Offer → Poll from guest → Answer → Exchange ICE → DataChannel open → Close.
-- **Same-machine test**: two tabs; should connect via host candidates (no TURN).
+## Dev & Test
+- Local dev: `wrangler dev` with KV binding.
+- Happy path: Create → Guest redeem → Offer/Answer → ICE exchange → DataChannel open → Close.
+- Same‑machine test: two tabs/windows; expect host candidates; STUN/TURN not required.
 
 ---
 
-## Non-Goals
-- No matchmaking lists, presence, or user accounts.
-- No TURN/STUN provisioning; clients supply ICE servers.
-- No game data forwarding.
+## Non‑Goals
+- No public matchmaking/presence.
+- No TURN/STUN provisioning (clients supply ICE).
+- No game data relaying.
 
 ---
 
-## Minimal Client Contract (reference)
-- All requests/returns **JSON**; UTF-8; `Content-Type: application/json`.
-- Include `X-Write-Token` for **POST** to room resources.
-- Poll `GET /rooms/:code` and `GET /rooms/:code/candidates` until connected; stop after DataChannel `open`.
+## Minimal Client Contract (Reference)
+- All calls JSON; `Content-Type: application/json`.
+- Mutations and sensitive operations require `X-Access-Token` (role‑scoped).
+- Guest must redeem `joinCode` before posting `/answer` or `/candidate`.
+- Stop polling Registry after DataChannel `open`.
