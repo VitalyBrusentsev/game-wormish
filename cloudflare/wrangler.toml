@@ -1,0 +1,6 @@
+name = "wormish-current-time"
+main = "src/index.ts"
+compatibility_date = "2024-05-20"
+
+[vars]
+# Define worker-specific variables here when needed.
