@@ -190,15 +190,6 @@ Key: `room:<code>` → JSON
 
 ---
 
-## App‑Level Handshake (HMAC)
-After DataChannel opens, each side can send:
-```json
-{ "type": "hello", "proof": "HMAC_SHA256(<token>, <nonce>)", "nonce": "<random>" }
-```
-Close on failure or timeout. Prevents non‑Registry peers from completing the app protocol.
-
----
-
 ## Config (Env)
 - `ROOM_TTL_SEC` default **60**
 - `ICE_TTL_SEC` default **180**
