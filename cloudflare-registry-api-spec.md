@@ -23,10 +23,10 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 
 ### Room record
 Key: `room:<code>` → JSON
-```json
+```javascript
 {
   "code": "ABCD12",
-  "joinCode": "123-456",                  // exchanged out of band
+  "joinCode": "123456",                  // exchanged out of band
   "hostName": "Alice1996",                // provided by the host UI upon creation
   "guestName": "Bob1993",                 // optional, provided by the guest UI upon joining
   "ownerToken": "<opaque random>",        // access cap for host
@@ -47,15 +47,16 @@ Key: `room:<code>` → JSON
 ### TTL defaults
 - Room key: 
   - Open: **30-60 seconds** (configurable),
-  - Joined: **2-5 minutes**
-  - Paired: **24 hours**
+  - Joined: **3 minutes**
+  - Paired: **5 minutes**
   - Closed: TTL is set to expire ASAP.
-- ICE buckets: **3 minutes**.
+- ICE buckets: **10 minutes**.
 
 
 ## Security & Access
 - **Room codes**: 6–8 chars base36. Not enumerable; no "list rooms" API. Knowing a room code only gives public information about an open room, you need to know the join code at the right time window for the rest of the exchange.
-- **Access tokens**: Opaque/random, **room‑scoped**, **short‑lived** (≤ room TTL). Required for all writes via header `X-Access-Token`.
+- Join Codes: 6 digits. Immediately invalidated (erased) upon successful join.
+- **Access tokens**: crypto random, at least 128 bits entropy, **room‑scoped**, **short‑lived** (≤ room TTL). Required for all writes (and sensitive reads) via header `X-Access-Token`.
 - **CORS**: lock to `ALLOWED_ORIGINS`.
 - **Strict validation & caps**:
   - SDP size ≤ **20 KB**; candidate size ≤ **1 KB**; ≤ **200** candidates/peer.
@@ -69,12 +70,12 @@ Key: `room:<code>` → JSON
 
 ## User Flow (Host + Guest)
 
-1. **Host creates room**  
+1. **Host creates room**
    `POST /rooms` with body `{ "name": "Alice1996" }` → returns:
    ```json
    {
      "code": "ABCD12",
-     "joinCode": "123-456",
+     "joinCode": "123456",
      "ownerToken": "<host capability>",
      "expiresAt": 1740001799999
    }
@@ -85,7 +86,7 @@ Key: `room:<code>` → JSON
    `GET /rooms/:code/public` -> 200 would return only a currently open room, otherwise 404
 
 3. **Guest sees the expected hostName (e.g., "Alice1996"), enters and redeems joinCode** 
-   `POST /rooms/:code/join` with body `{ "joinCode": "ABCD12", "name": "Bob1997" }` → returns:
+   `POST /rooms/:code/join` with body `{ "joinCode": "123456", "name": "Bob1997" }` → returns:
    ```json
    { "guestToken": "<guest capability>", "expiresAt": 1740001799999 }
    ```
@@ -94,17 +95,17 @@ Key: `room:<code>` → JSON
    Both parties poll the room status by using the polling endpoint:
    `GET /rooms/:code` (`X-Access-Token: ownerToken|guestToken`)
 
-4. **Offer/Answer**  
+4. **Offer/Answer**
    - Host posts offer: `POST /rooms/:code/offer` (`X-Access-Token: ownerToken`)
    - Guest posts answer: `POST /rooms/:code/answer` (`X-Access-Token: guestToken`)
    - Server sets `status:"paired"` after valid answer.
 
-5. **ICE exchange (both sides)**  
-   Each side posts candidates with their respective token:  
-   `POST /rooms/:code/candidate` (`X-Access-Token: ownerToken|guestToken`) → appends to `ice:<code>:host|guest`.
-   Reader drains via `GET /rooms/:code/candidates?peer=host|guest` with `X-Access-Token` mandatory.
+5. **ICE exchange (both sides)**
+   Each side posts candidates with their respective token:
+   `POST /rooms/:code/candidate` (`X-Access-Token: ownerToken|guestToken`) → appends to `ice:<code>:host|guest`. The list is kept deduplicated, so dupes would not be added.
+   Reader drains via `GET /rooms/:code/candidates` with `X-Access-Token` mandatory.
 
-6. **Close (optional)**  
+6. **Close**
    Host can close the room early: `POST /rooms/:code/close` (`X-Access-Token: ownerToken`) → `status:"closed"`, shrink TTL to acceptable destruction ASAP.
 
 ---
@@ -129,7 +130,7 @@ Key: `room:<code>` → JSON
 ### 3) Redeem Join Code → Guest Token
 `POST /rooms/:code/join`
 - **Body**: `{ "joinCode": "...", "name": "" }` -> provides `guestName`
-- **200**
+- **200**: sets status to "joined"; wipes out `joinCode`; issues a `guestToken`
   ```json
   { "guestToken": "...", "expiresAt": 1740001799999 }
   ```
@@ -138,7 +139,7 @@ Key: `room:<code>` → JSON
 ### 4) Put Offer (Host)
 `POST /rooms/:code/offer`
 - **Headers**: `X-Access-Token: ownerToken`
-- **Body**: `{ "sdp": "<base64 or raw SDP string>", "type": "offer" }`
+- **Body**: `{ "sdp": "<base64 SDP string>", "type": "offer" }`
 - **Responses**
   - `204` no content
   - `403` bad/missing token
@@ -146,20 +147,20 @@ Key: `room:<code>` → JSON
   - `409` if offer already set and room not reset
 - **Effect**: Merge `offer`; refresh TTL.
 
-### 4) Put Answer (Guest)
+### 5) Put Answer (Guest)
 `POST /rooms/:code/answer`
 - **Headers**: `X-Access-Token: guestToken`
 - **Body**: `{ "type":"answer", "sdp":"..." }`
 - **204**; sets `status:"paired"`; errors as above.
 
-### 5) Append ICE Candidate (Both)
+### 6) Append ICE Candidate (Both)
 `POST /rooms/:code/candidate`
 - **Headers**: `X-Access-Token: ownerToken|guestToken`
-- **Body**: `{ "candidate":"...", "sdpMid":"...", "sdpMLineIndex":0, "peer":"host|guest" }`
-  - `peer` optional; server can infer from token claims/role.
+- **Body**: `{ "candidate":"...", "sdpMid":"...", "sdpMLineIndex":0 }`
+  server will infer whether this is a host or a guest from token claims/role.
 - **204**; errors: `403/404/413`.
 
-### 6) Fetch Room Snapshot (Poll)
+### 7) Fetch Room Snapshot (Poll)
 `GET /rooms/:code`
 - **Headers**: `X-Access-Token: ownerToken|guestToken`
 - **200**
@@ -168,12 +169,13 @@ Key: `room:<code>` → JSON
   ```
 - **404** if expired/missing/closed.
 
-### 7) Drain ICE (Batch Read)
-`GET /rooms/:code/candidates?peer=host|guest&after=<cursor>`
+### 8) Drain ICE (Batch Read)
+`GET /rooms/:code/candidates`
 - **Headers**: `X-Access-Token: ownerToken|guestToken`
 - **200** `{ "items":[...], "next": "<cursor|null>" }`
+  server will infer whether this is a host or a guest from token claims/role, and return the current candidate list.
 
-### 8) Close Room (Optional)
+### 9) Close Room (Optional)
 `POST /rooms/:code/close`
 - **Headers**: `X-Access-Token: ownerToken`
 - **204**; marks closed and shortens TTL.
@@ -181,14 +183,14 @@ Key: `room:<code>` → JSON
 ---
 
 ## Validation & Limits (Server‑Side)
-- **SDP**: presence/length/type fields; length ≤ 20 KB.
+- **SDP**: presence/length/type fields; length ≤ 20 KB. Apply sanitization (e.g., stripping invalid lines in SDP that could exploit parsers)
 - **Candidates**: required fields; length ≤ 1 KB; **≤200** per peer; body ≤ 64 KB total.
 - **Room state constraints**: only one answer; error if already paired and another guest tries to join.
 - **Join code**: must match, single use.
 
 ---
 
-## Optional App‑Level Handshake (HMAC)
+## App‑Level Handshake (HMAC)
 After DataChannel opens, each side can send:
 ```json
 { "type": "hello", "proof": "HMAC_SHA256(<token>, <nonce>)", "nonce": "<random>" }
