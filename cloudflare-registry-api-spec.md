@@ -3,223 +3,284 @@
 ## Goal
 A minimal, secure signaling backend for 2‑player WebRTC rooms. Stores SDP offers/answers and ICE candidates with short TTLs; never carries game data.
 
-This proposal relies on a **human‑friendly, short‑lived room & join codes**. The host creates a room (with very short TTL, about 30-60 seconds, unless it's joined) with unique room code, which generates a unique join code. The host shares the room code and the join code out‑of‑band (chat/voice). The guest redeems the join code to obtain a scoped write capability, and both peers exchange their ICE candidates to establish the WebRTC connection for actual network gameplay data exchange.
+This proposal relies on a **human‑friendly, short‑lived room & join codes**. The host creates a room (with very short TTL, about 30-60 seconds, unless it's joined) with unique room code, which generates a unique join code. The host shares the room code and the join code out‑of‑band (chat/voice). The guest redeems the join code to obtain an access / exchange capability, and both peers exchange their ICE candidates to establish the WebRTC connection for actual network gameplay data exchange.
 
 ## Platform & Bindings
 - **Cloudflare Worker** (HTTP JSON API).
 - **KV Namespace**: `REGISTRY_KV`
-  - Keys auto-expire via **per-key TTL**.
-  - **Cloudflare WAF/rate limiting**: blanket rate limits on sensitive endpoints, and additional IP address based rate limits, to prevent abuse / DoS.
-- Optional:
-  - **Turnstile** (captcha) on room creation, or requesting a trusted identity JWT (Google?)
-  - **Durable Object** (optional) for strict room serialization.
+- **Cloudflare WAF/Rate Limiting**: blanket + per‑IP on sensitive endpoints.
+- Optional: **Turnstile** (captcha) or identity JWT on room creation.
 
 
-## Threat Model Summary
-- **Registry abuse**: mitigated via unguessable room codes, short TTLs, strict payload caps, scoped access capabilities, and rate limits.
-- **Rando guessing**: short‑lived join code + rate limits keep risk low.
+## Threat Model (Summary)
+
+- **Guessing & abuse:** Mitigated via unguessable room codes, short‑lived join codes and tokens, strict payload caps, per‑state TTLs, and rate limits.
 
 ## Data Model (KV)
 
-### Room record
-Key: `room:<code>` → JSON
-```javascript
+- `room:<code>` → Room JSON (below)
+- `ice:<code>:host` → JSON array of RTCIceCandidateInit (bounded, deduped)
+- `ice:<code>:guest` → JSON array of RTCIceCandidateInit (bounded, deduped)
+
+**Room JSON**
+```json
 {
-  "code": "ABCD12",
-  "joinCode": "123456",                  // exchanged out of band
-  "hostName": "Alice1996",                // provided by the host UI upon creation
-  "guestName": "Bob1993",                 // optional, provided by the guest UI upon joining
-  "ownerToken": "<opaque random>",        // access cap for host
-  "guestToken": "<opaque random>",        // access cap for guest
-  "offer": { "type": "offer", "sdp": "..." },    // optional, updated by host for SDP exchange
-  "answer": { "type": "answer", "sdp": "..." },  // optional, updated by guest for SDP exchange
-  "createdAt": 1739999999999,
-  "updatedAt": 1739999999999,
-  "expiresAt": 1740001799999,
-  "status": "open|joined|paired|closed"
+"code": "ABCD12",
+"hostUserName": "Alice1996",
+"guestUserName": "Bob1997",                   // optional, set on join
+"joinCode": "123456",                         // deleted on successful join
+"ownerToken": "<opaque random>",              // host capability (room-scoped)
+"guestToken": "<opaque random>",              // guest capability (room-scoped; minted on join)
+"offer":{ "type": "offer","sdp": "..." },     // UTF‑8 SDP (raw)
+"answer": { "type": "answer", "sdp": "..." }, // UTF‑8 SDP (raw)
+"status": "open|joined|paired|closed",
+"createdAt": 1739999999999,
+"updatedAt": 1739999999999,
+"expiresAt": 1740001799999
 }
 ```
 
-### ICE buckets
-  - Key: `ice:<code>:host` → JSON array of RTCIceCandidateInit
-  - Key: `ice:<code>:guest` → same
+## TTLs (Per‑State, Aligned)
 
-### TTL defaults
-- Room key: 
-  - Open: **30-60 seconds** (configurable),
-  - Joined: **3 minutes**
-  - Paired: **5 minutes**
-  - Closed: TTL is set to expire ASAP.
-- ICE buckets: **10 minutes**.
+- `ROOM_TTL_OPEN` = **60s**
+- `ROOM_TTL_JOINED` = **180s**
+- `ROOM_TTL_PAIRED` = **300s**
+- `ROOM_TTL_CLOSED` = **15s** (expire ASAP)
+- `ICE_TTL` = **600s** (10 minutes) for both `ice:<code>:(host|guest)`
+
+**Rules**
+- Valid mutations “touch” the room TTL for the **current state**.
+- State transitions (`open→joined→paired→closed`) set the **state‑specific** TTL.
+- All timestamps are **server‑derived** and advisory for clients (display / retry cadence only).
 
 
 ## Security & Access
-- **Room codes**: 6–8 chars base36. Not enumerable; no "list rooms" API. Knowing a room code only gives public information about an open room, you need to know the join code at the right time window for the rest of the exchange.
-- Join Codes: 6 digits. Immediately invalidated (erased) upon successful join.
-- **Access tokens**: crypto random, at least 128 bits entropy, **room‑scoped**, **short‑lived** (≤ room TTL). Required for all writes (and sensitive reads) via header `X-Access-Token`.
-- **CORS**: lock to `ALLOWED_ORIGINS`.
-- **Strict validation & caps**:
-  - SDP size ≤ **20 KB**; candidate size ≤ **1 KB**; ≤ **200** candidates/peer.
-  - JSON schema check for known fields.
-- **Rate limits**:
-  - Create: **≤5/min/IP**.
-  - Per-room mutations: **≤200/5 min** (both roles combined).
-  - Join attempts: **≤10/min/IP** and **≤10/min/room**.
-- **TTL touch**: Mutations may extend room TTL; Changing room states applies different types of TTL.
-- **Observability**: counters for creates/joins/offers/answers/ice_appends/closes and 4xx/5xx/429.
+
+- **Room codes**: base36, 6–8 chars, no “list rooms” API. 200/404 behavior avoids oracle leakage.
+- **Join codes**: 6 digits, **single‑use**, deleted on successful join.
+- **Access tokens**: opaque, ≥128‑bit entropy, **room‑scoped**, **short‑lived** (no longer than room TTL).
+- **Header**: all sensitive reads/writes require `X-Access-Token`.
+- **CORS**: locked to `ALLOWED_ORIGINS`. Later CSRF hardening via custom header requirement (see below).
+- **No logging of secrets or SDP/candidate bodies**; log sizes/hashes only.
+
+## Validation & Limits (Server‑Side)
+
+- **SDP**: UTF‑8 text, presence/type, length ≤ **20 KB**.
+- **ICE candidate**: `{ candidate, sdpMid?, sdpMLineIndex? }`, length ≤ **1 KB**.
+- **Candidate cap**: ≤ **40** per peer
+- **Request body**: ≤ **64 KB** total per request.
+- **Dedupe key**: `(candidate, sdpMid, sdpMLineIndex)`.
+- **State constraints**: only one `answer`; after `paired`, new `offer/answer` → `409` (candidates still accepted until expiry).
+
+## Rate Limits (Initial)
+
+- **Create**: ≤ **5 / min / IP** (token bucket).
+- **Join attempts**: ≤ **10 / min / IP** and ≤ **10 / min / room**.
+- **Per‑room mutations** (offer/answer/candidate): ≤ **200 / 5 min** (combined roles).
+- Friendly `429` JSON with `retryAfterSec` for UI backoff.
+
 
 ## User Flow (Host + Guest)
 
-1. **Host creates room**
-   `POST /rooms` with body `{ "name": "Alice1996" }` → returns:
-   ```json
-   {
-     "code": "ABCD12",
-     "joinCode": "123456",
-     "ownerToken": "<host capability>",
-     "expiresAt": 1740001799999
-   }
-   ```
-   Host shares **code** and **joinCode** with friend out‑of‑band.
+1. **Create Room**
+ - `POST /rooms` `{ "name": "Alice1996" }` → `201`
+ ```json
+ { "code": "ABCD12", "joinCode": "123456", "ownerToken": "<...>", "expiresAt": 1740001799999 }
+ ```
 
-2. **Guest searches for a room by code**
-   `GET /rooms/:code/public` -> 200 would return only a currently open room, otherwise 404
+2. **Public lookup (guest)**
+ - `GET /rooms/:code/public` → `200` if **open**, otherwise `404`
+ ```json
+ { "status": "open", "expiresAt": 1740001799999, "hostUserName": "Alice1996" }
+ ```
 
-3. **Guest sees the expected hostName (e.g., "Alice1996"), enters and redeems joinCode** 
-   `POST /rooms/:code/join` with body `{ "joinCode": "123456", "name": "Bob1997" }` → returns:
-   ```json
-   { "guestToken": "<guest capability>", "expiresAt": 1740001799999 }
-   ```
-   Server marks room as "joined" (or rejects on reuse/expiry).
-
-   Both parties poll the room status by using the polling endpoint:
-   `GET /rooms/:code` (`X-Access-Token: ownerToken|guestToken`)
+3. **Guest sees the expected hostUserName (e.g., "Alice1996"), enters and redeems joinCode** 
+ - `POST /rooms/:code/join` `{ "joinCode": "123456", "name": "Bob1997" }` → `200`
+ ```json
+ { "guestToken": "<...>", "expiresAt": 1740001799999 }
+ ```
 
 4. **Offer/Answer**
-   - Host posts offer: `POST /rooms/:code/offer` (`X-Access-Token: ownerToken`)
-   - Guest posts answer: `POST /rooms/:code/answer` (`X-Access-Token: guestToken`)
-   - Server sets `status:"paired"` after valid answer.
+ - Host `POST /rooms/:code/offer` (204)
+ - Guest `POST /rooms/:code/answer` (204; sets `status:"paired"`)
 
-5. **ICE exchange (both sides)**
-   Each side posts candidates with their respective token:
-   `POST /rooms/:code/candidate` (`X-Access-Token: ownerToken|guestToken`) → appends to `ice:<code>:host|guest`. The list is kept deduplicated, so dupes would not be added.
-   Reader drains via `GET /rooms/:code/candidates` with `X-Access-Token` mandatory.
+5. **ICE exchange**
+ - Both sides `POST /rooms/:code/candidate` (204; deduped; bounded list)
+ - Both sides `GET /rooms/:code/candidates` (see API)
 
-6. **Close**
-   Host can close the room early: `POST /rooms/:code/close` (`X-Access-Token: ownerToken`) → `status:"closed"`, shrink TTL to acceptable destruction ASAP.
-
----
+6. **Close (optional)**
+ - Host `POST /rooms/:code/close` (204; sets `status:"closed"`, short TTL)
 
 ## REST API
 
+> **Notes:**
+> - All responses are JSON unless `204`.
+> - All server times are epoch ms.
+> - Optional “escape hatches” are accepted now but may be ignored by MVP and will be honored in future backend improvements.
+> - **Do not** expose storage backend in errors or payloads.
+
 ### 1) Create Room
 `POST /rooms`
-- **Headers**: optional Turnstile / JWT.
-- **Body**: `{ "name": "Alice1996" }` -> provides `hostName`
-- **201**
+- **Headers**: (optional) Turnstile/JWT for abuse control
+- **Body**: `{ "name": "<hostUserName>" }`
+- **201 Created**
   ```json
-  { "code","ownerToken","joinCode","expiresAt" }
+  { "code": "ABCD12", "ownerToken": "<...>", "joinCode": "123456", "expiresAt": 1740001799999 }
   ```
-- Errors: `429`, `400/401` (Turnstile / JWT).
+- **Errors**: `429`, `400/401` (Turnstile/JWT).
 
-### 2) Get Public Room information by code
-`GET /rooms/:code/public` 
-- **200** { "status":"open", "expiresAt":..., "hostName": "" }
-- **404** - in case the room doesn't exist, or not in an open state
+### 2) Public Room Info
+`GET /rooms/:code/public`
+- **200 OK** *(only when status=`open`)*
+  ```json
+  { "status": "open", "expiresAt": 1740001799999, "hostUserName": "Alice1996" }
+  ```
+- **404 Not Found** *(room missing/expired/not open)*
 
 ### 3) Redeem Join Code → Guest Token
 `POST /rooms/:code/join`
-- **Body**: `{ "joinCode": "...", "name": "" }` -> provides `guestName`
-- **200**: sets status to "joined"; wipes out `joinCode`; issues a `guestToken`
+- **Body**: `{ "joinCode": "123456", "name": "Bob1997" }`
+- **200 OK**
   ```json
-  { "guestToken": "...", "expiresAt": 1740001799999 }
+  { "guestToken": "<...>", "expiresAt": 1740001799999 }
   ```
-- Errors: `404` (room/expired), `409` (already paired or join code consumed), `400` (invalid), `429` (rate limited).
+- **Errors**: 
+  - `404` (missing/expired), 
+  - `409` (already paired / code consumed), 
+  - `400` (bad code), 
+  - `429` (rate limited).
 
 ### 4) Put Offer (Host)
 `POST /rooms/:code/offer`
-- **Headers**: `X-Access-Token: ownerToken`
-- **Body**: `{ "sdp": "<base64 SDP string>", "type": "offer" }`
-- **Responses**
-  - `204` no content
-  - `403` bad/missing token
-  - `404` room not found
-  - `409` if offer already set and room not reset
-- **Effect**: Merge `offer`; refresh TTL.
+- **Headers**: `X-Access-Token: <ownerToken>`
+- **Body**: `{ "type": "offer", "sdp": "<raw UTF-8 SDP>" }`
+- **204 No Content**
+- **Errors**: 
+  - `403` (bad/missing token), 
+  - `404` (room missing/expired), 
+  - `409` (already paired or conflicting state).
 
 ### 5) Put Answer (Guest)
 `POST /rooms/:code/answer`
-- **Headers**: `X-Access-Token: guestToken`
-- **Body**: `{ "type":"answer", "sdp":"..." }`
-- **204**; sets `status:"paired"`; errors as above.
+- **Headers**: `X-Access-Token: <guestToken>`
+- **Body**: `{ "type": "answer", "sdp": "<raw UTF-8 SDP>" }`
+- **204 No Content** *(also sets `status:"paired"`)*
+- **Errors**: as above; plus `409` if no prior offer.
 
 ### 6) Append ICE Candidate (Both)
 `POST /rooms/:code/candidate`
-- **Headers**: `X-Access-Token: ownerToken|guestToken`
-- **Body**: `{ "candidate":"...", "sdpMid":"...", "sdpMLineIndex":0 }`
-  server will infer whether this is a host or a guest from token claims/role.
-- **204**; errors: `403/404/413`.
+**Headers**:
+- `X-Access-Token: <ownerToken|guestToken>` *(required)*
+- `Idempotency-Key: <uuid>` *(optional; MVP may ignore)*
+- **Body**:
+  ```json
+  { "candidate": "...", "sdpMid": "0", "sdpMLineIndex": 0 }
+  ```
+- **204 No Content**
+- **Errors**: `403`, `404`, `413` (body too large), `400` (bad fields).
 
 ### 7) Fetch Room Snapshot (Poll)
 `GET /rooms/:code`
-- **Headers**: `X-Access-Token: ownerToken|guestToken`
-- **200**
+- **Headers**: `X-Access-Token: <ownerToken|guestToken>`
+- **Query (optional)**:
+  - `wait=<seconds>` *(≤25; MVP may ignore and return immediately)*
+  - `sinceVersion=<n>` *(MVP may ignore)*
+- **200 OK**
   ```json
-  { "offer": {...} | null, "answer": {...} | null, "status": "open|joined|paired", "expiresAt": 1740001799999, "updatedAt": 1739999999999 }
+  {
+  "status": "open|joined|paired|closed",
+  "offer":{ "type": "offer","sdp": "..." } | null,
+  "answer": { "type": "answer", "sdp": "..." } | null,
+  "updatedAt": 1739999999999,
+  "expiresAt": 1740001799999
+  }
   ```
-- **404** if expired/missing/closed.
+- **Headers (optional, future)**: `ETag: "<version-hash>"`
+- **304 Not Modified** *(only when `If-None-Match` honored by future backend)*
+- **404 Not Found** *(expired/missing/closed and pruned)*
 
-### 8) Drain ICE (Batch Read)
+### 8) Drain ICE Candidates (Full‑Set in MVP)
 `GET /rooms/:code/candidates`
-- **Headers**: `X-Access-Token: ownerToken|guestToken`
-- **200** `{ "items":[...], "next": "<cursor|null>" }`
-  server will infer whether this is a host or a guest from token claims/role, and return the current candidate list.
+- **Headers**: `X-Access-Token: <ownerToken|guestToken>`
+- **Query (optional)**: `since=<seq>` *(MVP ignores and returns full set)*
+- **200 OK**
+  ```json
+  {
+  "items": [ { "candidate": "...", "sdpMid": "0", "sdpMLineIndex": 0 } , ... ],
+  "mode": "full",// MVP: always "full"
+  "lastSeq": 0 // MVP: 0 or omitted (reserved for future delta mode)
+  }
+  ```
+- **Semantics (MVP):** returns the **current complete set** of the *other side’s* candidates, **oldest→newest**.
+- **Client guidance:** keep a local set keyed by `(candidate, sdpMid, sdpMLineIndex)`; apply set‑difference; tolerate duplicates.
+
+**Future compatibility:** when `since` is provided, backend may return only deltas with `"mode":"delta"` and real `lastSeq`—without breaking old clients.
 
 ### 9) Close Room (Optional)
 `POST /rooms/:code/close`
-- **Headers**: `X-Access-Token: ownerToken`
-- **204**; marks closed and shortens TTL.
+- **Headers**: `X-Access-Token: <ownerToken>`
+- **204 No Content** *(sets `status:"closed"`, shrinks TTL to `ROOM_TTL_CLOSED`)*
+- **Errors**: `403`, `404`.
 
----
+## Error Schema (Stable Envelope)
 
-## Validation & Limits (Server‑Side)
-- **SDP**: presence/length/type fields; length ≤ 20 KB. Apply sanitization (e.g., stripping invalid lines in SDP that could exploit parsers)
-- **Candidates**: required fields; length ≤ 1 KB; **≤200** per peer; body ≤ 64 KB total.
-- **Room state constraints**: only one answer; error if already paired and another guest tries to join.
-- **Join code**: must match, single use.
+Errors use a compact, branchable structure:
 
----
+```json
+{ "error": { "code": "already_paired", "message": "Room already paired", "retryable": false } }
+```
 
-## Config (Env)
-- `ROOM_TTL_SEC` default **60**
-- `ICE_TTL_SEC` default **180**
-- `ALLOWED_ORIGINS`
-- `MAX_ROOM_WRITES_PER_5M` default **200**
-- (Optional) `TURNSTILE_SECRET`
----
+Common `code` values: `bad_join_code`, `not_open`, `already_paired`, `no_offer`, `rate_limited`, `forbidden`, `not_found`, `body_too_large`, `bad_candidate`, `bad_sdp`.
+
+## CORS & CSRF
+
+- Allow only `ALLOWED_ORIGINS`.
+- Require `X-Access-Token`
+- Future improvement: Require a non-simple custom header on mutations, e.g. `X-Registry-Intent: mutate` (forces preflight).
+- Never echo sensitive headers in error bodies.
+- `Access-Control-Max-Age` may be set to reduce preflight latency.
 
 ## Observability
-- **Logs**: `event`, `code`, `ipHash`, `status`, `bytes`, `latencyMs`.
-- **Metrics** (Durable Objects not required): counters for creates, joins, offers, answers, ice_appends, fetches, closes, rejects, rate_limits.
 
----
+- **Logs**: `event`, `code`, `ipHash`, `status`, `bytes`, `latencyMs`. No SDP/candidate/token contents.
+- **Metrics**: counters for creates, joins, offers, answers, ice_appends, fetches, closes, rejects, rate_limits. Optional histograms (payload sizes, time-to-join, time-to-pair).
+
+## Config (Env)
+
+- `ROOM_TTL_OPEN=60`
+- `ROOM_TTL_JOINED=180`
+- `ROOM_TTL_PAIRED=300`
+- `ROOM_TTL_CLOSED=15`
+- `ICE_TTL=600`
+- `ALLOWED_ORIGINS`
+- `MAX_ROOM_WRITES_PER_5M=200`
+- (Optional) `TURNSTILE_SECRET`
 
 ## Dev & Test
+
 - Local dev: `wrangler dev` with KV binding.
-- Happy path: Create → Guest redeem → Offer/Answer → ICE exchange → DataChannel open → Close.
+- Happy path: Create → Join → Offer/Answer → ICE exchange → DataChannel open → Close.
 - Same‑machine test: two tabs/windows; expect host candidates; STUN/TURN not required.
 
----
-
 ## Non‑Goals
+
 - No public matchmaking/presence.
 - No TURN/STUN provisioning (clients supply ICE).
 - No game data relaying.
-
----
+- No server‑mediated app HMAC handshake (not effective against abusive but legitimate peers).
 
 ## Minimal Client Contract (Reference)
-- All calls JSON; `Content-Type: application/json`.
-- Mutations and sensitive operations require `X-Access-Token` (role‑scoped).
+
+- JSON everywhere; `Content-Type: application/json`.
+- Mutations/sensitive reads require `X-Access-Token`
 - Guest must redeem `joinCode` before posting `/answer` or `/candidate`.
-- Stop polling Registry after DataChannel `open`.
+- Stop polling Registry after DataChannel `open` (keep a Kick UI to close the peer if needed).
+- Implement input validation, backpressure (`bufferedAmount` guard), and per‑connection rate/size caps client‑side.
+
+## Future Backwards‑Compatible Evolution (improving concurrency handling and data consistency)
+
+- Introduce Durable Objects for exclusive access to room data
+- Start honoring `If-None-Match`/`ETag` and `?wait/sinceVersion` on `/rooms/:code` (long‑poll).
+- Start honoring `Idempotency-Key` on candidate appends.
+- Add `"mode":"delta"` + `lastSeq` when `?since` is provided on `/candidates`.
+- Keep endpoints, status codes, and field names unchanged. Old clients continue to work unmodified.
