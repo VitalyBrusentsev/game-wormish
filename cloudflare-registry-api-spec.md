@@ -46,7 +46,7 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 - `ROOM_TTL_JOINED` = **180s**
 - `ROOM_TTL_PAIRED` = **300s**
 - `ROOM_TTL_CLOSED` = **15s** (expire ASAP)
-- `ICE_TTL` = **600s** (10 minutes) for both `ice:<code>:(host|guest)`
+- `ICE_TTL` = **300s** (5 minutes) for both `ice:<code>:(host|guest)`
 
 **Rules**
 - Valid mutations “touch” the room TTL for the **current state**.
@@ -56,26 +56,29 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 
 ## Security & Access
 
-- **Room codes**: base36, 6–8 chars, no “list rooms” API. 200/404 behavior avoids oracle leakage.
+- **Room codes**: base36, 8 chars, no “list rooms” API. 200/404 behavior avoids oracle leakage, IP rate limit prevents enumeration attempts.
 - **Join codes**: 6 digits, **single‑use**, deleted on successful join.
-- **Access tokens**: opaque, ≥128‑bit entropy, **room‑scoped**, **short‑lived** (no longer than room TTL).
+- **Access tokens**: opaque, 256‑bit crypto random, **room‑scoped**, **short‑lived** (no longer than room TTL), base64url-encoded, ~43chars
 - **Header**: all sensitive reads/writes require `X-Access-Token`.
-- **CORS**: locked to `ALLOWED_ORIGINS`. Later CSRF hardening via custom header requirement (see below).
+- **CORS**: locked to `ALLOWED_ORIGINS`. All mutation operations require CSRF protection via custom header requirement (see below).
 - **No logging of secrets or SDP/candidate bodies**; log sizes/hashes only.
 
 ## Validation & Limits (Server‑Side)
 
 - **SDP**: UTF‑8 text, presence/type, length ≤ **20 KB**.
+  - Check for required lines: `v=`, `o=`, `s=`, `t=`, `m=`
+- **Username**: 1-32 chars, `[a-zA-Z0-9_-]`, no uniqueness enforcement
 - **ICE candidate**: `{ candidate, sdpMid?, sdpMLineIndex? }`, length ≤ **1 KB**.
 - **Candidate cap**: ≤ **40** per peer
 - **Request body**: ≤ **64 KB** total per request.
-- **Dedupe key**: `(candidate, sdpMid, sdpMLineIndex)`.
+- **Dedupe key**: `(candidate, sdpMid ?? "", sdpMLineIndex ?? -1)`.
 - **State constraints**: only one `answer`; after `paired`, new `offer/answer` → `409` (candidates still accepted until expiry).
 
-## Rate Limits (Initial)
-
+## Rate Limits
+- **Public lookup**: **5 / min / IP**
 - **Create**: ≤ **5 / min / IP** (token bucket).
 - **Join attempts**: ≤ **10 / min / IP** and ≤ **10 / min / room**.
+- **Polling state**: **1 / s / room** (with token present!)
 - **Per‑room mutations** (offer/answer/candidate): ≤ **200 / 5 min** (combined roles).
 - Friendly `429` JSON with `retryAfterSec` for UI backoff.
 
@@ -135,7 +138,7 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
   ```json
   { "status": "open", "expiresAt": 1740001799999, "hostUserName": "Alice1996" }
   ```
-- **404 Not Found** *(room missing/expired/not open)*
+- **Errors**: `404` *(room missing/expired/not open)*, `429` (rate limited)
 
 ### 3) Redeem Join Code → Guest Token
 `POST /rooms/:code/join`
@@ -159,6 +162,7 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
   - `403` (bad/missing token), 
   - `404` (room missing/expired), 
   - `409` (already paired or conflicting state).
+  - `429` (rate limited)
 
 ### 5) Put Answer (Guest)
 `POST /rooms/:code/answer`
@@ -177,14 +181,20 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
   { "candidate": "...", "sdpMid": "0", "sdpMLineIndex": 0 }
   ```
 - **204 No Content**
-- **Errors**: `403`, `404`, `413` (body too large), `400` (bad fields).
+- **Errors**: 
+  - `400` (bad fields)
+  - `403` 
+  - `404` 
+  - `409` (more than 40 candidates per peer)
+  - `413` (body too large)
+  - `429` (rate limited)
 
 ### 7) Fetch Room Snapshot (Poll)
 `GET /rooms/:code`
 - **Headers**: `X-Access-Token: <ownerToken|guestToken>`
 - **Query (optional)**:
   - `wait=<seconds>` *(≤25; MVP may ignore and return immediately)*
-  - `sinceVersion=<n>` *(MVP may ignore)*
+  - `since=<n>` *(MVP may ignore)*
 - **200 OK**
   ```json
   {
@@ -211,7 +221,9 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
   "lastSeq": 0 // MVP: 0 or omitted (reserved for future delta mode)
   }
   ```
-- **Semantics (MVP):** returns the **current complete set** of the *other side’s* candidates, **oldest→newest**.
+- **Semantics (MVP):** returns the **current complete set** of the *other side’s* candidates, **oldest→newest**:
+  - `ownerToken` → return `ice:<code>:guest`
+  - `guestToken` → return `ice:<code>:host`
 - **Client guidance:** keep a local set keyed by `(candidate, sdpMid, sdpMLineIndex)`; apply set‑difference; tolerate duplicates.
 
 **Future compatibility:** when `since` is provided, backend may return only deltas with `"mode":"delta"` and real `lastSeq`—without breaking old clients.
@@ -229,14 +241,17 @@ Errors use a compact, branchable structure:
 ```json
 { "error": { "code": "already_paired", "message": "Room already paired", "retryable": false } }
 ```
+```json
+{ "error": { "code": "rate_limited", "message": "Too many attempts", "retryable": true, "retryAfterSec": 12 } }
+```
 
 Common `code` values: `bad_join_code`, `not_open`, `already_paired`, `no_offer`, `rate_limited`, `forbidden`, `not_found`, `body_too_large`, `bad_candidate`, `bad_sdp`.
 
 ## CORS & CSRF
 
 - Allow only `ALLOWED_ORIGINS`.
-- Require `X-Access-Token`
-- Future improvement: Require a non-simple custom header on mutations, e.g. `X-Registry-Intent: mutate` (forces preflight).
+- Require `X-Access-Token` on sensitive operations
+- Require a non-simple custom header on mutations, e.g. `X-Registry-Version: 1` (forces preflight).
 - Never echo sensitive headers in error bodies.
 - `Access-Control-Max-Age` may be set to reduce preflight latency.
 
@@ -251,7 +266,7 @@ Common `code` values: `bad_join_code`, `not_open`, `already_paired`, `no_offer`,
 - `ROOM_TTL_JOINED=180`
 - `ROOM_TTL_PAIRED=300`
 - `ROOM_TTL_CLOSED=15`
-- `ICE_TTL=600`
+- `ICE_TTL=300`
 - `ALLOWED_ORIGINS`
 - `MAX_ROOM_WRITES_PER_5M=200`
 - (Optional) `TURNSTILE_SECRET`
@@ -265,9 +280,8 @@ Common `code` values: `bad_join_code`, `not_open`, `already_paired`, `no_offer`,
 ## Non‑Goals
 
 - No public matchmaking/presence.
-- No TURN/STUN provisioning (clients supply ICE).
+- No TURN/STUN provisioning (clients supply ICE; they can either use public Google STUN servers, or provision their own ).
 - No game data relaying.
-- No server‑mediated app HMAC handshake (not effective against abusive but legitimate peers).
 
 ## Minimal Client Contract (Reference)
 
@@ -280,7 +294,7 @@ Common `code` values: `bad_join_code`, `not_open`, `already_paired`, `no_offer`,
 ## Future Backwards‑Compatible Evolution (improving concurrency handling and data consistency)
 
 - Introduce Durable Objects for exclusive access to room data
-- Start honoring `If-None-Match`/`ETag` and `?wait/sinceVersion` on `/rooms/:code` (long‑poll).
+- Start honoring `If-None-Match`/`ETag` and `?wait/since` on `/rooms/:code` (long‑poll).
 - Start honoring `Idempotency-Key` on candidate appends.
 - Add `"mode":"delta"` + `lastSeq` when `?since` is provided on `/candidates`.
 - Keep endpoints, status codes, and field names unchanged. Old clients continue to work unmodified.
