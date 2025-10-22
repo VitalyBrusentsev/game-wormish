@@ -1,6 +1,6 @@
 # Wormish Cloudflare Workers
 
-This directory contains the infrastructure required to build, test, and deploy Cloudflare Workers that complement the Wormish game. The initial worker ships a simple HTTP endpoint that returns the current server time in ISO-8601 format, demonstrating how to scaffold new handlers with automated tests and deployment.
+This directory contains the infrastructure required to build, test, and deploy Cloudflare Workers that complement the Wormish game. The worker exposes a WebRTC registry API used by clients to create short-lived pairing rooms and exchange SDP offers, answers, and ICE candidates ahead of a peer-to-peer match.
 
 ## Prerequisites
 
@@ -24,7 +24,7 @@ Run a local development worker using Cloudflare's Miniflare-powered emulator:
 npm run dev
 ```
 
-This serves the worker on <http://localhost:8787>. Requests return the current time payload.
+This serves the worker on <http://localhost:8787>. The endpoints match the API described in [`registry-api-spec.md`](./registry-api-spec.md).
 
 ## Testing
 
@@ -49,6 +49,80 @@ npm run build
 ```
 
 This executes `wrangler deploy --dry-run` and ensures the project builds successfully for deployment.
+
+## Testing the Registry API Locally
+
+After starting the worker with `npm run dev`, exercise the primary room lifecycle from another terminal. Replace the placeholder values with the actual response payloads returned by each step.
+
+1. **Create a room (host):**
+
+   ```bash
+   curl -X POST \
+     -H 'content-type: application/json' \
+     -H 'x-registry-version: 1' \
+     -d '{"name":"Alice1996"}' \
+     http://localhost:8787/rooms
+   ```
+
+   The response includes `code`, `joinCode`, `ownerToken`, and `expiresAt`.
+
+2. **Public lookup (guest confirmation):**
+
+   ```bash
+   curl http://localhost:8787/rooms/<code>/public
+   ```
+
+3. **Join the room (guest):**
+
+   ```bash
+   curl -X POST \
+     -H 'content-type: application/json' \
+     -H 'x-registry-version: 1' \
+     -d '{"joinCode":"<joinCode>","name":"Bob1997"}' \
+     http://localhost:8787/rooms/<code>/join
+   ```
+
+   Capture the returned `guestToken` for subsequent calls.
+
+4. **Exchange SDP offer and answer:**
+
+   ```bash
+   curl -X POST \
+     -H 'content-type: application/json' \
+     -H 'x-registry-version: 1' \
+     -H 'x-access-token: <ownerToken>' \
+     -d '{"type":"offer","sdp":"v=0\no=- 0 0 IN IP4 127.0.0.1\ns=-\nt=0 0\nm=audio 9 RTP/AVP 0"}' \
+     http://localhost:8787/rooms/<code>/offer
+
+   curl -X POST \
+     -H 'content-type: application/json' \
+     -H 'x-registry-version: 1' \
+     -H 'x-access-token: <guestToken>' \
+     -d '{"type":"answer","sdp":"v=0\no=- 0 0 IN IP4 127.0.0.1\ns=-\nt=0 0\nm=audio 9 RTP/AVP 0"}' \
+     http://localhost:8787/rooms/<code>/answer
+   ```
+
+5. **Post and drain ICE candidates:**
+
+   ```bash
+   curl -X POST \
+     -H 'content-type: application/json' \
+     -H 'x-registry-version: 1' \
+     -H 'x-access-token: <ownerToken>' \
+     -d '{"candidate":"candidate:1 1 UDP 1 127.0.0.1 3478 typ host"}' \
+     http://localhost:8787/rooms/<code>/candidate
+
+   curl -H 'x-access-token: <guestToken>' http://localhost:8787/rooms/<code>/candidates
+   ```
+
+6. **Close the room (optional host cleanup):**
+
+   ```bash
+   curl -X POST \
+     -H 'x-registry-version: 1' \
+     -H 'x-access-token: <ownerToken>' \
+     http://localhost:8787/rooms/<code>/close
+   ```
 
 ## Deploying
 
