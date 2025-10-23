@@ -40,6 +40,12 @@ For a single-run CI friendly invocation use:
 npm run test:run
 ```
 
+Validate the OpenAPI description before sharing updates:
+
+```bash
+npx @redocly/cli lint openapi.yaml
+```
+
 ## Building
 
 Validate the worker bundle without publishing anything:
