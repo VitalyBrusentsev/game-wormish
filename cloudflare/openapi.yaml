@@ -78,9 +78,9 @@ components:
     RoomCreateRequest:
       type: object
       required:
-        - name
+        - hostUserName
       properties:
-        name:
+        hostUserName:
           type: string
           minLength: 1
           maxLength: 32
@@ -125,12 +125,12 @@ components:
       type: object
       required:
         - joinCode
-        - name
+        - guestUserName
       properties:
         joinCode:
           type: string
           pattern: '^\d{6}$'
-        name:
+        guestUserName:
           type: string
           minLength: 1
           maxLength: 32

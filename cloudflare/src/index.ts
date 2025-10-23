@@ -443,8 +443,8 @@ async function handleCreateRoom(
 ): Promise<Response> {
   ensureMutationHeader(request);
   const rawBody = await readBodyText(request);
-  const body = parseJsonBody<{ name?: unknown }>(rawBody);
-  validateUserName(body.name);
+  const body = parseJsonBody<{ hostUserName?: unknown }>(rawBody);
+  validateUserName(body.hostUserName);
 
   const code = await ensureUniqueRoomCode(env);
   const joinCode = generateJoinCode();
@@ -452,7 +452,7 @@ async function handleCreateRoom(
   const now = Date.now();
   const room: RoomRecord = {
     code,
-    hostUserName: body.name,
+    hostUserName: body.hostUserName,
     joinCode,
     ownerToken,
     status: 'open',
@@ -516,9 +516,9 @@ async function handleJoinRoom(
   }
   ensureMutationHeader(request);
   const rawBody = await readBodyText(request);
-  const body = parseJsonBody<{ joinCode?: unknown; name?: unknown }>(rawBody);
+  const body = parseJsonBody<{ joinCode?: unknown; guestUserName?: unknown }>(rawBody);
   validateJoinCode(body.joinCode);
-  validateUserName(body.name);
+  validateUserName(body.guestUserName);
   const room = await requireRoom(env, roomCode);
   if (room.status !== 'open') {
     throw new RegistryError(409, 'not_open', 'Room is not open for joining', false);
@@ -528,7 +528,7 @@ async function handleJoinRoom(
   }
   const now = Date.now();
   const guestToken = generateToken();
-  room.guestUserName = body.name;
+  room.guestUserName = body.guestUserName;
   room.guestToken = guestToken;
   delete room.joinCode;
   room.status = 'joined';

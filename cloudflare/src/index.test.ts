@@ -66,7 +66,7 @@ describe('registry worker', () => {
           'x-registry-version': '1',
           Origin: origin,
         },
-        body: JSON.stringify({ name: 'Alice1996' }),
+        body: JSON.stringify({ hostUserName: 'Alice1996' }),
       }),
       env,
       createExecutionContext()
@@ -99,7 +99,7 @@ describe('registry worker', () => {
           'x-registry-version': '1',
           Origin: origin,
         },
-        body: JSON.stringify({ joinCode: created.joinCode, name: 'Bob1997' }),
+        body: JSON.stringify({ joinCode: created.joinCode, guestUserName: 'Bob1997' }),
       }),
       env,
       createExecutionContext()
@@ -214,7 +214,7 @@ describe('registry worker', () => {
           'x-registry-version': '1',
           Origin: origin,
         },
-        body: JSON.stringify({ name: 'Alice1996' }),
+        body: JSON.stringify({ hostUserName: 'Alice1996' }),
       }),
       env,
       createExecutionContext()
@@ -229,7 +229,7 @@ describe('registry worker', () => {
           'x-registry-version': '1',
           Origin: origin,
         },
-        body: JSON.stringify({ joinCode: '000000', name: 'Bob1997' }),
+        body: JSON.stringify({ joinCode: '000000', guestUserName: 'Bob1997' }),
       }),
       env,
       createExecutionContext()
