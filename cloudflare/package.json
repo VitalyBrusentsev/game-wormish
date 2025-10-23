@@ -10,7 +10,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit",
-    "deploy": "node ./scripts/deploy.mjs"
+    "deploy": "./scripts/deploy.sh"
   },
   "devDependencies": {
     "typescript": "^5.4.5",

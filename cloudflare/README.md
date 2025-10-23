@@ -175,4 +175,4 @@ The Worker under `cloudflare/` is configured with [`wrangler.toml`](./wrangler.t
 
 ### Keeping production-only values private
 
-Real Cloudflare resource identifiers (such as the production KV namespace `id`) should not be committed. `wrangler.toml` keeps a placeholder (`REGISTRY_KV_ID_PLACEHOLDER`) for the production namespace ID, and the deploy script rewrites it at runtime using the `CLOUDFLARE_KV_ID` environment variable supplied by your shell or CI pipeline.
+Real Cloudflare resource identifiers (such as the production KV namespace `id`) should not be committed. `wrangler.toml` keeps a placeholder (`REGISTRY_KV_ID_PLACEHOLDER`) for the production namespace ID. The deployment command creates a temporary copy of the config with that placeholder replaced by the `CLOUDFLARE_KV_ID` environment variable supplied by your shell or CI pipeline.
