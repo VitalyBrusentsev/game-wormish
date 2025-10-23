@@ -6,7 +6,7 @@ compatibility_date = "2024-05-20"
 binding = "REGISTRY_KV"
 # Miniflare (wrangler dev) uses the preview namespace. Wrangler requires an ID value, but for
 # local development it only names the ephemeral namespace managed by Miniflare.
-preview_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 [env.production]
 [[env.production.kv_namespaces]]
