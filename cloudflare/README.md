@@ -142,7 +142,7 @@ You must provide the following environment variables (locally and in CI) for Wra
 
 - `CLOUDFLARE_API_TOKEN`: an API token with **Workers Scripts** "Edit" permissions and access to the target account.
 - `CLOUDFLARE_ACCOUNT_ID`: the account identifier from your Cloudflare dashboard (found under **Workers & Pages → Overview**).
-- `CLOUDFLARE_KV_ID`: the KV namespace identifier for the production `REGISTRY_KV` binding. This value remains private in CI via repository secrets.
+- `CLOUDFLARE_KV_ID`: the KV namespace identifier for the production `REGISTRY_KV` binding. This value remains private in CI via repository secrets and is injected during the deployment command.
 
 When deployed, the worker URL will be reported by Wrangler in the CLI output. The default route will be `https://wormish-current-time.<your-subdomain>.workers.dev/` unless you configure a custom domain.
 
@@ -175,4 +175,4 @@ The Worker under `cloudflare/` is configured with [`wrangler.toml`](./wrangler.t
 
 ### Keeping production-only values private
 
-Real Cloudflare resource identifiers (such as the production KV namespace `id`) should not be committed. `wrangler.toml` references the production namespace ID via the `CLOUDFLARE_KV_ID` environment variable, allowing local shells and CI pipelines to inject the value securely while keeping the development defaults intact.
+Real Cloudflare resource identifiers (such as the production KV namespace `id`) should not be committed. `wrangler.toml` keeps a placeholder (`REGISTRY_KV_ID_PLACEHOLDER`) for the production namespace ID, and the deploy script rewrites it at runtime using the `CLOUDFLARE_KV_ID` environment variable supplied by your shell or CI pipeline.

@@ -10,7 +10,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit",
-    "deploy": "wrangler deploy --env production"
+    "deploy": "node ./scripts/deploy.mjs"
   },
   "devDependencies": {
     "typescript": "^5.4.5",

@@ -11,9 +11,9 @@ preview_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 [env.production]
 [[env.production.kv_namespaces]]
 binding = "REGISTRY_KV"
-# Wrangler reads the ID from the environment so production deployments can
-# reference secrets instead of committing real identifiers.
-id = "${CLOUDFLARE_KV_ID}"
+# The deploy script replaces this placeholder with the actual production
+# namespace ID supplied at deploy time.
+id = "REGISTRY_KV_ID_PLACEHOLDER"
 
 [vars]
 # Define worker-specific variables here when needed.
