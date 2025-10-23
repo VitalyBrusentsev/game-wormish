@@ -1,0 +1,540 @@
+openapi: 3.0.3
+info:
+  title: Wormish Registry API
+  version: 1.0.0
+  description: |
+    API for creating short-lived WebRTC pairing rooms and exchanging SDP offers, answers,
+    and ICE candidates between Wormish peers. All responses are JSON encoded.
+  license:
+    name: ISC
+    url: https://opensource.org/license/isc-license-txt/
+servers:
+  - url: https://registry.wormish.app
+    description: Production deployment
+  - url: http://127.0.0.1:8787
+    description: Local development via `wrangler dev`
+components:
+  securitySchemes:
+    RegistryVersionHeader:
+      type: apiKey
+      in: header
+      name: X-Registry-Version
+      description: Custom header used to guard mutating requests.
+    AccessTokenHeader:
+      type: apiKey
+      in: header
+      name: X-Access-Token
+      description: Capability token scoped to a single room.
+  parameters:
+    RoomCode:
+      name: code
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Z0-9]{8}$'
+      description: Auto-generated room code.
+    RegistryVersion:
+      name: X-Registry-Version
+      in: header
+      required: true
+      schema:
+        type: string
+        example: '1'
+      description: Custom header that enables preflight protection for state-changing requests.
+    AccessToken:
+      name: X-Access-Token
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 1
+      description: Room-scoped capability token issued on room creation or join.
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+          properties:
+            code:
+              type: string
+              description: Machine readable error code.
+            message:
+              type: string
+              description: Human friendly explanation of the failure.
+            retryable:
+              type: boolean
+            retryAfterSec:
+              type: integer
+              minimum: 0
+              description: Present when the client should retry after the indicated delay.
+      required:
+        - error
+    RoomCreateRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 32
+          pattern: '^[a-zA-Z0-9_-]+$'
+    RoomCreateResponse:
+      type: object
+      required:
+        - code
+        - joinCode
+        - ownerToken
+        - expiresAt
+      properties:
+        code:
+          type: string
+          description: Eight character room code.
+        joinCode:
+          type: string
+          description: Six digit join code for the guest to redeem.
+        ownerToken:
+          type: string
+          description: Token required for host-authenticated operations.
+        expiresAt:
+          type: integer
+          format: int64
+          description: Epoch milliseconds when the room will expire without activity.
+    RoomPublicResponse:
+      type: object
+      required:
+        - status
+        - expiresAt
+        - hostUserName
+      properties:
+        status:
+          type: string
+          enum: [open]
+        expiresAt:
+          type: integer
+          format: int64
+        hostUserName:
+          type: string
+    RoomJoinRequest:
+      type: object
+      required:
+        - joinCode
+        - name
+      properties:
+        joinCode:
+          type: string
+          pattern: '^\d{6}$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 32
+          pattern: '^[a-zA-Z0-9_-]+$'
+    RoomJoinResponse:
+      type: object
+      required:
+        - guestToken
+        - expiresAt
+      properties:
+        guestToken:
+          type: string
+          description: Token required for guest-authenticated operations.
+        expiresAt:
+          type: integer
+          format: int64
+    SessionDescription:
+      type: object
+      required:
+        - type
+        - sdp
+      properties:
+        type:
+          type: string
+          enum: [offer, answer]
+        sdp:
+          type: string
+          description: UTF-8 encoded SDP payload (≤20 KB).
+    Candidate:
+      type: object
+      required:
+        - candidate
+      properties:
+        candidate:
+          type: string
+          description: ICE candidate string (≤1 KB).
+        sdpMid:
+          type: string
+          nullable: true
+        sdpMLineIndex:
+          type: integer
+          nullable: true
+    RoomSnapshot:
+      type: object
+      required:
+        - status
+        - offer
+        - answer
+        - updatedAt
+        - expiresAt
+      properties:
+        status:
+          type: string
+          enum: [open, joined, paired, closed]
+        offer:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/SessionDescription'
+          nullable: true
+        answer:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/SessionDescription'
+          nullable: true
+        updatedAt:
+          type: integer
+          format: int64
+        expiresAt:
+          type: integer
+          format: int64
+    CandidateList:
+      type: object
+      required:
+        - items
+        - mode
+        - lastSeq
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Candidate'
+        mode:
+          type: string
+          enum: [full]
+        lastSeq:
+          type: integer
+          description: Reserved for future delta streaming support.
+paths:
+  /rooms:
+    post:
+      summary: Create a short-lived WebRTC room.
+      operationId: createRoom
+      security:
+        - RegistryVersionHeader: []
+      parameters:
+        - $ref: '#/components/parameters/RegistryVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoomCreateRequest'
+      responses:
+        '201':
+          description: Room created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomCreateResponse'
+        '400':
+          description: Invalid payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Payload too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limited.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /rooms/{code}/public:
+    get:
+      summary: Inspect an open room without authentication.
+      operationId: getRoomPublic
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+      responses:
+        '200':
+          description: Room is open.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomPublicResponse'
+        '404':
+          description: Room not open or not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /rooms/{code}/join:
+    post:
+      summary: Join an open room using the join code.
+      operationId: joinRoom
+      security:
+        - RegistryVersionHeader: []
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+        - $ref: '#/components/parameters/RegistryVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoomJoinRequest'
+      responses:
+        '200':
+          description: Join successful.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomJoinResponse'
+        '400':
+          description: Invalid payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Join code rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Room no longer open.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Payload too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /rooms/{code}/offer:
+    post:
+      summary: Submit the host SDP offer.
+      operationId: setOffer
+      security:
+        - RegistryVersionHeader: []
+          AccessTokenHeader: []
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+        - $ref: '#/components/parameters/RegistryVersion'
+        - $ref: '#/components/parameters/AccessToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionDescription'
+      responses:
+        '204':
+          description: Offer stored.
+        '400':
+          description: Invalid SDP.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Token missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Room already paired or closed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Payload too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /rooms/{code}/answer:
+    post:
+      summary: Submit the guest SDP answer.
+      operationId: setAnswer
+      security:
+        - RegistryVersionHeader: []
+          AccessTokenHeader: []
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+        - $ref: '#/components/parameters/RegistryVersion'
+        - $ref: '#/components/parameters/AccessToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SessionDescription'
+      responses:
+        '204':
+          description: Answer stored.
+        '400':
+          description: Invalid SDP.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Token missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Offer missing or room already paired/closed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Payload too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /rooms/{code}/candidate:
+    post:
+      summary: Append an ICE candidate for the posting peer.
+      operationId: addCandidate
+      security:
+        - RegistryVersionHeader: []
+          AccessTokenHeader: []
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+        - $ref: '#/components/parameters/RegistryVersion'
+        - $ref: '#/components/parameters/AccessToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Candidate'
+      responses:
+        '204':
+          description: Candidate stored (deduplicated when necessary).
+        '400':
+          description: Invalid candidate data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Token missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Room closed or candidate limit reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Payload too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /rooms/{code}:
+    get:
+      summary: Fetch the latest room snapshot.
+      operationId: getRoom
+      security:
+        - AccessTokenHeader: []
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+        - $ref: '#/components/parameters/AccessToken'
+      responses:
+        '200':
+          description: Snapshot returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomSnapshot'
+        '403':
+          description: Token missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Room not found or closed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /rooms/{code}/candidates:
+    get:
+      summary: Retrieve the current set of remote ICE candidates.
+      operationId: getCandidates
+      security:
+        - AccessTokenHeader: []
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+        - $ref: '#/components/parameters/AccessToken'
+      responses:
+        '200':
+          description: Candidate list returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateList'
+        '403':
+          description: Token missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Room not found or closed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /rooms/{code}/close:
+    post:
+      summary: Close a room early.
+      operationId: closeRoom
+      security:
+        - RegistryVersionHeader: []
+          AccessTokenHeader: []
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+        - $ref: '#/components/parameters/RegistryVersion'
+        - $ref: '#/components/parameters/AccessToken'
+      responses:
+        '204':
+          description: Room closed.
+        '403':
+          description: Token missing or invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Room not found or already closed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
