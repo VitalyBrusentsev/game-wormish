@@ -119,7 +119,13 @@ After starting the worker with `npm run dev`, exercise the primary room lifecycl
      http://localhost:8787/rooms/<code>/candidate
 
    curl -H 'x-access-token: <guestToken>' http://localhost:8787/rooms/<code>/candidates
+
+   # The queue is drained after each poll, so subsequent reads return an empty list
+   curl -H 'x-access-token: <guestToken>' http://localhost:8787/rooms/<code>/candidates
    ```
+
+   Each poll returns the remote peer's pending candidates and clears them from storage. Poll frequently enough to avoid missing
+   updates; you can continue posting new candidates indefinitely.
 
 6. **Close the room (optional host cleanup):**
 

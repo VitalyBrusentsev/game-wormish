@@ -1,5 +1,5 @@
 # Cloudflare “Registry” API — Functional Requirements
-> Revision 5.1
+> Revision 5.2
 
 ## Goal
 A minimal, secure signaling backend for 2‑player WebRTC rooms. Stores SDP offers/answers and ICE candidates with short TTLs; never carries game data.
@@ -20,8 +20,8 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 ## Data Model (KV)
 
 - `room:<code>` → Room JSON (below)
-- `ice:<code>:host` → JSON array of RTCIceCandidateInit (bounded, deduped)
-- `ice:<code>:guest` → JSON array of RTCIceCandidateInit (bounded, deduped)
+- `ice:<code>:host` → JSON array of RTCIceCandidateInit (deduped, drained after poll)
+- `ice:<code>:guest` → JSON array of RTCIceCandidateInit (deduped, drained after poll)
 
 **Room JSON**
 ```json
@@ -70,7 +70,7 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
   - Check for required lines: `v=`, `o=`, `s=`, `t=`, `m=`
 - **Username**: 1-32 chars, `[a-zA-Z0-9_-]`, no uniqueness enforcement
 - **ICE candidate**: `{ candidate, sdpMid?, sdpMLineIndex? }`, length ≤ **1 KB**.
-- **Candidate cap**: ≤ **40** per peer
+- **Candidate queue**: deduped, drained after polling; no static per-peer cap
 - **Request body**: ≤ **64 KB** total per request.
 - **Dedupe key**: `(candidate, sdpMid ?? "", sdpMLineIndex ?? -1)`.
 - **State constraints**: only one `answer`; after `paired`, new `offer/answer` → `409` (candidates still accepted until expiry).
@@ -109,8 +109,8 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
  - Guest `POST /rooms/:code/answer` (204; sets `status:"paired"`)
 
 5. **ICE exchange**
- - Both sides `POST /rooms/:code/candidate` (204; deduped; bounded list)
- - Both sides `GET /rooms/:code/candidates` (see API)
+ - Both sides `POST /rooms/:code/candidate` (204; deduped queue)
+ - Both sides `GET /rooms/:code/candidates` (returns and drains pending remote candidates)
 
 6. **Close (optional)**
  - Host `POST /rooms/:code/close` (204; sets `status:"closed"`, short TTL)
@@ -213,21 +213,20 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 ### 8) Drain ICE Candidates (Full‑Set in MVP)
 `GET /rooms/:code/candidates`
 - **Headers**: `X-Access-Token: <ownerToken|guestToken>`
-- **Query (optional)**: `since=<seq>` *(MVP ignores and returns full set)*
 - **200 OK**
   ```json
   {
-  "items": [ { "candidate": "...", "sdpMid": "0", "sdpMLineIndex": 0 } , ... ],
-  "mode": "full",// MVP: always "full"
-  "lastSeq": 0 // MVP: 0 or omitted (reserved for future delta mode)
+    "items": [ { "candidate": "...", "sdpMid": "0", "sdpMLineIndex": 0 } , ... ],
+    "mode": "drain",
+    "lastSeq": null
   }
   ```
-- **Semantics (MVP):** returns the **current complete set** of the *other side’s* candidates, **oldest→newest**:
+- **Semantics (MVP):** returns and deletes the *other side’s* pending candidates, **oldest→newest**:
   - `ownerToken` → return `ice:<code>:guest`
   - `guestToken` → return `ice:<code>:host`
-- **Client guidance:** keep a local set keyed by `(candidate, sdpMid, sdpMLineIndex)`; apply set‑difference; tolerate duplicates.
+- **Client guidance:** poll frequently; the queue is emptied after each successful fetch. Maintain your own dedupe keyed by `(candidate, sdpMid, sdpMLineIndex)`.
 
-**Future compatibility:** when `since` is provided, backend may return only deltas with `"mode":"delta"` and real `lastSeq`—without breaking old clients.
+**Future compatibility:** backend may later accept `since` to support deltas with new modes/sequence numbers without breaking existing drain clients.
 
 ### 9) Close Room (Optional)
 `POST /rooms/:code/close`

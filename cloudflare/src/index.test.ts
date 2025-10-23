@@ -239,6 +239,99 @@ describe('registry worker', () => {
     const error = await joinResponse.json();
     expect(error.error.code).toBe('bad_join_code');
   });
+
+  it('drains ICE candidates between polls and accepts new bursts', async () => {
+    const origin = 'https://game.test';
+    const createResponse = await worker.fetch(
+      new Request('https://example.com/rooms', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-registry-version': '1',
+          Origin: origin,
+        },
+        body: JSON.stringify({ hostUserName: 'Alice1996' }),
+      }),
+      env,
+      createExecutionContext()
+    );
+
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json();
+
+    const joinResponse = await worker.fetch(
+      new Request(`https://example.com/rooms/${created.code}/join`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-registry-version': '1',
+          Origin: origin,
+        },
+        body: JSON.stringify({ joinCode: created.joinCode, guestUserName: 'Bob1997' }),
+      }),
+      env,
+      createExecutionContext()
+    );
+
+    expect(joinResponse.status).toBe(200);
+    const joined = await joinResponse.json();
+
+    const postCandidate = async (candidate: string) =>
+      worker.fetch(
+        new Request(`https://example.com/rooms/${created.code}/candidate`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-registry-version': '1',
+            'x-access-token': created.ownerToken,
+            Origin: origin,
+          },
+          body: JSON.stringify({ candidate }),
+        }),
+        env,
+        createExecutionContext()
+      );
+
+    const pollCandidates = async () => {
+      const response = await worker.fetch(
+        new Request(`https://example.com/rooms/${created.code}/candidates`, {
+          headers: {
+            'x-access-token': joined.guestToken,
+            Origin: origin,
+          },
+        }),
+        env,
+        createExecutionContext()
+      );
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+
+    expect((await postCandidate('candidate:seed')).status).toBe(204);
+
+    const firstBatch = await pollCandidates();
+    expect(firstBatch.mode).toBe('drain');
+    expect(firstBatch.lastSeq).toBeNull();
+    expect(firstBatch.items).toHaveLength(1);
+    expect(firstBatch.items[0].candidate).toContain('candidate:seed');
+
+    const secondBatch = await pollCandidates();
+    expect(secondBatch.items).toHaveLength(0);
+
+    for (let i = 0; i < 50; i += 1) {
+      const response = await postCandidate(`candidate:${i}`);
+      expect(response.status).toBe(204);
+    }
+
+    const burst = await pollCandidates();
+    expect(burst.items).toHaveLength(50);
+    expect(burst.items[burst.items.length - 1].candidate).toContain('candidate:49');
+
+    const afterDrain = await pollCandidates();
+    expect(afterDrain.items).toHaveLength(0);
+
+    expect((await postCandidate('candidate:after-drain')).status).toBe(204);
+  });
 });
 
 function createExecutionContext(): WorkerExecutionContext {

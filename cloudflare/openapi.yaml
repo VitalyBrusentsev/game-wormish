@@ -214,10 +214,12 @@ components:
             $ref: '#/components/schemas/Candidate'
         mode:
           type: string
-          enum: [full]
+          enum: [drain]
+          description: Returned candidates are removed from the queue immediately after delivery.
         lastSeq:
           type: integer
-          description: Reserved for future delta streaming support.
+          nullable: true
+          description: Always null in drain mode; reserved for future delta streaming support.
 paths:
   /rooms:
     post:
@@ -486,13 +488,17 @@ paths:
                 $ref: '#/components/schemas/Error'
   /rooms/{code}/candidates:
     get:
-      summary: Retrieve the current set of remote ICE candidates.
+      summary: Retrieve and drain the remote ICE candidate queue.
       operationId: getCandidates
       security:
         - AccessTokenHeader: []
       parameters:
         - $ref: '#/components/parameters/RoomCode'
         - $ref: '#/components/parameters/AccessToken'
+      description: >-
+        Returns the pending ICE candidates published by the opposite peer. Once delivered,
+        the backend removes the candidates from storage so subsequent polls only return
+        newly posted entries.
       responses:
         '200':
           description: Candidate list returned.

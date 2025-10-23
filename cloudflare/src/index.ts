@@ -68,7 +68,6 @@ const HEADER_VERSION = 'x-registry-version';
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_SDP_BYTES = 20 * 1024;
 const MAX_CANDIDATE_BYTES = 1024;
-const MAX_CANDIDATES_PER_PEER = 40;
 const REQUIRED_SDP_LINES = ['v=', 'o=', 's=', 't=', 'm='];
 const BASE36_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
@@ -362,9 +361,6 @@ async function appendCandidate(env: Env, code: string, role: 'host' | 'guest', c
   const dedupe = new Map(existing.map((item) => [candidateDedupeKey(item), item] as const));
   const candidateKey = candidateDedupeKey(candidate);
   if (!dedupe.has(candidateKey)) {
-    if (existing.length >= MAX_CANDIDATES_PER_PEER) {
-      throw new RegistryError(409, 'too_many_candidates', 'Candidate limit reached', true);
-    }
     existing.push(candidate);
   }
   const ttl = getIceTtl(env);
@@ -372,13 +368,19 @@ async function appendCandidate(env: Env, code: string, role: 'host' | 'guest', c
 }
 
 async function readCandidates(env: Env, code: string, role: 'host' | 'guest'): Promise<CandidateRecord[]> {
-  const raw = await env.REGISTRY_KV.get(getIceKey(code, role));
+  const key = getIceKey(code, role);
+  const raw = await env.REGISTRY_KV.get(key);
   if (!raw) {
     return [];
   }
   try {
-    return JSON.parse(raw) as CandidateRecord[];
+    const items = JSON.parse(raw) as CandidateRecord[];
+    if (items.length > 0) {
+      await env.REGISTRY_KV.delete(key);
+    }
+    return items;
   } catch (error) {
+    await env.REGISTRY_KV.delete(key);
     return [];
   }
 }
@@ -680,8 +682,8 @@ async function handleCandidates(
   return jsonResponse(
     {
       items,
-      mode: 'full',
-      lastSeq: 0,
+      mode: 'drain',
+      lastSeq: null,
     },
     200,
     corsOrigin
