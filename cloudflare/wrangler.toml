@@ -15,5 +15,3 @@ binding = "REGISTRY_KV"
 # namespace ID supplied at deploy time.
 id = "REGISTRY_KV_ID_PLACEHOLDER"
 
-[vars]
-# Define worker-specific variables here when needed.
