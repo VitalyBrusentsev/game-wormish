@@ -57,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           : "${CLOUDFLARE_KV_ID:?CLOUDFLARE_KV_ID secret must be set}"
-          tmp_config="$(mktemp)"
+          tmp_config="$(mktemp "$PWD/wrangler.XXXXXX.toml")"
           trap 'rm -f "$tmp_config"' EXIT
           sed "s/id = \"REGISTRY_KV_ID_PLACEHOLDER\"/id = \"${CLOUDFLARE_KV_ID}\"/" wrangler.toml > "$tmp_config"
           npx wrangler deploy --env production --config "$tmp_config"
