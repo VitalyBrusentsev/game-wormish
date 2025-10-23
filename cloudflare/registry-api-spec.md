@@ -1,4 +1,5 @@
 # Cloudflare “Registry” API — Functional Requirements
+> Revision 5.1
 
 ## Goal
 A minimal, secure signaling backend for 2‑player WebRTC rooms. Stores SDP offers/answers and ICE candidates with short TTLs; never carries game data.
@@ -86,7 +87,7 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 ## User Flow (Host + Guest)
 
 1. **Create Room**
- - `POST /rooms` `{ "name": "Alice1996" }` → `201`
+ - `POST /rooms` `{ "hostUserName": "Alice1996" }` → `201`
  ```json
  { "code": "ABCD12", "joinCode": "123456", "ownerToken": "<...>", "expiresAt": 1740001799999 }
  ```
@@ -98,7 +99,7 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
  ```
 
 3. **Guest sees the expected hostUserName (e.g., "Alice1996"), enters and redeems joinCode** 
- - `POST /rooms/:code/join` `{ "joinCode": "123456", "name": "Bob1997" }` → `200`
+ - `POST /rooms/:code/join` `{ "joinCode": "123456", "guestUserName": "Bob1997" }` → `200`
  ```json
  { "guestToken": "<...>", "expiresAt": 1740001799999 }
  ```
@@ -125,7 +126,7 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 ### 1) Create Room
 `POST /rooms`
 - **Headers**: (optional) Turnstile/JWT for abuse control
-- **Body**: `{ "name": "<hostUserName>" }`
+- **Body**: `{ "hostUserName": "<hostUserName>" }`
 - **201 Created**
   ```json
   { "code": "ABCD12", "ownerToken": "<...>", "joinCode": "123456", "expiresAt": 1740001799999 }
@@ -142,7 +143,7 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 
 ### 3) Redeem Join Code → Guest Token
 `POST /rooms/:code/join`
-- **Body**: `{ "joinCode": "123456", "name": "Bob1997" }`
+- **Body**: `{ "joinCode": "123456", "guestUserName": "Bob1997" }`
 - **200 OK**
   ```json
   { "guestToken": "<...>", "expiresAt": 1740001799999 }
