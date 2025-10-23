@@ -2,5 +2,18 @@ name = "wormish-current-time"
 main = "src/index.ts"
 compatibility_date = "2024-05-20"
 
+[[kv_namespaces]]
+binding = "REGISTRY_KV"
+# Miniflare (wrangler dev) uses the preview namespace. Wrangler requires an ID value, but for
+# local development it only names the ephemeral namespace managed by Miniflare.
+preview_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[env.production]
+[[env.production.kv_namespaces]]
+binding = "REGISTRY_KV"
+# The deploy script replaces this placeholder with the actual production
+# namespace ID supplied at deploy time.
+id = "REGISTRY_KV_ID_PLACEHOLDER"
+
 [vars]
 # Define worker-specific variables here when needed.

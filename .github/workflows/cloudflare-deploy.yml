@@ -53,4 +53,11 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npm run deploy
+          CLOUDFLARE_KV_ID: ${{ secrets.CLOUDFLARE_KV_ID }}
+        run: |
+          set -euo pipefail
+          : "${CLOUDFLARE_KV_ID:?CLOUDFLARE_KV_ID secret must be set}"
+          tmp_config="$(mktemp)"
+          trap 'rm -f "$tmp_config"' EXIT
+          sed "s/id = \"REGISTRY_KV_ID_PLACEHOLDER\"/id = \"${CLOUDFLARE_KV_ID}\"/" wrangler.toml > "$tmp_config"
+          npx wrangler deploy --env production --config "$tmp_config"

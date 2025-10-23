@@ -132,16 +132,13 @@ After starting the worker with `npm run dev`, exercise the primary room lifecycl
 
 ## Deploying
 
-Deploy the worker to Cloudflare with:
+Production deployments run through the [`cloudflare-deploy.yml`](../.github/workflows/cloudflare-deploy.yml) GitHub Actions workflow. The job rewrites a temporary `wrangler.toml`, replacing the `REGISTRY_KV_ID_PLACEHOLDER` with the `CLOUDFLARE_KV_ID` secret before invoking `wrangler deploy`.
 
-```bash
-npm run deploy
-```
-
-You must provide the following environment variables (locally and in CI) for Wrangler to authenticate:
+Configure the following repository secrets so the workflow can authenticate and target the production KV namespace:
 
 - `CLOUDFLARE_API_TOKEN`: an API token with **Workers Scripts** "Edit" permissions and access to the target account.
 - `CLOUDFLARE_ACCOUNT_ID`: the account identifier from your Cloudflare dashboard (found under **Workers & Pages → Overview**).
+- `CLOUDFLARE_KV_ID`: the KV namespace identifier for the production `REGISTRY_KV` binding. This value remains private in CI via repository secrets and is injected during the deployment step.
 
 When deployed, the worker URL will be reported by Wrangler in the CLI output. The default route will be `https://wormish-current-time.<your-subdomain>.workers.dev/` unless you configure a custom domain.
 
@@ -155,7 +152,7 @@ npm run typecheck
 
 ## Continuous Deployment via GitHub Actions
 
-The repository contains `.github/workflows/cloudflare-deploy.yml`, which installs dependencies, runs tests, performs a dry-run build, and deploys on pushes to `main`. Store the Cloudflare credentials as encrypted secrets named `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` within your GitHub repository settings. The workflow only publishes when both secrets are present and the branch is `main`.
+The repository contains `.github/workflows/cloudflare-deploy.yml`, which installs dependencies, runs tests, performs a dry-run build, and deploys on pushes to `main`. Store the Cloudflare credentials as encrypted secrets named `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `CLOUDFLARE_KV_ID` within your GitHub repository settings. The workflow only publishes when the required secrets are present and the branch is `main`.
 
 ## Project Structure
 
@@ -164,3 +161,14 @@ The repository contains `.github/workflows/cloudflare-deploy.yml`, which install
 - `wrangler.toml` – Wrangler configuration used for local dev and deployments.
 - `tsconfig.json` – TypeScript configuration shared by source and tests.
 - `package.json` – Scripts and dependency definitions for the worker project.
+
+## Configuration management
+
+The Worker under `cloudflare/` is configured with [`wrangler.toml`](./wrangler.toml). That file remains in source control so every clone of the repository can run `wrangler dev` without extra setup. The committed values are safe defaults for local development:
+
+- The `REGISTRY_KV` binding uses Miniflare's ephemeral namespace while developing.
+- No secrets are stored directly in the configuration. Sensitive data should be provisioned with `wrangler secret put` or environment variables.
+
+### Keeping production-only values private
+
+Real Cloudflare resource identifiers (such as the production KV namespace `id`) should not be committed. `wrangler.toml` keeps a placeholder (`REGISTRY_KV_ID_PLACEHOLDER`) for the production namespace ID. The deployment workflow creates a temporary copy of the config with that placeholder replaced by the `CLOUDFLARE_KV_ID` secret supplied by GitHub.
