@@ -138,10 +138,11 @@ Deploy the worker to Cloudflare with:
 npm run deploy
 ```
 
-You must provide the following environment variables (locally and in CI) for Wrangler to authenticate:
+You must provide the following environment variables (locally and in CI) for Wrangler to authenticate and target the production KV namespace:
 
 - `CLOUDFLARE_API_TOKEN`: an API token with **Workers Scripts** "Edit" permissions and access to the target account.
 - `CLOUDFLARE_ACCOUNT_ID`: the account identifier from your Cloudflare dashboard (found under **Workers & Pages → Overview**).
+- `CLOUDFLARE_KV_ID`: the KV namespace identifier for the production `REGISTRY_KV` binding. This value remains private in CI via repository secrets.
 
 When deployed, the worker URL will be reported by Wrangler in the CLI output. The default route will be `https://wormish-current-time.<your-subdomain>.workers.dev/` unless you configure a custom domain.
 
@@ -155,7 +156,7 @@ npm run typecheck
 
 ## Continuous Deployment via GitHub Actions
 
-The repository contains `.github/workflows/cloudflare-deploy.yml`, which installs dependencies, runs tests, performs a dry-run build, and deploys on pushes to `main`. Store the Cloudflare credentials as encrypted secrets named `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` within your GitHub repository settings. The workflow only publishes when both secrets are present and the branch is `main`.
+The repository contains `.github/workflows/cloudflare-deploy.yml`, which installs dependencies, runs tests, performs a dry-run build, and deploys on pushes to `main`. Store the Cloudflare credentials as encrypted secrets named `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `CLOUDFLARE_KV_ID` within your GitHub repository settings. The workflow only publishes when the required secrets are present and the branch is `main`.
 
 ## Project Structure
 
@@ -174,10 +175,4 @@ The Worker under `cloudflare/` is configured with [`wrangler.toml`](./wrangler.t
 
 ### Keeping production-only values private
 
-Real Cloudflare resource identifiers (such as the production KV namespace `id`) should not be committed. The recommended workflow is:
-
-1. Leave `wrangler.toml` focused on development defaults and placeholder values.
-2. Copy it to a local-only file such as `cloudflare/wrangler.production.toml` (ignored via `.gitignore`) and replace the placeholders with the real IDs.
-3. Deploy with `npx wrangler deploy --config cloudflare/wrangler.production.toml --env production`. CI systems can generate that file from secure environment variables during the pipeline.
-
-This keeps production configuration out of the repository while ensuring contributors still have a working developer experience.
+Real Cloudflare resource identifiers (such as the production KV namespace `id`) should not be committed. `wrangler.toml` references the production namespace ID via the `CLOUDFLARE_KV_ID` environment variable, allowing local shells and CI pipelines to inject the value securely while keeping the development defaults intact.
