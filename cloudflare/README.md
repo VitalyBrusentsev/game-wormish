@@ -164,3 +164,20 @@ The repository contains `.github/workflows/cloudflare-deploy.yml`, which install
 - `wrangler.toml` – Wrangler configuration used for local dev and deployments.
 - `tsconfig.json` – TypeScript configuration shared by source and tests.
 - `package.json` – Scripts and dependency definitions for the worker project.
+
+## Configuration management
+
+The Worker under `cloudflare/` is configured with [`wrangler.toml`](./wrangler.toml). That file remains in source control so every clone of the repository can run `wrangler dev` without extra setup. The committed values are safe defaults for local development:
+
+- The `REGISTRY_KV` binding uses Miniflare's ephemeral namespace while developing.
+- No secrets are stored directly in the configuration. Sensitive data should be provisioned with `wrangler secret put` or environment variables.
+
+### Keeping production-only values private
+
+Real Cloudflare resource identifiers (such as the production KV namespace `id`) should not be committed. The recommended workflow is:
+
+1. Leave `wrangler.toml` focused on development defaults and placeholder values.
+2. Copy it to a local-only file such as `cloudflare/wrangler.production.toml` (ignored via `.gitignore`) and replace the placeholders with the real IDs.
+3. Deploy with `npx wrangler deploy --config cloudflare/wrangler.production.toml --env production`. CI systems can generate that file from secure environment variables during the pipeline.
+
+This keeps production configuration out of the repository while ensuring contributors still have a working developer experience.
