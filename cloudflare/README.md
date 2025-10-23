@@ -66,7 +66,7 @@ After starting the worker with `npm run dev`, exercise the primary room lifecycl
    curl -X POST \
      -H 'content-type: application/json' \
      -H 'x-registry-version: 1' \
-     -d '{"name":"Alice1996"}' \
+     -d '{"hostUserName":"Alice1996"}' \
      http://localhost:8787/rooms
    ```
 
@@ -84,7 +84,7 @@ After starting the worker with `npm run dev`, exercise the primary room lifecycl
    curl -X POST \
      -H 'content-type: application/json' \
      -H 'x-registry-version: 1' \
-     -d '{"joinCode":"<joinCode>","name":"Bob1997"}' \
+     -d '{"joinCode":"<joinCode>","guestUserName":"Bob1997"}' \
      http://localhost:8787/rooms/<code>/join
    ```
 
