@@ -1,5 +1,5 @@
 # WebRTC Registry Client Module Specification
-> Revision: 1.0
+> Revision: 1.1
 
 **Target**: TypeScript client for a 2‑player, room‑scoped WebRTC handshake using the “Registry” HTTP API.  
 
@@ -312,13 +312,15 @@ await client.startConnection();
 client.sendMessage({ type: "greeting", content: "Hello from guest!" });
 ```
 
+## Debugging Harness
+
+The Debugging Harness is a standalone HTML page with form UI, allowing the user to choose a role of a host or a guest, requesting the necessary parameters (username, join code, etc), and testing the room handshake protocol, showing the room state in the process.
+Upon establishing a successful connection, it should allow a simple chat interface for text message exchange.
+
 ## Future Enhancements
 
 1. **TURN Server Support**: Add support for TURN servers for NAT traversal
-2. **Multi-Peer Support**: Extend for more than two participants
-3. **Media Streams**: Add support for audio/video streams
-4. **File Transfer**: Implement file transfer capabilities
-5. **Connection Metrics**: Expose connection quality metrics
+2. **Connection Metrics**: Expose connection quality metrics
 
 ## Conclusion
 
