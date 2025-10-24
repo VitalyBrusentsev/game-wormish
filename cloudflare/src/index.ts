@@ -80,6 +80,7 @@ const DEFAULT_TTLS: Record<RoomStatus, number> = {
 };
 
 const DEFAULT_ICE_TTL = 300;
+const MIN_KV_TTL_SECONDS = 60;
 
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -343,11 +344,11 @@ async function loadRoom(env: Env, code: string): Promise<RoomRecord | null> {
 }
 
 async function saveRoom(env: Env, room: RoomRecord): Promise<void> {
-  const ttl = getRoomTtl(env, room.status);
-  const expiresAt = Date.now() + ttl * 1000;
+  const logicalTtl = getRoomTtl(env, room.status);
+  const expiresAt = Date.now() + logicalTtl * 1000;
   room.expiresAt = expiresAt;
   await env.REGISTRY_KV.put(getRoomKey(room.code), JSON.stringify(room), {
-    expirationTtl: ttl,
+    expirationTtl: Math.max(logicalTtl, MIN_KV_TTL_SECONDS),
   });
 }
 
