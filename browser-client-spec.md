@@ -29,6 +29,15 @@ This document specifies a TypeScript client module for browser applications that
 4. **Type Safety**: Full TypeScript typing for all interfaces, methods, and callbacks.
 5. **Error Resilience**: Robust error handling with clear error types and recovery strategies.
 
+## CORS & CSRF Requirements
+
+All HTTP requests must satisfy the Registry API's CORS contract described in `cloudflare/registry-api-spec.md`:
+
+- Cross-origin requests are performed with `mode: "cors"` and `credentials: "omit"` because the Registry relies exclusively on bearer-style access tokens instead of cookies. Sending credentials causes the preflight to fail — the Worker does not echo `Access-Control-Allow-Credentials: true` — so requests must opt out of cookies entirely.
+- Every mutation (`POST`) includes the non-simple header `X-Registry-Version: "1"` to force a preflight request for CSRF protection.
+- Calls that require a capability token supply `X-Access-Token` in addition to the CSRF header.
+- The default HTTP client used by the module is responsible for attaching these headers and fetch options automatically so that consumers cannot accidentally omit them.
+
 ## Architecture
 
 The client module will consist of several key components:

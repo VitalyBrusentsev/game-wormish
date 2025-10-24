@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Registry Debug Harness</title>
+    <link rel="stylesheet" href="./src/styles/debug-harness.css" />
+  </head>
+  <body>
+    <div class="app">
+      <h1>Registry Debug Harness</h1>
+      <section class="config">
+        <h2>Configuration</h2>
+        <label>
+          Registry API URL
+          <input id="registry-url" type="text" placeholder="https://example.com" />
+        </label>
+        <label>
+          ICE Server URL (comma separated)
+          <input id="ice-servers" type="text" placeholder="stun:stun.l.google.com:19302" />
+        </label>
+      </section>
+
+      <section class="role">
+        <h2>Role</h2>
+        <label><input type="radio" name="role" value="host" checked /> Host</label>
+        <label><input type="radio" name="role" value="guest" /> Guest</label>
+      </section>
+
+      <section class="inputs">
+        <div class="host-inputs">
+          <label>
+            Host Username
+            <input id="host-username" type="text" placeholder="Alice" />
+          </label>
+        </div>
+        <div class="guest-inputs hidden">
+          <label>
+            Room Code
+            <input id="room-code" type="text" placeholder="ABC123" />
+          </label>
+          <label>
+            Join Code
+            <input id="join-code" type="text" placeholder="123456" />
+          </label>
+          <label>
+            Guest Username
+            <input id="guest-username" type="text" placeholder="Bob" />
+          </label>
+        </div>
+      </section>
+
+      <section class="actions">
+        <button id="create-room">Create Room</button>
+        <button id="join-room" class="hidden">Join Room</button>
+        <button id="start-connection" disabled>Start Connection</button>
+        <button id="close-room" disabled>Close Room</button>
+      </section>
+
+      <section class="status">
+        <h2>Status</h2>
+        <div>State: <span id="connection-state">idle</span></div>
+        <div>Room Code: <span id="display-room-code">-</span></div>
+        <div>Join Code: <span id="display-join-code">-</span></div>
+        <div>Expires At: <span id="display-expires">-</span></div>
+      </section>
+
+      <section class="chat">
+        <h2>Chat</h2>
+        <div id="chat-log" class="chat-log"></div>
+        <div class="chat-input">
+          <input id="chat-message" type="text" placeholder="Type a message" />
+          <button id="send-message" disabled>Send</button>
+        </div>
+      </section>
+
+      <section class="log">
+        <h2>Log</h2>
+        <pre id="event-log"></pre>
+      </section>
+    </div>
+
+    <script type="module" src="./src/debug-harness.ts"></script>
+  </body>
+</html>
