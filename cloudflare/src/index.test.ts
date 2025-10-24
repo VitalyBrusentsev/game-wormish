@@ -204,6 +204,40 @@ describe('registry worker', () => {
     expect(closeResponse.status).toBe(204);
   });
 
+  it('allows host to close an open room', async () => {
+    const origin = 'https://game.test';
+    const createResponse = await worker.fetch(
+      new Request('https://example.com/rooms', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-registry-version': '1',
+          Origin: origin,
+        },
+        body: JSON.stringify({ hostUserName: 'Alice1996' }),
+      }),
+      env,
+      createExecutionContext()
+    );
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json();
+
+    const closeResponse = await worker.fetch(
+      new Request(`https://example.com/rooms/${created.code}/close`, {
+        method: 'POST',
+        headers: {
+          'x-access-token': created.ownerToken,
+          'x-registry-version': '1',
+          Origin: origin,
+        },
+      }),
+      env,
+      createExecutionContext()
+    );
+
+    expect(closeResponse.status).toBe(204);
+  });
+
   it('rejects invalid join attempts', async () => {
     const origin = 'https://game.test';
     const createResponse = await worker.fetch(
