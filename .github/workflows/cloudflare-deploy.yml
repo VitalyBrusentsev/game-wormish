@@ -62,7 +62,7 @@ jobs:
           tmp_config="$(mktemp "$PWD/wrangler.XXXXXX.toml")"
           trap 'rm -f "$tmp_config"' EXIT
           sed \
-            -e "s/id = \"REGISTRY_KV_ID_PLACEHOLDER\"/id = \"${CLOUDFLARE_KV_ID}\"/" \
-            -e "s/ALLOWED_ORIGINS = \"ALLOWED_ORIGIN_PLACEHOLDER\"/ALLOWED_ORIGINS = \"${CLOUDFLARE_ALLOWED_ORIGIN}\"/" \
+            -e "s@id = \"REGISTRY_KV_ID_PLACEHOLDER\"@id = \"${CLOUDFLARE_KV_ID}\"@" \
+            -e "s@ALLOWED_ORIGINS = \"ALLOWED_ORIGIN_PLACEHOLDER\"@ALLOWED_ORIGINS = \"${CLOUDFLARE_ALLOWED_ORIGIN}\"@" \
             wrangler.toml > "$tmp_config"
           npx wrangler deploy --env production --config "$tmp_config"
