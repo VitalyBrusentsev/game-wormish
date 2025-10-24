@@ -152,7 +152,7 @@ class DefaultHttpClient implements IHttpClient {
         "Content-Type": "application/json",
         ...headers,
       },
-      credentials: "include",
+      credentials: "omit",
     });
 
     if (!response.ok) {
@@ -177,7 +177,7 @@ class DefaultHttpClient implements IHttpClient {
         "Content-Type": "application/json",
         ...headers,
       },
-      credentials: "include",
+      credentials: "omit",
       mode: "cors",
     };
 
