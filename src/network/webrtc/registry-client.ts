@@ -133,10 +133,33 @@ export type StateChangeListener = (state: ConnectionState) => void;
 export type MessageListener = (message: unknown) => void;
 export type ErrorListener = (error: Error) => void;
 
+export type DebugEventType =
+  | "state"
+  | "createRoom"
+  | "joinRoom"
+  | "startConnection"
+  | "offer"
+  | "answer"
+  | "iceCandidate"
+  | "candidates"
+  | "dataChannel"
+  | "connectionState"
+  | "closeRoom"
+  | "error";
+
+export interface DebugEvent {
+  type: DebugEventType;
+  message: string;
+  details?: unknown;
+}
+
+export type DebugListener = (event: DebugEvent) => void;
+
 type InternalEvents = Record<string, unknown> & {
   state: ConnectionState;
   message: unknown;
   error: Error;
+  debug: DebugEvent;
 };
 
 const DEFAULT_POLL_INTERVAL_MS = 1000;
@@ -149,7 +172,7 @@ class DefaultHttpClient implements IHttpClient {
     const response = await fetch(url, {
       mode: "cors",
       headers: {
-        "Content-Type": "application/json",
+        Accept: "application/json",
         ...headers,
       },
       credentials: "omit",
@@ -255,7 +278,7 @@ class RegistryHttpClient implements IRegistryClient {
     await this.http.post(
       this.url(`/rooms/${roomCode}/offer`),
       offer,
-      withTokenHeaders(token)
+      withAuthenticatedHeaders(token)
     );
   }
 
@@ -267,7 +290,7 @@ class RegistryHttpClient implements IRegistryClient {
     await this.http.post(
       this.url(`/rooms/${roomCode}/answer`),
       answer,
-      withTokenHeaders(token)
+      withAuthenticatedHeaders(token)
     );
   }
 
@@ -279,14 +302,14 @@ class RegistryHttpClient implements IRegistryClient {
     await this.http.post(
       this.url(`/rooms/${roomCode}/candidate`),
       candidate,
-      withTokenHeaders(token)
+      withAuthenticatedHeaders(token)
     );
   }
 
   async getRoom(roomCode: string, token: string): Promise<RoomSnapshot> {
     return this.http.get(
       this.url(`/rooms/${roomCode}`),
-      withTokenHeaders(token)
+      withAccessTokenHeader(token)
     );
   }
 
@@ -296,7 +319,7 @@ class RegistryHttpClient implements IRegistryClient {
   ): Promise<CandidateList> {
     return this.http.get(
       this.url(`/rooms/${roomCode}/candidates`),
-      withTokenHeaders(token)
+      withAccessTokenHeader(token)
     );
   }
 
@@ -304,7 +327,7 @@ class RegistryHttpClient implements IRegistryClient {
     await this.http.post(
       this.url(`/rooms/${roomCode}/close`),
       undefined,
-      withTokenHeaders(token)
+      withAuthenticatedHeaders(token)
     );
   }
 }
@@ -364,12 +387,20 @@ class WebRTCManager implements IWebRTCManager {
   private dataChannelCallback:
     | ((channel: RTCDataChannel) => void)
     | null = null;
+  private pendingIceCandidates: RTCIceCandidateInit[] = [];
 
   createPeerConnection(iceServers: RTCIceServer[]): RTCPeerConnection {
     this.peerConnection = new RTCPeerConnection({ iceServers });
+    this.pendingIceCandidates = [];
     this.peerConnection.onicecandidate = (event) => {
-      if (event.candidate && this.iceCallback) {
-        this.iceCallback(event.candidate.toJSON());
+      if (!event.candidate) {
+        return;
+      }
+      const candidate = event.candidate.toJSON();
+      if (this.iceCallback) {
+        this.iceCallback(candidate);
+      } else {
+        this.pendingIceCandidates.push(candidate);
       }
     };
     this.peerConnection.onconnectionstatechange = () => {
@@ -397,7 +428,8 @@ class WebRTCManager implements IWebRTCManager {
     const pc = this.ensurePeerConnection();
     const offer = await pc.createOffer(options);
     await pc.setLocalDescription(offer);
-    return offer;
+    await waitForIceGatheringComplete(pc);
+    return descriptionToInit(pc.localDescription, offer);
   }
 
   async createAnswer(
@@ -406,7 +438,8 @@ class WebRTCManager implements IWebRTCManager {
     const pc = this.ensurePeerConnection();
     const answer = await pc.createAnswer(options);
     await pc.setLocalDescription(answer);
-    return answer;
+    await waitForIceGatheringComplete(pc);
+    return descriptionToInit(pc.localDescription, answer);
   }
 
   async setLocalDescription(description: RTCSessionDescriptionInit): Promise<void> {
@@ -436,6 +469,13 @@ class WebRTCManager implements IWebRTCManager {
 
   onIceCandidate(callback: (candidate: RTCIceCandidateInit) => void): void {
     this.iceCallback = callback;
+    if (this.pendingIceCandidates.length > 0) {
+      const pending = this.pendingIceCandidates;
+      this.pendingIceCandidates = [];
+      for (const candidate of pending) {
+        this.iceCallback(candidate);
+      }
+    }
   }
 
   onConnectionStateChange(
@@ -458,10 +498,14 @@ function withCsrfHeader(
   };
 }
 
-function withTokenHeaders(token: string): Record<string, string> {
-  return withCsrfHeader({
+function withAccessTokenHeader(token: string): Record<string, string> {
+  return {
     "X-Access-Token": token,
-  });
+  };
+}
+
+function withAuthenticatedHeaders(token: string): Record<string, string> {
+  return withCsrfHeader(withAccessTokenHeader(token));
 }
 
 function wait(ms: number): Promise<void> {
@@ -511,6 +555,14 @@ export class WebRTCRegistryClient {
       };
       this.stateManager.setRoomInfo(roomInfo);
       this.updateState(ConnectionState.CREATED);
+      this.logDebug({
+        type: "createRoom",
+        message: "Room created",
+        details: {
+          code: response.code,
+          expiresAt: response.expiresAt,
+        },
+      });
       return response.code;
     } catch (error) {
       this.handleError(error);
@@ -539,6 +591,14 @@ export class WebRTCRegistryClient {
       };
       this.stateManager.setRoomInfo(roomInfo);
       this.updateState(ConnectionState.JOINED);
+      this.logDebug({
+        type: "joinRoom",
+        message: "Joined room",
+        details: {
+          code: roomCode,
+          expiresAt: response.expiresAt,
+        },
+      });
     } catch (error) {
       this.handleError(error);
       throw error;
@@ -562,36 +622,75 @@ export class WebRTCRegistryClient {
     this.isClosing = false;
     this.remoteCandidateKeys.clear();
     this.updateState(ConnectionState.CONNECTING);
+    this.logDebug({
+      type: "startConnection",
+      message: "Starting connection",
+      details: { role: roomInfo.role },
+    });
 
     const peerConnection = this.webRTCManager.createPeerConnection(
       this.config.iceServers
     );
     this.stateManager.setPeerConnection(peerConnection);
+    this.logDebug({
+      type: "startConnection",
+      message: "Peer connection created",
+      details: { iceServers: this.config.iceServers.map((server) => server.urls) },
+    });
 
     const role = roomInfo.role;
 
     if (role === "host") {
       const dataChannel = this.webRTCManager.createDataChannel("game-data");
       this.setupDataChannel(dataChannel);
+      this.logDebug({
+        type: "dataChannel",
+        message: "Host created data channel",
+        details: { label: dataChannel.label },
+      });
     } else {
       this.webRTCManager.onDataChannel((channel) => {
+        this.logDebug({
+          type: "dataChannel",
+          message: "Guest received data channel",
+          details: { label: channel.label },
+        });
         this.setupDataChannel(channel);
       });
     }
 
     this.webRTCManager.onIceCandidate(async (candidate) => {
+      this.logDebug({
+        type: "iceCandidate",
+        message: "Local ICE candidate gathered",
+        details: candidate,
+      });
       try {
         await this.registryClient.postCandidate(
           roomInfo.code,
           roomInfo.token,
           candidate
         );
+        this.logDebug({
+          type: "iceCandidate",
+          message: "Local ICE candidate posted",
+          details: {
+            candidate: candidate.candidate,
+            sdpMid: candidate.sdpMid,
+            sdpMLineIndex: candidate.sdpMLineIndex,
+          },
+        });
       } catch (error) {
         this.handleError(error);
       }
     });
 
     this.webRTCManager.onConnectionStateChange((state) => {
+      this.logDebug({
+        type: "connectionState",
+        message: "Peer connection state changed",
+        details: { state },
+      });
       if (state === "connected") {
         this.updateState(ConnectionState.CONNECTED);
       } else if (state === "disconnected" || state === "failed") {
@@ -626,6 +725,11 @@ export class WebRTCRegistryClient {
     this.isClosing = true;
     this.polling = false;
     this.remoteCandidateKeys.clear();
+    this.logDebug({
+      type: "closeRoom",
+      message: "Closing room",
+      details: { code: roomInfo?.code ?? null },
+    });
 
     const peerConnection = this.stateManager.getPeerConnection();
     if (peerConnection) {
@@ -664,6 +768,10 @@ export class WebRTCRegistryClient {
     this.events.on("error", callback);
   }
 
+  onDebug(callback: DebugListener): void {
+    this.events.on("debug", callback);
+  }
+
   getConnectionState(): ConnectionState {
     return this.stateManager.getState();
   }
@@ -678,35 +786,80 @@ export class WebRTCRegistryClient {
       if (!this.isClosing) {
         this.updateState(ConnectionState.CONNECTED);
       }
+      this.logDebug({
+        type: "dataChannel",
+        message: "Data channel open",
+        details: { label: dataChannel.label },
+      });
     };
     dataChannel.onclose = () => {
       if (!this.isClosing) {
         this.updateState(ConnectionState.DISCONNECTED);
       }
+      this.logDebug({
+        type: "dataChannel",
+        message: "Data channel closed",
+        details: { label: dataChannel.label },
+      });
     };
     dataChannel.onmessage = (event) => {
       const parsed = typeof event.data === "string" ? parseMessage(event.data) : event.data;
       this.events.emit("message", parsed);
+      this.logDebug({
+        type: "dataChannel",
+        message: "Data channel message received",
+        details: { label: dataChannel.label },
+      });
     };
   }
 
   private async handleHostConnection(roomInfo: RoomInfo): Promise<void> {
+    this.logDebug({
+      type: "offer",
+      message: "Creating offer",
+      details: { code: roomInfo.code },
+    });
     const offer = await this.webRTCManager.createOffer();
     await this.registryClient.postOffer(roomInfo.code, roomInfo.token, offer);
+    this.logDebug({
+      type: "offer",
+      message: "Offer posted",
+      details: { sdpType: offer.type },
+    });
     await this.waitForAnswer(roomInfo);
     this.startCandidateDrain(roomInfo);
   }
 
   private async handleGuestConnection(roomInfo: RoomInfo): Promise<void> {
+    this.logDebug({
+      type: "offer",
+      message: "Waiting for offer",
+      details: { code: roomInfo.code },
+    });
     const offer = await this.waitForOffer(roomInfo);
     await this.webRTCManager.setRemoteDescription(offer);
+    this.logDebug({
+      type: "offer",
+      message: "Offer applied",
+      details: { sdpType: offer.type },
+    });
     const answer = await this.webRTCManager.createAnswer();
     await this.registryClient.postAnswer(roomInfo.code, roomInfo.token, answer);
+    this.logDebug({
+      type: "answer",
+      message: "Answer posted",
+      details: { sdpType: answer.type },
+    });
     this.startCandidateDrain(roomInfo);
   }
 
   private async waitForAnswer(roomInfo: RoomInfo): Promise<void> {
     this.polling = true;
+    this.logDebug({
+      type: "answer",
+      message: "Polling for answer",
+      details: { code: roomInfo.code },
+    });
     while (!this.isClosing) {
       const snapshot = await this.registryClient.getRoom(
         roomInfo.code,
@@ -715,6 +868,11 @@ export class WebRTCRegistryClient {
       if (snapshot.answer) {
         await this.webRTCManager.setRemoteDescription(snapshot.answer);
         this.polling = false;
+        this.logDebug({
+          type: "answer",
+          message: "Answer received",
+          details: { status: snapshot.status },
+        });
         return;
       }
       await wait(this.pollIntervalMs);
@@ -723,6 +881,11 @@ export class WebRTCRegistryClient {
 
   private async waitForOffer(roomInfo: RoomInfo): Promise<RTCSessionDescriptionInit> {
     this.polling = true;
+    this.logDebug({
+      type: "offer",
+      message: "Polling for offer",
+      details: { code: roomInfo.code },
+    });
     while (!this.isClosing) {
       const snapshot = await this.registryClient.getRoom(
         roomInfo.code,
@@ -730,6 +893,11 @@ export class WebRTCRegistryClient {
       );
       if (snapshot.offer) {
         this.polling = false;
+        this.logDebug({
+          type: "offer",
+          message: "Offer received",
+          details: { status: snapshot.status },
+        });
         return snapshot.offer;
       }
       await wait(this.pollIntervalMs);
@@ -742,6 +910,11 @@ export class WebRTCRegistryClient {
       return;
     }
 
+    this.logDebug({
+      type: "candidates",
+      message: "Starting remote candidate drain",
+      details: { code: roomInfo.code },
+    });
     void this.drainRemoteCandidates(roomInfo);
   }
 
@@ -752,13 +925,26 @@ export class WebRTCRegistryClient {
           roomInfo.code,
           roomInfo.token
         );
+        const newCandidates: RTCIceCandidateInit[] = [];
         for (const candidate of candidateList.items) {
           const key = candidateKey(candidate);
           if (!this.remoteCandidateKeys.has(key)) {
             this.remoteCandidateKeys.add(key);
+            newCandidates.push(candidate);
             await this.webRTCManager.addIceCandidate(candidate);
           }
         }
+        this.logDebug({
+          type: "candidates",
+          message: `Fetched ${candidateList.items.length} remote candidates`,
+          details: {
+            applied: newCandidates.length,
+            knownTotal: this.remoteCandidateKeys.size,
+            mode: candidateList.mode,
+            lastSeq: candidateList.lastSeq,
+            newCandidates,
+          },
+        });
       } catch (error) {
         this.handleError(error);
         return;
@@ -781,6 +967,10 @@ export class WebRTCRegistryClient {
   private updateState(state: ConnectionState): void {
     this.stateManager.setState(state);
     this.events.emit("state", state);
+    this.logDebug({
+      type: "state",
+      message: `State updated to ${state}`,
+    });
   }
 
   private handleError(error: unknown): void {
@@ -788,6 +978,14 @@ export class WebRTCRegistryClient {
     this.stateManager.setState(ConnectionState.ERROR);
     this.polling = false;
     this.events.emit("error", err);
+    this.logDebug({
+      type: "error",
+      message: err.message,
+    });
+  }
+
+  private logDebug(event: DebugEvent): void {
+    this.events.emit("debug", event);
   }
 }
 
@@ -795,5 +993,51 @@ function candidateKey(candidate: RTCIceCandidateInit): string {
   const mid = candidate.sdpMid ?? "";
   const line = candidate.sdpMLineIndex ?? -1;
   return `${candidate.candidate}|${mid}|${line}`;
+}
+
+async function waitForIceGatheringComplete(
+  pc: RTCPeerConnection
+): Promise<void> {
+  if (pc.iceGatheringState === "complete") {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      pc.removeEventListener("icegatheringstatechange", checkState);
+      if (timeout !== null) {
+        clearTimeout(timeout);
+      }
+      resolve();
+    };
+
+    const checkState = () => {
+      if (pc.iceGatheringState === "complete") {
+        cleanup();
+      }
+    };
+
+    timeout = setTimeout(() => {
+      cleanup();
+    }, 2000);
+
+    pc.addEventListener("icegatheringstatechange", checkState);
+  });
+}
+
+function descriptionToInit(
+  description: RTCSessionDescription | null,
+  fallback: RTCSessionDescriptionInit
+): RTCSessionDescriptionInit {
+  if (!description) {
+    return fallback;
+  }
+
+  return {
+    type: description.type,
+    sdp: description.sdp,
+  };
 }
 
