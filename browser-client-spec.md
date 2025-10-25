@@ -40,7 +40,7 @@ All HTTP requests must satisfy the Registry API's CORS contract described in `cl
 
 ## Architecture
 
-The client module will consist of several key components:
+The client module will consist of several key components, with a clear separation of interfaces and implementation in separate files:
 
 1. **RegistryClient**: Handles HTTP communication with the Registry API
 2. **WebRTCManager**: Manages the WebRTC peer connection and data channels
@@ -248,11 +248,12 @@ The module will be designed for comprehensive unit testing:
 
 ## Implementation Considerations
 
-1. **Polling Strategy**: Implement efficient polling for room state and candidates
+1. **Polling Strategy**: Implement efficient polling for room state and candidates. Manage the correct polling lifetime: the client should remove the polling loop as soon as the room changes status from states expected to be polled, or the first datachannel open event fires, or when pc.iceGatheringState === "complete"
 2. **Rate Limiting**: Respect API rate limits with exponential backoff
 3. **Connection Resilience**: Implement reconnection strategies for temporary network issues
 4. **Memory Management**: Properly clean up WebRTC resources when closing connections
 5. **Browser Compatibility**: Ensure compatibility across major browsers
+6. **Data Validation**: Guard against incorrect candidate data values (filter out mDNS candidates for IP debugging and empty candidates)
 
 ## Usage Examples
 
@@ -326,7 +327,7 @@ client.sendMessage({ type: "greeting", content: "Hello from guest!" });
 The Debugging Harness is a standalone HTML page with form UI, allowing the user to choose a role of a host or a guest, requesting the necessary parameters (username, join code, etc), and testing the room handshake protocol, showing the room state in the process.
 Upon establishing a successful connection, it should allow a simple chat interface for text message exchange.
 
-## Future Enhancements
+## Future Enhancements (Not in Scope)
 
 1. **TURN Server Support**: Add support for TURN servers for NAT traversal
 2. **Connection Metrics**: Expose connection quality metrics
