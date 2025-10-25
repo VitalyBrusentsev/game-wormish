@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebRTC Registry Client - Debug Harness</title>
+  <link rel="stylesheet" href="src/styles/debug-harness.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>WebRTC Registry Client - Debug Harness</h1>
+      <p class="subtitle">Test room handshake protocol and peer-to-peer messaging</p>
+    </header>
+
+    <main>
+      <!-- Configuration Section -->
+      <section class="section config-section">
+        <h2>Configuration</h2>
+        <div class="form-group">
+          <label for="registry-url">Registry API URL:</label>
+          <input 
+            type="text" 
+            id="registry-url" 
+            data-testid="registry-url"
+            value="http://127.0.0.1:8787"
+            placeholder="https://registry.example.com"
+          />
+        </div>
+        <div class="form-group">
+          <label for="stun-url">STUN Server URL:</label>
+          <input 
+            type="text" 
+            id="stun-url"
+            data-testid="stun-url"
+            value="stun:stun.l.google.com:19302"
+            placeholder="stun:stun.l.google.com:19302"
+          />
+        </div>
+      </section>
+
+      <!-- Role Selection -->
+      <section class="section role-section">
+        <h2>Select Role</h2>
+        <div class="role-buttons">
+          <button 
+            id="role-host" 
+            class="role-button" 
+            data-testid="role-host"
+          >
+            Host
+          </button>
+          <button 
+            id="role-guest" 
+            class="role-button"
+            data-testid="role-guest"
+          >
+            Guest
+          </button>
+        </div>
+      </section>
+
+      <!-- Host Interface -->
+      <section id="host-interface" class="section hidden" data-testid="host-interface">
+        <h2>Host Interface</h2>
+        <div class="form-group">
+          <label for="host-username">Your Username:</label>
+          <input 
+            type="text" 
+            id="host-username"
+            data-testid="host-username"
+            placeholder="Enter your username"
+            maxlength="32"
+          />
+        </div>
+        <button 
+          id="create-room-btn"
+          class="action-button"
+          data-testid="create-room-btn"
+        >
+          Create Room
+        </button>
+
+        <div id="room-created-info" class="info-box hidden" data-testid="room-created-info">
+          <h3>Room Created!</h3>
+          <div class="info-row">
+            <label>Room Code:</label>
+            <span id="room-code" class="code" data-testid="room-code"></span>
+            <button id="copy-room-code" class="copy-btn" data-testid="copy-room-code">Copy</button>
+          </div>
+          <div class="info-row">
+            <label>Join Code:</label>
+            <span id="join-code" class="code" data-testid="join-code"></span>
+            <button id="copy-join-code" class="copy-btn" data-testid="copy-join-code">Copy</button>
+          </div>
+          <div class="info-row">
+            <label>Expires At:</label>
+            <span id="expires-at" data-testid="expires-at"></span>
+          </div>
+          <button 
+            id="start-connection-host-btn"
+            class="action-button"
+            data-testid="start-connection-host-btn"
+          >
+            Start Connection
+          </button>
+        </div>
+      </section>
+
+      <!-- Guest Interface -->
+      <section id="guest-interface" class="section hidden" data-testid="guest-interface">
+        <h2>Guest Interface</h2>
+        <div class="form-group">
+          <label for="guest-username">Your Username:</label>
+          <input 
+            type="text" 
+            id="guest-username"
+            data-testid="guest-username"
+            placeholder="Enter your username"
+            maxlength="32"
+          />
+        </div>
+        <div class="form-group">
+          <label for="guest-room-code">Room Code:</label>
+          <input 
+            type="text" 
+            id="guest-room-code"
+            data-testid="guest-room-code"
+            placeholder="8-character room code"
+            maxlength="8"
+          />
+        </div>
+        <div class="form-group">
+          <label for="guest-join-code">Join Code:</label>
+          <input 
+            type="text" 
+            id="guest-join-code"
+            data-testid="guest-join-code"
+            placeholder="6-digit join code"
+            maxlength="6"
+          />
+        </div>
+        <button 
+          id="join-room-btn"
+          class="action-button"
+          data-testid="join-room-btn"
+        >
+          Join Room
+        </button>
+
+        <div id="room-joined-info" class="info-box hidden" data-testid="room-joined-info">
+          <h3>Joined Room!</h3>
+          <div class="info-row">
+            <label>Host:</label>
+            <span id="host-name" data-testid="host-name"></span>
+          </div>
+          <button 
+            id="start-connection-guest-btn"
+            class="action-button"
+            data-testid="start-connection-guest-btn"
+          >
+            Start Connection
+          </button>
+        </div>
+      </section>
+
+      <!-- Connection State -->
+      <section class="section state-section">
+        <h2>Connection State</h2>
+        <div class="state-display">
+          <div class="state-indicator" id="state-indicator" data-testid="state-indicator">
+            <span class="state-dot"></span>
+            <span class="state-text" id="state-text" data-testid="state-text">idle</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Chat Interface -->
+      <section id="chat-interface" class="section hidden" data-testid="chat-interface">
+        <h2>Chat</h2>
+        <div class="chat-container">
+          <div id="chat-messages" class="chat-messages" data-testid="chat-messages">
+            <!-- Messages will appear here -->
+          </div>
+          <div class="chat-input-container">
+            <input 
+              type="text" 
+              id="chat-input"
+              data-testid="chat-input"
+              placeholder="Type a message..."
+            />
+            <button 
+              id="send-message-btn"
+              class="action-button"
+              data-testid="send-message-btn"
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Error Display -->
+      <section id="error-section" class="section error-section hidden" data-testid="error-section">
+        <h2>Error</h2>
+        <div class="error-box" id="error-box" data-testid="error-box"></div>
+      </section>
+
+      <!-- Close Room -->
+      <section class="section actions-section">
+        <button 
+          id="close-room-btn"
+          class="action-button danger-button hidden"
+          data-testid="close-room-btn"
+        >
+          Close Room
+        </button>
+      </section>
+    </main>
+  </div>
+
+  <script type="module">
+    import { WebRTCRegistryClient, ConnectionState } from './src/webrtc/index.ts';
+
+    let client = null;
+    let currentRole = null;
+
+    // DOM Elements
+    const registryUrlInput = document.getElementById('registry-url');
+    const stunUrlInput = document.getElementById('stun-url');
+    const roleHostBtn = document.getElementById('role-host');
+    const roleGuestBtn = document.getElementById('role-guest');
+    const hostInterface = document.getElementById('host-interface');
+    const guestInterface = document.getElementById('guest-interface');
+    const chatInterface = document.getElementById('chat-interface');
+    const errorSection = document.getElementById('error-section');
+    const errorBox = document.getElementById('error-box');
+    const stateText = document.getElementById('state-text');
+    const stateIndicator = document.getElementById('state-indicator');
+    const closeRoomBtn = document.getElementById('close-room-btn');
+
+    // Host elements
+    const hostUsernameInput = document.getElementById('host-username');
+    const createRoomBtn = document.getElementById('create-room-btn');
+    const roomCreatedInfo = document.getElementById('room-created-info');
+    const roomCodeSpan = document.getElementById('room-code');
+    const joinCodeSpan = document.getElementById('join-code');
+    const expiresAtSpan = document.getElementById('expires-at');
+    const startConnectionHostBtn = document.getElementById('start-connection-host-btn');
+    const copyRoomCodeBtn = document.getElementById('copy-room-code');
+    const copyJoinCodeBtn = document.getElementById('copy-join-code');
+
+    // Guest elements
+    const guestUsernameInput = document.getElementById('guest-username');
+    const guestRoomCodeInput = document.getElementById('guest-room-code');
+    const guestJoinCodeInput = document.getElementById('guest-join-code');
+    const joinRoomBtn = document.getElementById('join-room-btn');
+    const roomJoinedInfo = document.getElementById('room-joined-info');
+    const hostNameSpan = document.getElementById('host-name');
+    const startConnectionGuestBtn = document.getElementById('start-connection-guest-btn');
+
+    // Chat elements
+    const chatMessages = document.getElementById('chat-messages');
+    const chatInput = document.getElementById('chat-input');
+    const sendMessageBtn = document.getElementById('send-message-btn');
+
+    // Initialize client
+    function initializeClient() {
+      const registryApiUrl = registryUrlInput.value.trim();
+      const stunUrl = stunUrlInput.value.trim();
+
+      if (!registryApiUrl || !stunUrl) {
+        showError('Please provide Registry API URL and STUN server URL');
+        return false;
+      }
+
+      client = new WebRTCRegistryClient({
+        registryApiUrl,
+        iceServers: [{ urls: stunUrl }]
+      });
+
+      client.onStateChange((state) => {
+        updateState(state);
+        if (state === ConnectionState.CONNECTED) {
+          chatInterface.classList.remove('hidden');
+        }
+      });
+
+      client.onMessage((message) => {
+        addChatMessage(message.text, 'peer');
+      });
+
+      client.onError((error) => {
+        showError(error.message);
+      });
+
+      return true;
+    }
+
+    // Role selection
+    roleHostBtn.addEventListener('click', () => {
+      currentRole = 'host';
+      roleHostBtn.classList.add('active');
+      roleGuestBtn.classList.remove('active');
+      hostInterface.classList.remove('hidden');
+      guestInterface.classList.add('hidden');
+      if (!client && !initializeClient()) return;
+    });
+
+    roleGuestBtn.addEventListener('click', () => {
+      currentRole = 'guest';
+      roleGuestBtn.classList.add('active');
+      roleHostBtn.classList.remove('active');
+      guestInterface.classList.remove('hidden');
+      hostInterface.classList.add('hidden');
+      if (!client && !initializeClient()) return;
+    });
+
+    // Host: Create room
+    createRoomBtn.addEventListener('click', async () => {
+      const username = hostUsernameInput.value.trim();
+      if (!username) {
+        showError('Please enter a username');
+        return;
+      }
+
+      try {
+        await client.createRoom(username);
+        const roomInfo = client.getRoomInfo();
+        
+        roomCodeSpan.textContent = roomInfo.code;
+        joinCodeSpan.textContent = roomInfo.joinCode || 'N/A';
+        expiresAtSpan.textContent = new Date(roomInfo.expiresAt).toLocaleString();
+        
+        roomCreatedInfo.classList.remove('hidden');
+        closeRoomBtn.classList.remove('hidden');
+        createRoomBtn.disabled = true;
+      } catch (error) {
+        showError(`Failed to create room: ${error.message}`);
+      }
+    });
+
+    // Guest: Join room
+    joinRoomBtn.addEventListener('click', async () => {
+      const username = guestUsernameInput.value.trim();
+      const roomCode = guestRoomCodeInput.value.trim();
+      const joinCode = guestJoinCodeInput.value.trim();
+
+      if (!username || !roomCode || !joinCode) {
+        showError('Please fill in all fields');
+        return;
+      }
+
+      try {
+        await client.joinRoom(roomCode, joinCode, username);
+        const roomInfo = client.getRoomInfo();
+        
+        hostNameSpan.textContent = roomInfo.hostUserName || 'Unknown';
+        roomJoinedInfo.classList.remove('hidden');
+        closeRoomBtn.classList.remove('hidden');
+        joinRoomBtn.disabled = true;
+      } catch (error) {
+        showError(`Failed to join room: ${error.message}`);
+      }
+    });
+
+    // Start connection
+    startConnectionHostBtn.addEventListener('click', async () => {
+      try {
+        await client.startConnection();
+        startConnectionHostBtn.disabled = true;
+      } catch (error) {
+        showError(`Failed to start connection: ${error.message}`);
+      }
+    });
+
+    startConnectionGuestBtn.addEventListener('click', async () => {
+      try {
+        await client.startConnection();
+        startConnectionGuestBtn.disabled = true;
+      } catch (error) {
+        showError(`Failed to start connection: ${error.message}`);
+      }
+    });
+
+    // Copy buttons
+    copyRoomCodeBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(roomCodeSpan.textContent);
+    });
+
+    copyJoinCodeBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(joinCodeSpan.textContent);
+    });
+
+    // Chat
+    sendMessageBtn.addEventListener('click', sendChatMessage);
+    chatInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') sendChatMessage();
+    });
+
+    function sendChatMessage() {
+      const text = chatInput.value.trim();
+      if (!text) return;
+
+      try {
+        client.sendMessage({ text });
+        addChatMessage(text, 'self');
+        chatInput.value = '';
+      } catch (error) {
+        showError(`Failed to send message: ${error.message}`);
+      }
+    }
+
+    function addChatMessage(text, sender) {
+      const messageEl = document.createElement('div');
+      messageEl.className = `chat-message ${sender}`;
+      messageEl.textContent = text;
+      chatMessages.appendChild(messageEl);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // Close room
+    closeRoomBtn.addEventListener('click', async () => {
+      try {
+        await client.closeRoom();
+        location.reload();
+      } catch (error) {
+        showError(`Failed to close room: ${error.message}`);
+      }
+    });
+
+    // Update state display
+    function updateState(state) {
+      stateText.textContent = state;
+      stateIndicator.className = `state-indicator state-${state}`;
+    }
+
+    // Show error
+    function showError(message) {
+      errorBox.textContent = message;
+      errorSection.classList.remove('hidden');
+      setTimeout(() => {
+        errorSection.classList.add('hidden');
+      }, 5000);
+    }
+  </script>
+</body>
+</html>
