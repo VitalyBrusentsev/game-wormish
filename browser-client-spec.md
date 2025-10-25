@@ -1,5 +1,5 @@
 # WebRTC Registry Client Module Specification
-> Revision: 1.1
+> Revision: 1.2
 
 **Target**: TypeScript client for a 2‑player, room‑scoped WebRTC handshake using the “Registry” HTTP API.  
 
@@ -218,7 +218,7 @@ The client will maintain an internal state machine that tracks the connection li
 4. **JOINING**: Guest is joining a room
 5. **JOINED**: Guest joined successfully, ready to establish connection
 6. **CONNECTING**: WebRTC connection is being established
-7. **CONNECTED**: WebRTC connection is established and data channel is open
+7. **CONNECTED**: WebRTC connection is established and data channel is open. Application-level data can only be sent once the `RTCDataChannel`'s `readyState` is open.
 8. **DISCONNECTED**: Connection was established but is now closed
 9. **ERROR**: An error occurred during the process
 
@@ -244,16 +244,16 @@ The module will be designed for comprehensive unit testing:
 2. **Mock Implementations**: Provide mock implementations of all interfaces for testing
 3. **State Testing**: Test all state transitions and edge cases
 4. **Error Scenarios**: Test various error conditions and recovery paths
-5. **Integration Testing**: Provide guidance for integration testing with real WebRTC connections
 
 ## Implementation Considerations
 
-1. **Polling Strategy**: Implement efficient polling for room state and candidates. Manage the correct polling lifetime: the client should remove the polling loop as soon as the room changes status from states expected to be polled, or the first datachannel open event fires, or when pc.iceGatheringState === "complete"
-2. **Rate Limiting**: Respect API rate limits with exponential backoff
-3. **Connection Resilience**: Implement reconnection strategies for temporary network issues
-4. **Memory Management**: Properly clean up WebRTC resources when closing connections
-5. **Browser Compatibility**: Ensure compatibility across major browsers
-6. **Data Validation**: Guard against incorrect candidate data values (filter out mDNS candidates for IP debugging and empty candidates)
+1. **Efficient Candidate handling**: The WebRTCManager should be bound to the RTCPeerConnection.onicecandidate event. When a candidate is generated, it should be sent immediately via registryClient.postCandidate(). The client should be designed to handle and add candidates idempotently, as the "full set" API might send the same candidates multiple times.
+2. **Polling Strategy**: Implement efficient polling for room state and candidates. Manage the correct polling lifetime: the client should remove the polling loop as soon as the room changes status from states expected to be polled, or the first datachannel open event fires, or when pc.iceGatheringState becomes "complete" or "failed".
+3. **Rate Limiting**: Respect API rate limits with exponential backoff
+4. **Connection Resilience**: Implement reconnection strategies for temporary network issues
+5. **Memory Management**: Properly clean up WebRTC resources when closing connections
+6. **Browser Compatibility**: Ensure compatibility across major browsers
+7. **Data Validation**: Guard against incorrect candidate data values (filter out mDNS candidates for IP debugging and empty candidates)
 
 ## Usage Examples
 
@@ -324,8 +324,32 @@ client.sendMessage({ type: "greeting", content: "Hello from guest!" });
 
 ## Debugging Harness
 
-The Debugging Harness is a standalone HTML page with form UI, allowing the user to choose a role of a host or a guest, requesting the necessary parameters (username, join code, etc), and testing the room handshake protocol, showing the room state in the process.
+The Debugging Harness is a standalone HTML page with form UI, allowing the user to choose a role of a host or a guest, requesting the necessary parameters (username, join code, etc), and testing the room handshake protocol, showing the room state in the process. The form controls should have discoverable attributes, suitable for page automation via Playwright.
 Upon establishing a successful connection, it should allow a simple chat interface for text message exchange.
+
+## Integration Testing
+
+The integration testing of the client should be implemented via headless browser orchestration with Playwright within a Node.js test runner like Jest.
+### Test Workflow
+**Setup**: The test script starts a local instance of the registry API (`wrangler dev`).
+
+**Launch Peers**: It launches two headless browser instances (e.g., Chromium), representing the "Host" and the "Guest".
+
+**Orchestration**: The central test script acts as the "out-of-band" communicator:
+
+- It instructs the Host browser to execute `client.createRoom('HostUser')`.
+- It retrieves the resulting `roomCode` and `joinCode` from the Host browser's execution context.
+- It passes these codes to the Guest browser.
+- It instructs the Guest browser to execute `client.joinRoom(roomCode, joinCode, 'GuestUser')`.
+- It then instructs both browsers to call `client.startConnection()`.
+
+**Verification**:
+
+- The test script listens for `onStateChange` events from both peers, asserting that they both eventually reach the `CONNECTED` state.
+- To verify the data channel, the script instructs the Host to `sendMessage('ping')`. It then waits for the Guest's `onMessage` event and asserts that the received data is 'ping'.
+- The process is repeated in the other direction (Guest to Host) to ensure bidirectional communication.
+
+**Teardown**: The script closes the room and terminates the browser instances.
 
 ## Future Enhancements (Not in Scope)
 
