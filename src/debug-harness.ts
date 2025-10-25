@@ -1,4 +1,8 @@
-import { ConnectionState, WebRTCRegistryClient } from "./network/webrtc/registry-client";
+import {
+  ConnectionState,
+  WebRTCRegistryClient,
+  type DebugEvent,
+} from "./network/webrtc/registry-client";
 import type { RoomInfo } from "./network/webrtc/registry-client";
 
 const registryUrlInput = document.getElementById("registry-url") as HTMLInputElement;
@@ -131,6 +135,10 @@ function createClient(): WebRTCRegistryClient {
     startConnectionButton.disabled = false;
   });
 
+  newClient.onDebug((event) => {
+    appendDebugLog(event);
+  });
+
   return newClient;
 }
 
@@ -223,10 +231,25 @@ function updateRoomInfoDisplay(): void {
     : "-";
 }
 
-function appendLog(message: string): void {
+function appendLog(message: string, details?: unknown): void {
   const timestamp = new Date().toLocaleTimeString();
-  eventLog.textContent = `${eventLog.textContent ?? ""}[${timestamp}] ${message}\n`;
+  const logLines = [`[${timestamp}] ${message}`];
+  if (details !== undefined) {
+    const formattedDetails =
+      typeof details === "string"
+        ? details
+        : JSON.stringify(details, null, 2);
+    if (formattedDetails) {
+      logLines.push(formattedDetails);
+    }
+  }
+  eventLog.textContent = `${eventLog.textContent ?? ""}${logLines.join("\n")}\n`;
   eventLog.scrollTop = eventLog.scrollHeight;
+}
+
+function appendDebugLog(event: DebugEvent): void {
+  const prefix = `[${event.type}] ${event.message}`;
+  appendLog(prefix, event.details);
 }
 
 function appendChatEntry(sender: string, message: string): void {
