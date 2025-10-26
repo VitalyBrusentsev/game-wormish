@@ -84,7 +84,7 @@ describe("RegistryClient", () => {
 
       expect(mockHttpClient.post).toHaveBeenCalledWith(
         `${baseUrl}/rooms/ABCD1234/offer`,
-        { offer },
+        offer,
         { "X-Access-Token": "token123" }
       );
     });
@@ -103,7 +103,7 @@ describe("RegistryClient", () => {
 
       expect(mockHttpClient.post).toHaveBeenCalledWith(
         `${baseUrl}/rooms/ABCD1234/answer`,
-        { answer },
+        answer,
         { "X-Access-Token": "token123" }
       );
     });
@@ -122,8 +122,8 @@ describe("RegistryClient", () => {
       await registryClient.postCandidate("ABCD1234", "token123", candidate);
 
       expect(mockHttpClient.post).toHaveBeenCalledWith(
-        `${baseUrl}/rooms/ABCD1234/candidates`,
-        { candidate },
+        `${baseUrl}/rooms/ABCD1234/candidate`,
+        candidate,
         { "X-Access-Token": "token123" }
       );
     });
@@ -182,8 +182,8 @@ describe("RegistryClient", () => {
       await registryClient.closeRoom("ABCD1234", "token123");
 
       expect(mockHttpClient.post).toHaveBeenCalledWith(
-        `${baseUrl}/rooms/ABCD1234`,
-        { status: "closed" },
+        `${baseUrl}/rooms/ABCD1234/close`,
+        undefined,
         { "X-Access-Token": "token123" }
       );
     });

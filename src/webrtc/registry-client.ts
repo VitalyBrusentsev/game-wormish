@@ -70,7 +70,7 @@ export class RegistryClient implements IRegistryClient {
     const url = `${this.baseUrl}/rooms/${roomCode}/offer`;
     await this.httpClient.post(
       url,
-      { offer },
+      offer,
       { "X-Access-Token": token }
     );
   }
@@ -89,7 +89,7 @@ export class RegistryClient implements IRegistryClient {
     const url = `${this.baseUrl}/rooms/${roomCode}/answer`;
     await this.httpClient.post(
       url,
-      { answer },
+      answer,
       { "X-Access-Token": token }
     );
   }
@@ -105,10 +105,10 @@ export class RegistryClient implements IRegistryClient {
     token: string,
     candidate: RTCIceCandidateInit
   ): Promise<void> {
-    const url = `${this.baseUrl}/rooms/${roomCode}/candidates`;
+    const url = `${this.baseUrl}/rooms/${roomCode}/candidate`;
     await this.httpClient.post(
       url,
-      { candidate },
+      candidate,
       { "X-Access-Token": token }
     );
   }
@@ -139,7 +139,7 @@ export class RegistryClient implements IRegistryClient {
    * @param token - The access token
    */
   async closeRoom(roomCode: string, token: string): Promise<void> {
-    const url = `${this.baseUrl}/rooms/${roomCode}`;
-    await this.httpClient.post(url, { status: "closed" }, { "X-Access-Token": token });
+    const url = `${this.baseUrl}/rooms/${roomCode}/close`;
+    await this.httpClient.post(url, undefined, { "X-Access-Token": token });
   }
 }
