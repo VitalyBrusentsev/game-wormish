@@ -209,7 +209,7 @@ All HTTP requests are configured with:
 - mDNS candidates (containing `.local`) are filtered out
 - Empty candidates are ignored
 - Candidates are deduplicated using a composite key
-- Polling stops when ICE gathering completes or data channel opens
+- Polling stops when data channel opens
 
 ### Polling Strategy
 

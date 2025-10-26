@@ -233,11 +233,6 @@ export class RoomManager implements IRoomManager {
           }
         }
 
-        // Check if ICE gathering is complete
-        const pc = this.stateManager.getPeerConnection();
-        if (pc && pc.iceGatheringState === "complete") {
-          this.stopCandidatePolling();
-        }
       } catch (error) {
         console.error("Error polling candidates:", error);
       }

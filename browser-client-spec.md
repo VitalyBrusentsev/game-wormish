@@ -248,7 +248,7 @@ The module will be designed for comprehensive unit testing:
 ## Implementation Considerations
 
 1. **Efficient Candidate handling**: The WebRTCManager should be bound to the RTCPeerConnection.onicecandidate event. When a candidate is generated, it should be sent immediately via registryClient.postCandidate(). The client should be designed to handle and add candidates idempotently, as the "full set" API might send the same candidates multiple times.
-2. **Polling Strategy**: Implement efficient polling for room state and candidates. Manage the correct polling lifetime: the client should remove the polling loop as soon as the room changes status from states expected to be polled, or the first datachannel open event fires, or when pc.iceGatheringState becomes "complete" or "failed".
+2. **Polling Strategy**: Implement efficient polling for room state and candidates. Manage the correct polling lifetime: the client should remove the polling loop as soon as the room changes status from states expected to be polled, or the first datachannel open event fires, or when pc.iceGatheringState becomes "failed".
 3. **Rate Limiting**: Respect API rate limits with exponential backoff
 4. **Connection Resilience**: Implement reconnection strategies for temporary network issues
 5. **Memory Management**: Properly clean up WebRTC resources when closing connections
