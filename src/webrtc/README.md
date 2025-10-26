@@ -164,19 +164,16 @@ Get the current room information.
 The module includes comprehensive unit tests for all components:
 
 ```bash
-# Run tests
-npm run test
-
-# Run tests with coverage
+# A single run of the test suite
 npm run test:run
 ```
 
 **Test Coverage:**
-- ✅ HTTP Client (11 tests)
-- ✅ Registry Client (9 tests)
-- ✅ State Manager (16 tests)
-- ✅ WebRTC Manager (22 tests)
-- ✅ Main Client (6 tests)
+- HTTP Client
+- Registry Client
+- State Manager
+- WebRTC Manager
+- Main Client
 
 ## Debug Harness
 
