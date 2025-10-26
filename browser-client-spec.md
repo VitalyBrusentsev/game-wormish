@@ -253,7 +253,7 @@ The module will be designed for comprehensive unit testing:
 4. **Connection Resilience**: Implement reconnection strategies for temporary network issues
 5. **Memory Management**: Properly clean up WebRTC resources when closing connections
 6. **Browser Compatibility**: Ensure compatibility across major browsers
-7. **Data Validation**: Guard against incorrect candidate data values (filter out mDNS candidates for IP debugging and empty candidates)
+7. **Data Validation**: Guard against incorrect candidate data values (filter out empty candidates)
 
 ## Usage Examples
 
