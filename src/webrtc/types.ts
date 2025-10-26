@@ -59,6 +59,49 @@ export interface CandidateList {
   lastSeq?: number;
 }
 
+// Debug events for instrumentation and tooling
+export type DebugEvent =
+  | {
+      type: "room-snapshot";
+      status: RoomSnapshot["status"];
+      hasOffer: boolean;
+      hasAnswer: boolean;
+      timestamp: number;
+    }
+  | {
+      type: "offer-posted" | "answer-posted";
+      timestamp: number;
+    }
+  | {
+      type: "remote-description-set";
+      descriptionType: "offer" | "answer";
+      timestamp: number;
+    }
+  | {
+      type: "candidate-sent" | "candidate-buffered" | "candidate-applied";
+      candidateKey: string;
+      candidate: string;
+      timestamp: number;
+    }
+  | {
+      type: "candidate-error";
+      candidateKey: string;
+      candidate: string;
+      message: string;
+      timestamp: number;
+    }
+  | {
+      type: "peer-connection-state";
+      state: RTCPeerConnectionState;
+      timestamp: number;
+    }
+  | {
+      type: "data-channel-state";
+      state: RTCDataChannelState;
+      label: string;
+      timestamp: number;
+    };
+
 // HTTP Client Interface
 export interface IHttpClient {
   get(url: string, headers?: Record<string, string>): Promise<any>;
@@ -113,6 +156,7 @@ export interface IRoomManager {
   closeRoom(): Promise<void>;
   onStateChange(callback: (state: ConnectionState) => void): void;
   onMessage(callback: (message: any) => void): void;
+  onDebugEvent(callback: (event: DebugEvent) => void): void;
   sendMessage(message: any): void;
   getConnectionState(): ConnectionState;
   getRoomInfo(): RoomInfo | null;
@@ -144,7 +188,8 @@ export interface IWebRTCRegistryClient {
   onStateChange(callback: (state: ConnectionState) => void): void;
   onMessage(callback: (message: any) => void): void;
   onError(callback: (error: Error) => void): void;
-  
+  onDebugEvent(callback: (event: DebugEvent) => void): void;
+
   // Getters
   getConnectionState(): ConnectionState;
   getRoomInfo(): RoomInfo | null;

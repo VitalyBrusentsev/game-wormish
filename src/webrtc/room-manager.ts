@@ -5,6 +5,7 @@ import type {
   IWebRTCManager,
   IStateManager,
   RoomInfo,
+  DebugEvent,
 } from "./types";
 
 /**
@@ -23,6 +24,8 @@ export class RoomManager implements IRoomManager {
   private pollingInterval: number | null = null;
   private candidatePollingInterval: number | null = null;
   private processedCandidates = new Set<string>();
+  private pendingCandidates = new Map<string, RTCIceCandidateInit>();
+  private debugCallbacks: ((event: DebugEvent) => void)[] = [];
 
   constructor(
     private readonly registryClient: IRegistryClient,
@@ -99,6 +102,8 @@ export class RoomManager implements IRoomManager {
     }
 
     this.setState(ConnectionState.CONNECTING);
+    this.processedCandidates.clear();
+    this.pendingCandidates.clear();
 
     // Create peer connection
     const pc = this.webRTCManager.createPeerConnection(this.iceServers);
@@ -106,15 +111,34 @@ export class RoomManager implements IRoomManager {
 
     // Set up ICE candidate handler
     this.webRTCManager.onIceCandidate(async (candidate) => {
+      const candidateKey = this.getCandidateKey(candidate);
       try {
         await this.registryClient.postCandidate(roomInfo.code, roomInfo.token, candidate);
+        this.emitDebug({
+          type: "candidate-sent",
+          candidateKey,
+          candidate: candidate.candidate ?? "",
+          timestamp: Date.now(),
+        });
       } catch (error) {
         console.error("Failed to post ICE candidate:", error);
+        this.emitDebug({
+          type: "candidate-error",
+          candidateKey,
+          candidate: candidate.candidate ?? "",
+          message: error instanceof Error ? error.message : String(error),
+          timestamp: Date.now(),
+        });
       }
     });
 
     // Set up connection state change handler
     this.webRTCManager.onConnectionStateChange((state) => {
+      this.emitDebug({
+        type: "peer-connection-state",
+        state,
+        timestamp: Date.now(),
+      });
       if (state === "connected") {
         this.stopPolling();
       } else if (state === "failed" || state === "closed") {
@@ -142,6 +166,7 @@ export class RoomManager implements IRoomManager {
     const offer = await this.webRTCManager.createOffer();
     await this.webRTCManager.setLocalDescription(offer);
     await this.registryClient.postOffer(roomInfo.code, roomInfo.token, offer);
+    this.emitDebug({ type: "offer-posted", timestamp: Date.now() });
 
     // Start polling for answer and candidates
     this.startPolling(roomInfo);
@@ -165,10 +190,22 @@ export class RoomManager implements IRoomManager {
    */
   private setupDataChannel(channel: RTCDataChannel): void {
     this.stateManager.setDataChannel(channel);
+    this.emitDebug({
+      type: "data-channel-state",
+      state: channel.readyState,
+      label: channel.label,
+      timestamp: Date.now(),
+    });
 
     channel.onopen = () => {
       this.setState(ConnectionState.CONNECTED);
       this.stopPolling();
+      this.emitDebug({
+        type: "data-channel-state",
+        state: channel.readyState,
+        label: channel.label,
+        timestamp: Date.now(),
+      });
     };
 
     channel.onmessage = (event) => {
@@ -182,6 +219,12 @@ export class RoomManager implements IRoomManager {
 
     channel.onclose = () => {
       this.setState(ConnectionState.DISCONNECTED);
+      this.emitDebug({
+        type: "data-channel-state",
+        state: channel.readyState,
+        label: channel.label,
+        timestamp: Date.now(),
+      });
     };
 
     channel.onerror = (error) => {
@@ -197,22 +240,47 @@ export class RoomManager implements IRoomManager {
     this.pollingInterval = window.setInterval(async () => {
       try {
         const snapshot = await this.registryClient.getRoom(roomInfo.code, roomInfo.token);
+        this.emitDebug({
+          type: "room-snapshot",
+          status: snapshot.status,
+          hasOffer: Boolean(snapshot.offer),
+          hasAnswer: Boolean(snapshot.answer),
+          timestamp: snapshot.updatedAt ?? Date.now(),
+        });
+
+        const peerConnection = this.stateManager.getPeerConnection();
 
         // Handle offer (guest side)
-        if (roomInfo.role === "guest" && snapshot.offer && !this.stateManager.getPeerConnection()?.remoteDescription) {
+        if (roomInfo.role === "guest" && snapshot.offer && !peerConnection?.remoteDescription) {
           const answer = await this.webRTCManager.createAnswer(snapshot.offer);
+          this.emitDebug({
+            type: "remote-description-set",
+            descriptionType: "offer",
+            timestamp: Date.now(),
+          });
           await this.webRTCManager.setLocalDescription(answer);
           await this.registryClient.postAnswer(roomInfo.code, roomInfo.token, answer);
+          this.emitDebug({ type: "answer-posted", timestamp: Date.now() });
+          await this.flushPendingCandidates(this.stateManager.getPeerConnection());
         }
 
         // Handle answer (host side)
-        if (roomInfo.role === "host" && snapshot.answer && !this.stateManager.getPeerConnection()?.remoteDescription) {
+        if (roomInfo.role === "host" && snapshot.answer && !peerConnection?.remoteDescription) {
           await this.webRTCManager.setRemoteDescription(snapshot.answer);
+          this.emitDebug({
+            type: "remote-description-set",
+            descriptionType: "answer",
+            timestamp: Date.now(),
+          });
+          await this.flushPendingCandidates(this.stateManager.getPeerConnection());
         }
 
-        // Stop polling if room is closed or paired
-        if (snapshot.status === "closed" || snapshot.status === "paired") {
+        // Stop polling if room is closed. Once paired we can stop room polling
+        // but keep candidate polling active until the data channel opens.
+        if (snapshot.status === "closed") {
           this.stopPolling();
+        } else if (snapshot.status === "paired") {
+          this.stopRoomPolling();
         }
       } catch (error) {
         console.error("Error polling room state:", error);
@@ -223,16 +291,34 @@ export class RoomManager implements IRoomManager {
     this.candidatePollingInterval = window.setInterval(async () => {
       try {
         const candidateList = await this.registryClient.getCandidates(roomInfo.code, roomInfo.token);
-        
+        const peerConnection = this.stateManager.getPeerConnection();
+
         for (const candidate of candidateList.items) {
-          // Idempotent candidate handling - deduplicate using candidate string
           const candidateKey = this.getCandidateKey(candidate);
-          if (!this.processedCandidates.has(candidateKey)) {
-            this.processedCandidates.add(candidateKey);
-            await this.webRTCManager.addIceCandidate(candidate);
+          if (this.processedCandidates.has(candidateKey)) {
+            continue;
+          }
+
+          if (!peerConnection || !peerConnection.remoteDescription) {
+            if (!this.pendingCandidates.has(candidateKey)) {
+              this.pendingCandidates.set(candidateKey, candidate);
+              this.emitDebug({
+                type: "candidate-buffered",
+                candidateKey,
+                candidate: candidate.candidate ?? "",
+                timestamp: Date.now(),
+              });
+            }
+            continue;
+          }
+
+          const applied = await this.applyCandidate(candidateKey, candidate);
+          if (applied) {
+            this.pendingCandidates.delete(candidateKey);
           }
         }
 
+        await this.flushPendingCandidates(peerConnection ?? null);
       } catch (error) {
         console.error("Error polling candidates:", error);
       }
@@ -246,12 +332,59 @@ export class RoomManager implements IRoomManager {
     return `${candidate.candidate || ""}|${candidate.sdpMid || ""}|${candidate.sdpMLineIndex ?? -1}`;
   }
 
+  private async flushPendingCandidates(peerConnection: RTCPeerConnection | null): Promise<void> {
+    if (!peerConnection || !peerConnection.remoteDescription || this.pendingCandidates.size === 0) {
+      return;
+    }
+
+    for (const [candidateKey, candidate] of Array.from(this.pendingCandidates.entries())) {
+      if (this.processedCandidates.has(candidateKey)) {
+        this.pendingCandidates.delete(candidateKey);
+        continue;
+      }
+
+      const applied = await this.applyCandidate(candidateKey, candidate);
+      if (applied) {
+        this.pendingCandidates.delete(candidateKey);
+      }
+    }
+  }
+
+  private async applyCandidate(
+    candidateKey: string,
+    candidate: RTCIceCandidateInit
+  ): Promise<boolean> {
+    try {
+      await this.webRTCManager.addIceCandidate(candidate);
+      this.processedCandidates.add(candidateKey);
+      this.emitDebug({
+        type: "candidate-applied",
+        candidateKey,
+        candidate: candidate.candidate ?? "",
+        timestamp: Date.now(),
+      });
+      return true;
+    } catch (error) {
+      console.error("Failed to add ICE candidate:", error);
+      this.processedCandidates.add(candidateKey);
+      this.emitDebug({
+        type: "candidate-error",
+        candidateKey,
+        candidate: candidate.candidate ?? "",
+        message: error instanceof Error ? error.message : String(error),
+        timestamp: Date.now(),
+      });
+      return false;
+    }
+  }
+
   /**
    * Stop all polling
    */
   private stopPolling(): void {
     this.stopRoomPolling();
     this.stopCandidatePolling();
+    this.pendingCandidates.clear();
   }
 
   /**
@@ -290,6 +423,7 @@ export class RoomManager implements IRoomManager {
     this.stopPolling();
     this.stateManager.reset();
     this.processedCandidates.clear();
+    this.pendingCandidates.clear();
     this.setState(ConnectionState.IDLE);
   }
 
@@ -320,6 +454,13 @@ export class RoomManager implements IRoomManager {
   }
 
   /**
+   * Register a debug event callback
+   */
+  onDebugEvent(callback: (event: DebugEvent) => void): void {
+    this.debugCallbacks.push(callback);
+  }
+
+  /**
    * Get the current connection state
    */
   getConnectionState(): ConnectionState {
@@ -339,5 +480,9 @@ export class RoomManager implements IRoomManager {
   private setState(state: ConnectionState): void {
     this.stateManager.setState(state);
     this.stateChangeCallbacks.forEach((cb) => cb(state));
+  }
+
+  private emitDebug(event: DebugEvent): void {
+    this.debugCallbacks.forEach((cb) => cb(event));
   }
 }

@@ -175,6 +175,12 @@
         </div>
       </section>
 
+      <!-- Debug Timeline -->
+      <section class="section debug-section" data-testid="debug-section">
+        <h2>Debug Timeline</h2>
+        <div id="debug-log" class="debug-log" data-testid="debug-log"></div>
+      </section>
+
       <!-- Chat Interface -->
       <section id="chat-interface" class="section hidden" data-testid="chat-interface">
         <h2>Chat</h2>
@@ -237,7 +243,10 @@
     const errorBox = document.getElementById('error-box');
     const stateText = document.getElementById('state-text');
     const stateIndicator = document.getElementById('state-indicator');
+    const debugLog = document.getElementById('debug-log');
     const closeRoomBtn = document.getElementById('close-room-btn');
+
+    const MAX_DEBUG_ENTRIES = 60;
 
     // Host elements
     const hostUsernameInput = document.getElementById('host-username');
@@ -279,6 +288,10 @@
         iceServers: [{ urls: stunUrl }]
       });
 
+      if (debugLog) {
+        debugLog.innerHTML = '';
+      }
+
       client.onStateChange((state) => {
         updateState(state);
         if (state === ConnectionState.CONNECTED) {
@@ -292,6 +305,10 @@
 
       client.onError((error) => {
         showError(error.message);
+      });
+
+      client.onDebugEvent((event) => {
+        addDebugEvent(event);
       });
 
       return true;
@@ -417,6 +434,108 @@
       messageEl.textContent = text;
       chatMessages.appendChild(messageEl);
       chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function addDebugEvent(event) {
+      if (!debugLog) return;
+
+      const entry = document.createElement('div');
+      entry.className = 'debug-entry';
+      entry.dataset.eventType = event.type;
+
+      if (event.type === 'candidate-error') {
+        entry.classList.add('debug-entry-error');
+      } else if (event.type === 'candidate-buffered') {
+        entry.classList.add('debug-entry-buffered');
+      }
+
+      const header = document.createElement('div');
+      header.className = 'debug-entry-header';
+
+      const typeSpan = document.createElement('span');
+      typeSpan.className = 'debug-entry-type';
+      typeSpan.textContent = formatDebugEventType(event.type);
+
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'debug-entry-time';
+      timeSpan.textContent = new Date(event.timestamp || Date.now()).toLocaleTimeString();
+
+      header.appendChild(typeSpan);
+      header.appendChild(timeSpan);
+
+      const message = document.createElement('div');
+      message.className = 'debug-entry-message';
+      message.textContent = describeDebugEvent(event);
+
+      entry.appendChild(header);
+      entry.appendChild(message);
+
+      debugLog.prepend(entry);
+
+      while (debugLog.childElementCount > MAX_DEBUG_ENTRIES) {
+        debugLog.removeChild(debugLog.lastElementChild);
+      }
+    }
+
+    function formatDebugEventType(type) {
+      switch (type) {
+        case 'room-snapshot':
+          return 'Room Poll';
+        case 'offer-posted':
+          return 'Offer';
+        case 'answer-posted':
+          return 'Answer';
+        case 'remote-description-set':
+          return 'Remote SDP';
+        case 'candidate-sent':
+          return 'Candidate Out';
+        case 'candidate-buffered':
+          return 'Candidate Buffered';
+        case 'candidate-applied':
+          return 'Candidate In';
+        case 'candidate-error':
+          return 'Candidate Error';
+        case 'peer-connection-state':
+          return 'Peer State';
+        case 'data-channel-state':
+          return 'Data Channel';
+        default:
+          return type;
+      }
+    }
+
+    function describeDebugEvent(event) {
+      switch (event.type) {
+        case 'room-snapshot':
+          return `Room status: ${event.status} (offer: ${event.hasOffer ? 'yes' : 'no'}, answer: ${event.hasAnswer ? 'yes' : 'no'})`;
+        case 'offer-posted':
+          return 'Offer posted to registry';
+        case 'answer-posted':
+          return 'Answer posted to registry';
+        case 'remote-description-set':
+          return `Remote description set (${event.descriptionType})`;
+        case 'candidate-sent':
+          return `Sent ICE candidate ${summarizeCandidate(event.candidateKey, event.candidate)}`;
+        case 'candidate-buffered':
+          return `Buffered ICE candidate ${summarizeCandidate(event.candidateKey, event.candidate)}`;
+        case 'candidate-applied':
+          return `Applied ICE candidate ${summarizeCandidate(event.candidateKey, event.candidate)}`;
+        case 'candidate-error':
+          return `Candidate issue (${event.candidateKey}): ${event.message}`;
+        case 'peer-connection-state':
+          return `Peer connection state changed to ${event.state}`;
+        case 'data-channel-state':
+          return `Data channel "${event.label}" is ${event.state}`;
+        default:
+          return event.type;
+      }
+    }
+
+    function summarizeCandidate(candidateKey, candidate) {
+      const keySuffix = candidateKey ? candidateKey.slice(0, 8) : 'n/a';
+      const text = candidate || 'empty';
+      const truncated = text.length > 60 ? `${text.slice(0, 60)}…` : text;
+      return `[${keySuffix}] ${truncated}`;
     }
 
     // Close room

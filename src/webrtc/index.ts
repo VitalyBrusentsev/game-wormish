@@ -14,6 +14,7 @@ export {
   type RoomInfo,
   type WebRTCClientConfig,
   type IWebRTCRegistryClient,
+  type DebugEvent,
   type RoomCreationResponse,
   type PublicRoomInfo,
   type RoomJoinResponse,

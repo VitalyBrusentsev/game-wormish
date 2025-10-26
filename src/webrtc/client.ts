@@ -7,6 +7,7 @@ import type {
   IWebRTCManager,
   IStateManager,
   IRoomManager,
+  DebugEvent,
 } from "./types";
 import { HttpClient } from "./http-client";
 import { RegistryClient } from "./registry-client";
@@ -29,6 +30,7 @@ import { RoomManager } from "./room-manager";
 export class WebRTCRegistryClient implements IWebRTCRegistryClient {
   private readonly roomManager: IRoomManager;
   private errorCallbacks: ((error: Error) => void)[] = [];
+  private debugCallbacks: ((event: DebugEvent) => void)[] = [];
 
   constructor(config: WebRTCClientConfig) {
     // Use injected dependencies or create defaults
@@ -47,6 +49,11 @@ export class WebRTCRegistryClient implements IWebRTCRegistryClient {
 
     // Set up error handling wrapper
     this.wrapRoomManagerForErrors();
+
+    // Forward debug events
+    this.roomManager.onDebugEvent((event) => {
+      this.debugCallbacks.forEach((cb) => cb(event));
+    });
   }
 
   /**
@@ -139,6 +146,14 @@ export class WebRTCRegistryClient implements IWebRTCRegistryClient {
    */
   onError(callback: (error: Error) => void): void {
     this.errorCallbacks.push(callback);
+  }
+
+  /**
+   * Register a callback for debug instrumentation events
+   * @param callback - Function to call when a debug event occurs
+   */
+  onDebugEvent(callback: (event: DebugEvent) => void): void {
+    this.debugCallbacks.push(callback);
   }
 
   /**
