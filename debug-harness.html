@@ -177,7 +177,16 @@
 
       <!-- Debug Timeline -->
       <section class="section debug-section" data-testid="debug-section">
-        <h2>Debug Timeline</h2>
+        <div class="section-header">
+          <h2>Debug Timeline</h2>
+          <button
+            id="copy-debug-log"
+            class="copy-btn"
+            data-testid="copy-debug-log"
+          >
+            Copy Log
+          </button>
+        </div>
         <div id="debug-log" class="debug-log" data-testid="debug-log"></div>
       </section>
 
@@ -244,9 +253,11 @@
     const stateText = document.getElementById('state-text');
     const stateIndicator = document.getElementById('state-indicator');
     const debugLog = document.getElementById('debug-log');
+    const copyDebugLogBtn = document.getElementById('copy-debug-log');
     const closeRoomBtn = document.getElementById('close-room-btn');
 
     const MAX_DEBUG_ENTRIES = 60;
+    const debugEvents = [];
 
     // Host elements
     const hostUsernameInput = document.getElementById('host-username');
@@ -273,6 +284,10 @@
     const chatInput = document.getElementById('chat-input');
     const sendMessageBtn = document.getElementById('send-message-btn');
 
+    if (copyDebugLogBtn) {
+      copyDebugLogBtn.addEventListener('click', copyDebugLog);
+    }
+
     // Initialize client
     function initializeClient() {
       const registryApiUrl = registryUrlInput.value.trim();
@@ -291,6 +306,7 @@
       if (debugLog) {
         debugLog.innerHTML = '';
       }
+      debugEvents.length = 0;
 
       client.onStateChange((state) => {
         updateState(state);
@@ -437,6 +453,11 @@
     }
 
     function addDebugEvent(event) {
+      debugEvents.push({ ...event });
+      if (debugEvents.length > MAX_DEBUG_ENTRIES) {
+        debugEvents.shift();
+      }
+
       if (!debugLog) return;
 
       const entry = document.createElement('div');
@@ -474,6 +495,102 @@
 
       while (debugLog.childElementCount > MAX_DEBUG_ENTRIES) {
         debugLog.removeChild(debugLog.lastElementChild);
+      }
+    }
+
+    function copyDebugLog() {
+      if (!debugEvents.length) {
+        showError('No debug events to copy yet');
+        return;
+      }
+
+      const logText = buildDebugLogText();
+
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+        try {
+          fallbackCopyToClipboard(logText);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          showError(`Failed to copy log: ${message}`);
+        }
+        return;
+      }
+
+      navigator.clipboard.writeText(logText).catch(() => {
+        try {
+          fallbackCopyToClipboard(logText);
+        } catch (fallbackError) {
+          const message =
+            fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+          showError(`Failed to copy log: ${message}`);
+        }
+      });
+    }
+
+    function buildDebugLogText() {
+      return debugEvents
+        .map((event) => {
+          const timestamp = new Date(event.timestamp ?? Date.now()).toISOString();
+          const description = describeDebugEvent(event);
+          const serialized = JSON.stringify(event, getCircularReplacer(), 2);
+          const lines = [`[${timestamp}] ${event.type}`];
+          if (description && description !== event.type) {
+            lines.push(description);
+          }
+          lines.push(serialized);
+          return lines.join('\n');
+        })
+        .join('\n\n');
+    }
+
+    function getCircularReplacer() {
+      const seen = new WeakSet();
+      return (key, value) => {
+        if (value instanceof Error) {
+          return {
+            name: value.name,
+            message: value.message,
+            stack: value.stack,
+          };
+        }
+
+        if (typeof value === 'object' && value !== null) {
+          if (seen.has(value)) {
+            return '[Circular]';
+          }
+          seen.add(value);
+        }
+        return value;
+      };
+    }
+
+    function fallbackCopyToClipboard(text) {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'absolute';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+
+      const selection = document.getSelection();
+      const selectedRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+
+      const successful = typeof document.execCommand === 'function'
+        ? document.execCommand('copy')
+        : false;
+
+      document.body.removeChild(textarea);
+
+      if (selectedRange && selection) {
+        selection.removeAllRanges();
+        selection.addRange(selectedRange);
+      }
+
+      if (!successful) {
+        throw new Error('Clipboard copy was not permitted');
       }
     }
 
