@@ -26,9 +26,8 @@ export class WebRTCManager implements IWebRTCManager {
     // Set up ICE candidate handler
     this.peerConnection.onicecandidate = (event) => {
       if (event.candidate && this.iceCandidateCallback) {
-        // Filter out mDNS candidates and empty candidates per spec
         const candidate = event.candidate.toJSON();
-        if (candidate.candidate && !candidate.candidate.includes(".local")) {
+        if (candidate.candidate && candidate.candidate.trim() !== "") {
           this.iceCandidateCallback(candidate);
         }
       }

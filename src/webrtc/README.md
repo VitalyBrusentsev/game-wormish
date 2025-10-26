@@ -206,7 +206,7 @@ All HTTP requests are configured with:
 ### ICE Candidate Handling
 
 - Candidates are sent immediately via [`registryClient.postCandidate()`](registry-client.ts#L113)
-- mDNS candidates (containing `.local`) are filtered out
+- mDNS candidates (containing `.local`) are forwarded to maximize connectivity options
 - Empty candidates are ignored
 - Candidates are deduplicated using a composite key
 - Polling stops when data channel opens

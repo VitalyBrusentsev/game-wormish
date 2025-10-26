@@ -48,7 +48,7 @@ describe("WebRTCManager", () => {
       expect(mockPeerConnection.onicecandidate).toBeDefined();
     });
 
-    it("should filter out mDNS candidates", () => {
+    it("should forward mDNS candidates", () => {
       globalThis.RTCPeerConnection = vi.fn(() => mockPeerConnection) as any;
       const candidateCallback = vi.fn();
 
@@ -71,7 +71,11 @@ describe("WebRTCManager", () => {
 
       mockPeerConnection.onicecandidate({ candidate: mdnsCandidate });
 
-      expect(candidateCallback).not.toHaveBeenCalled();
+      expect(candidateCallback).toHaveBeenCalledWith({
+        candidate: mdnsCandidate.candidate,
+        sdpMid: mdnsCandidate.sdpMid,
+        sdpMLineIndex: mdnsCandidate.sdpMLineIndex,
+      });
     });
 
     it("should pass valid candidates to callback", () => {
