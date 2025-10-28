@@ -40,6 +40,49 @@ class MemoryKV implements KVNamespace {
   async delete(key: string): Promise<void> {
     this.store.delete(key);
   }
+
+  debugPeek(key: string): string | null {
+    const entry = this.store.get(key);
+    if (!entry) {
+      return null;
+    }
+    if (entry.expiration && entry.expiration <= Date.now()) {
+      this.store.delete(key);
+      return null;
+    }
+    return entry.value;
+  }
+}
+
+class RecordingKV extends MemoryKV {
+  private overrides = new Map<string, Array<string | null>>();
+
+  public readonly getRequests: Array<{
+    key: string;
+    options?: KVNamespaceGetOptions<string>;
+  }> = [];
+
+  queueGetOverride(key: string, value: string | null): void {
+    const queue = this.overrides.get(key);
+    if (queue) {
+      queue.push(value);
+    } else {
+      this.overrides.set(key, [value]);
+    }
+  }
+
+  override async get(key: string, options?: KVNamespaceGetOptions<string>): Promise<string | null> {
+    this.getRequests.push({ key, options });
+    const queue = this.overrides.get(key);
+    if (queue && queue.length > 0) {
+      const next = queue.shift();
+      if (queue.length === 0) {
+        this.overrides.delete(key);
+      }
+      return next ?? null;
+    }
+    return super.get(key, options);
+  }
 }
 
 if (!(globalThis as { btoa?: typeof btoa }).btoa) {
@@ -202,6 +245,112 @@ describe('registry worker', () => {
       createExecutionContext()
     );
     expect(closeResponse.status).toBe(204);
+  });
+
+  it('preserves SDP data when candidates race with stale KV replicas', async () => {
+    const origin = 'https://game.test';
+    const kv = new RecordingKV();
+    env.REGISTRY_KV = kv;
+
+    const createResponse = await worker.fetch(
+      new Request('https://example.com/rooms', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-registry-version': '1',
+          Origin: origin,
+        },
+        body: JSON.stringify({ hostUserName: 'Alice1996' }),
+      }),
+      env,
+      createExecutionContext()
+    );
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json();
+
+    const joinResponse = await worker.fetch(
+      new Request(`https://example.com/rooms/${created.code}/join`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-registry-version': '1',
+          Origin: origin,
+        },
+        body: JSON.stringify({ joinCode: created.joinCode, guestUserName: 'Bob1997' }),
+      }),
+      env,
+      createExecutionContext()
+    );
+    expect(joinResponse.status).toBe(200);
+    const join = await joinResponse.json();
+
+    const roomKey = `room:${created.code}`;
+    const staleSnapshot = kv.debugPeek(roomKey);
+    expect(staleSnapshot).not.toBeNull();
+
+    const sdp = 'v=0\no=- 0 0 IN IP4 127.0.0.1\ns=-\nt=0 0\nm=audio 9 RTP/AVP 0';
+    const offerResponse = await worker.fetch(
+      new Request(`https://example.com/rooms/${created.code}/offer`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-registry-version': '1',
+          'x-access-token': created.ownerToken,
+          Origin: origin,
+        },
+        body: JSON.stringify({ type: 'offer', sdp }),
+      }),
+      env,
+      createExecutionContext()
+    );
+    expect(offerResponse.status).toBe(204);
+
+    const freshSnapshot = kv.debugPeek(roomKey);
+    expect(freshSnapshot).not.toBeNull();
+    expect(freshSnapshot).not.toBe(staleSnapshot);
+    const parsedFresh = JSON.parse(freshSnapshot!);
+    expect(parsedFresh.offer?.type).toBe('offer');
+
+    kv.queueGetOverride(roomKey, staleSnapshot);
+
+    const candidateResponse = await worker.fetch(
+      new Request(`https://example.com/rooms/${created.code}/candidate`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-registry-version': '1',
+          'x-access-token': join.guestToken,
+          Origin: origin,
+        },
+        body: JSON.stringify({ candidate: 'candidate:1 1 UDP 1 127.0.0.1 3478 typ host' }),
+      }),
+      env,
+      createExecutionContext()
+    );
+    expect(candidateResponse.status).toBe(204);
+
+    const storedRoom = kv.debugPeek(roomKey);
+    expect(storedRoom).not.toBeNull();
+    const parsedRoom = JSON.parse(storedRoom!);
+    expect(parsedRoom.offer?.type).toBe('offer');
+
+    const guestIceKey = `ice:${created.code}:guest`;
+    const guestIce = kv.debugPeek(guestIceKey);
+    expect(guestIce).not.toBeNull();
+    const parsedGuestIce = JSON.parse(guestIce!);
+    expect(parsedGuestIce).toHaveLength(1);
+
+    const roomGets = kv.getRequests.filter((req) => req.key === roomKey);
+    expect(roomGets.length).toBeGreaterThan(0);
+    for (const req of roomGets) {
+      expect(req.options?.cacheTtl).toBe(0);
+    }
+
+    const iceGets = kv.getRequests.filter((req) => req.key === guestIceKey);
+    expect(iceGets.length).toBeGreaterThan(0);
+    for (const req of iceGets) {
+      expect(req.options?.cacheTtl).toBe(0);
+    }
   });
 
   it('allows host to close an open room', async () => {
