@@ -47,6 +47,74 @@ The client module will consist of several key components, with a clear separatio
 3. **RoomManager**: Orchestrates the room lifecycle and state transitions
 4. **StateManager**: Manages the internal state of the connection process
 
+## WebRTC Connection Establishment Flow
+
+`RoomManager.startConnection()` coordinates the Registry signaling calls from `IRegistryClient`, peer-connection primitives from `IWebRTCManager`, and lifecycle tracking in `IStateManager` to walk both host and guest through the handshake. The flow below documents the phases in the order they occur so that spec readers can trace responsibilities to the appropriate interfaces.
+
+### Phase 1: Room Provisioning and Admission
+
+1. **Host creates the room**
+   - Applications call `IRoomManager.createRoom(hostUserName)` which delegates to `IRegistryClient.createRoom`.
+   - The Registry responds with a `RoomCreationResponse` (`code`, `ownerToken`, `joinCode`, `expiresAt`). The host stores the `ownerToken` in the state manager and distributes the room/join codes to the guest out-of-band.
+   - `StateManager` transitions from `IDLE` → `CREATING` → `CREATED` and `RoomInfo.role` is set to `"host"` with the received token.
+
+2. **Guest joins the room**
+   - The guest calls `IRoomManager.joinRoom(roomCode, joinCode, guestUserName)` which invokes `IRegistryClient.joinRoom`.
+   - On success the Registry returns a `RoomJoinResponse` carrying the `guestToken`; the state manager persists it alongside the shared room metadata.
+   - The guest transitions `IDLE` → `JOINING` → `JOINED`, confirming the Registry has marked the room `status: "joined"` in subsequent `getRoom` polls.
+
+### Phase 2: Offer/Answer Negotiation
+
+1. **Peer-connection setup**
+   - `RoomManager` builds an `RTCPeerConnection` via `IWebRTCManager.createPeerConnection(iceServers)` for both roles, registers `onIceCandidate`, `onConnectionStateChange`, and data-channel handlers, and persists the connection in `StateManager`.
+
+2. **Host offers**
+   - When `startConnection()` runs on the host, `RoomManager` invokes `IWebRTCManager.createOffer`, applies it locally with `setLocalDescription`, and immediately posts it through `IRegistryClient.postOffer(roomCode, ownerToken, offer)`.
+   - Offer publication also flips the state to `CONNECTING` and primes ICE gathering.
+
+3. **Guest answers**
+   - The guest side polls `IRegistryClient.getRoom` on the configured polling cadence (see *Implementation Considerations · Polling Strategy*) until the `RoomSnapshot.offer` is populated.
+   - `RoomManager` forwards the offer into `IWebRTCManager.createAnswer`, sets the local description, and pushes the answer to the Registry using `postAnswer(roomCode, guestToken, answer)`.
+   - `StateManager` remains in `CONNECTING` while the answer waits for host retrieval.
+
+4. **Host applies the answer**
+   - The host continues `getRoom` polling until `RoomSnapshot.answer` is non-null, then commits it via `IWebRTCManager.setRemoteDescription`, completing the SDP exchange.
+
+### Phase 3: Trickle ICE Exchange
+
+1. **Candidate publication**
+   - `RoomManager` subscribes to `IWebRTCManager.onIceCandidate`, forwarding every non-null candidate to `IRegistryClient.postCandidate` along with the caller’s token.
+   - Candidates are deduplicated by the Registry; the `CandidateList.mode` values (`"full"` or `"delta"`) inform the client whether it should reset or append to the cached set.
+
+2. **Candidate retrieval**
+   - Both peers continue polling `getCandidates(roomCode, token)` on the same cadence used for room snapshots while they remain in `CONNECTING`.
+   - Each candidate from the `CandidateList.items` array is fed into `IWebRTCManager.addIceCandidate`. The polling loop terminates once the data channel opens or the ICE gathering state reports `"failed"`, aligning with the polling rules in the implementation notes.
+
+### Phase 4: Connection-State Monitoring
+
+1. **ICE connectivity checks**
+   - With SDP and trickled candidates in place, the browser runs ICE connectivity checks automatically. `RoomManager` watches `onconnectionstatechange` events via `IWebRTCManager.onConnectionStateChange` and updates `StateManager` to `CONNECTED` when the state becomes `"connected"`.
+
+2. **Data channel negotiation**
+   - The host creates an application data channel through `IWebRTCManager.createDataChannel`, while the guest listens via `IWebRTCManager.onDataChannel`.
+   - Both peers wait for the channel’s `readyState` to reach `"open"` before emitting the application-facing `onMessage` callbacks.
+
+3. **Failure detection**
+   - If the peer connection enters `"failed"` or `"disconnected"`, `RoomManager` transitions to `ERROR` or `DISCONNECTED` respectively and raises `onError` so the application can react.
+
+### Phase 5: Validation and Recovery
+
+1. **Connection validation**
+   - The module can emit a lightweight verification ping (for example, a JSON heartbeat) through `RoomManager.sendMessage` once the channel is open. Receipt through the corresponding `onMessage` callback confirms end-to-end delivery for both host and guest.
+
+2. **Error handling**
+   - **Offer/answer issues**: Timeouts while waiting for `RoomSnapshot.offer` or `.answer` trigger retries using the exponential-backoff strategy described in the error-handling section and surface actionable errors to consumers.
+   - **Candidate gaps**: Missing or malformed candidates in `CandidateList` are ignored, while polling continues until the Registry reports no new deltas. `RoomManager` may request a fresh `mode: "full"` snapshot if sequence numbers stall.
+   - **Connection failures**: When the ICE state remains `"failed"`, `RoomManager` moves the state to `ERROR`, calls `IRegistryClient.closeRoom` if the client is host, and exposes diagnostics (last known `RTCPeerConnectionState`, token role) through the error payload so applications can decide whether to restart the handshake.
+
+3. **Cleanup**
+   - Both roles call `closeRoom()` to revoke Registry resources and dispose of WebRTC objects once the session ends or an error becomes unrecoverable, ensuring parity with the lifecycle described in `src/webrtc/README.md`.
+
 ## Class and Interface Definitions
 
 ### 1. RegistryClient Interface
