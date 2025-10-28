@@ -179,13 +179,33 @@
       <section class="section debug-section" data-testid="debug-section">
         <div class="section-header">
           <h2>Debug Timeline</h2>
-          <button
-            id="copy-debug-log"
-            class="copy-btn"
-            data-testid="copy-debug-log"
-          >
-            Copy Log
-          </button>
+          <div class="log-controls">
+            <button
+              id="collapse-debug-log"
+              class="log-control-btn"
+              type="button"
+              aria-pressed="false"
+              data-testid="collapse-debug-log"
+            >
+              Collapse Entries
+            </button>
+            <button
+              id="clear-debug-log"
+              class="log-control-btn"
+              type="button"
+              data-testid="clear-debug-log"
+            >
+              Clear Log
+            </button>
+            <button
+              id="copy-debug-log"
+              class="log-control-btn"
+              type="button"
+              data-testid="copy-debug-log"
+            >
+              Copy Log
+            </button>
+          </div>
         </div>
         <div id="debug-log" class="debug-log" data-testid="debug-log"></div>
       </section>
@@ -254,10 +274,19 @@
     const stateIndicator = document.getElementById('state-indicator');
     const debugLog = document.getElementById('debug-log');
     const copyDebugLogBtn = document.getElementById('copy-debug-log');
+    const clearDebugLogBtn = document.getElementById('clear-debug-log');
+    const collapseDebugLogBtn = document.getElementById('collapse-debug-log');
     const closeRoomBtn = document.getElementById('close-room-btn');
 
     const MAX_DEBUG_ENTRIES = 60;
     const debugEvents = [];
+    const stateTimestamps = new Map();
+    stateTimestamps.set(ConnectionState.IDLE, Date.now());
+
+    let isLogCollapsed = false;
+    let lastLoggedErrorStateTimestamp = null;
+    let expectingErrorPayload = false;
+    let pendingErrorTimer = null;
 
     // Host elements
     const hostUsernameInput = document.getElementById('host-username');
@@ -288,6 +317,14 @@
       copyDebugLogBtn.addEventListener('click', copyDebugLog);
     }
 
+    if (clearDebugLogBtn) {
+      clearDebugLogBtn.addEventListener('click', clearDebugLog);
+    }
+
+    if (collapseDebugLogBtn) {
+      collapseDebugLogBtn.addEventListener('click', toggleDebugLogCollapse);
+    }
+
     // Initialize client
     function initializeClient() {
       const registryApiUrl = registryUrlInput.value.trim();
@@ -298,20 +335,55 @@
         return false;
       }
 
+      if (debugLog) {
+        debugLog.innerHTML = '';
+      }
+      debugEvents.length = 0;
+      stateTimestamps.clear();
+      recordStateTimestamp(ConnectionState.IDLE, Date.now());
+      lastLoggedErrorStateTimestamp = null;
+      expectingErrorPayload = false;
+      if (pendingErrorTimer !== null) {
+        clearTimeout(pendingErrorTimer);
+        pendingErrorTimer = null;
+      }
+
       client = new WebRTCRegistryClient({
         registryApiUrl,
         iceServers: [{ urls: stunUrl }]
       });
 
-      if (debugLog) {
-        debugLog.innerHTML = '';
-      }
-      debugEvents.length = 0;
-
       client.onStateChange((state) => {
         updateState(state);
         if (state === ConnectionState.CONNECTED) {
           chatInterface.classList.remove('hidden');
+        }
+        if (state === ConnectionState.ERROR) {
+          const errorStateTimestamp = stateTimestamps.get(state) ?? Date.now();
+          if (pendingErrorTimer !== null) {
+            clearTimeout(pendingErrorTimer);
+          }
+          expectingErrorPayload = true;
+          pendingErrorTimer = setTimeout(() => {
+            if (!expectingErrorPayload) {
+              return;
+            }
+            addErrorEvent({
+              state,
+              message: 'Entered error state without diagnostics payload',
+              timestamp: Date.now(),
+              stateTimestamp: errorStateTimestamp,
+            });
+            lastLoggedErrorStateTimestamp = errorStateTimestamp;
+            expectingErrorPayload = false;
+            pendingErrorTimer = null;
+          }, 200);
+        } else {
+          expectingErrorPayload = false;
+          if (pendingErrorTimer !== null) {
+            clearTimeout(pendingErrorTimer);
+            pendingErrorTimer = null;
+          }
         }
       });
 
@@ -320,7 +392,7 @@
       });
 
       client.onError((error) => {
-        showError(error.message);
+        handleClientError(error);
       });
 
       client.onDebugEvent((event) => {
@@ -452,22 +524,123 @@
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    function addDebugEvent(event) {
-      debugEvents.push({ ...event });
-      if (debugEvents.length > MAX_DEBUG_ENTRIES) {
-        debugEvents.shift();
+    function handleClientError(error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const timestamp = Date.now();
+      const state = client && typeof client.getConnectionState === 'function'
+        ? client.getConnectionState()
+        : ConnectionState.ERROR;
+      const stateTimestamp = stateTimestamps.get(state) ?? timestamp;
+      const diagnostics = extractDiagnostics(error);
+
+      addErrorEvent({
+        state,
+        message,
+        timestamp,
+        stateTimestamp,
+        diagnostics,
+        error,
+      });
+      lastLoggedErrorStateTimestamp = stateTimestamp;
+      expectingErrorPayload = false;
+      if (pendingErrorTimer !== null) {
+        clearTimeout(pendingErrorTimer);
+        pendingErrorTimer = null;
+      }
+      showError(message);
+    }
+
+    function extractDiagnostics(error) {
+      if (!error || typeof error !== 'object') {
+        return null;
       }
 
+      if ('diagnostics' in error && error.diagnostics) {
+        return error.diagnostics;
+      }
+
+      if ('details' in error && error.details) {
+        return error.details;
+      }
+
+      if ('info' in error && error.info) {
+        return error.info;
+      }
+
+      if (error.cause && typeof error.cause === 'object') {
+        return extractDiagnostics(error.cause);
+      }
+
+      return null;
+    }
+
+    function addDebugEvent(event) {
+      const normalizedEvent = sanitizeForLogging({ ...event });
+      storeDebugEvent(normalizedEvent);
+      renderDebugEntry(normalizedEvent);
+    }
+
+    function addErrorEvent({ state, message, timestamp, stateTimestamp, diagnostics, error }) {
+      const errorPayload = {
+        type: 'error-state',
+        state,
+        message,
+        timestamp,
+        stateTimestamp,
+        diagnostics: diagnostics ?? null,
+        error: error ? sanitizeForLogging(error) : null,
+      };
+
+      if (errorPayload.error && typeof errorPayload.error === 'object') {
+        const rawError = errorPayload.error;
+        if (rawError && typeof rawError === 'object') {
+          if (rawError.code !== undefined) {
+            errorPayload.code = rawError.code;
+          }
+          if (rawError.retryable !== undefined) {
+            errorPayload.retryable = rawError.retryable;
+          }
+          if (rawError.status !== undefined) {
+            errorPayload.status = rawError.status;
+          }
+          if (!errorPayload.diagnostics && rawError.diagnostics) {
+            errorPayload.diagnostics = rawError.diagnostics;
+          }
+        }
+      }
+
+      if (errorPayload.diagnostics) {
+        errorPayload.diagnostics = sanitizeForLogging(errorPayload.diagnostics);
+      }
+
+      storeDebugEvent(errorPayload);
+      renderDebugEntry(errorPayload);
+    }
+
+    function storeDebugEvent(event) {
+      debugEvents.push(event);
+      while (debugEvents.length > MAX_DEBUG_ENTRIES) {
+        debugEvents.shift();
+      }
+    }
+
+    function renderDebugEntry(event) {
       if (!debugLog) return;
 
       const entry = document.createElement('div');
       entry.className = 'debug-entry';
       entry.dataset.eventType = event.type;
 
-      if (event.type === 'candidate-error') {
+      if (event.type === 'candidate-error' || event.type === 'error-state') {
         entry.classList.add('debug-entry-error');
-      } else if (event.type === 'candidate-buffered') {
+      }
+
+      if (event.type === 'candidate-buffered') {
         entry.classList.add('debug-entry-buffered');
+      }
+
+      if (event.type === 'error-state') {
+        entry.classList.add('debug-entry-fatal');
       }
 
       const header = document.createElement('div');
@@ -475,11 +648,15 @@
 
       const typeSpan = document.createElement('span');
       typeSpan.className = 'debug-entry-type';
-      typeSpan.textContent = formatDebugEventType(event.type);
+      const typeLabel = formatDebugEventType(event.type);
+      typeSpan.textContent = event.state ? `${typeLabel} (${event.state})` : typeLabel;
 
       const timeSpan = document.createElement('span');
       timeSpan.className = 'debug-entry-time';
-      timeSpan.textContent = new Date(event.timestamp || Date.now()).toLocaleTimeString();
+      timeSpan.textContent = formatTimestamp(event.timestamp);
+      if (event.stateTimestamp && event.stateTimestamp !== event.timestamp) {
+        timeSpan.title = `State timestamp: ${formatTimestamp(event.stateTimestamp)}`;
+      }
 
       header.appendChild(typeSpan);
       header.appendChild(timeSpan);
@@ -490,6 +667,13 @@
 
       entry.appendChild(header);
       entry.appendChild(message);
+
+      if (event.diagnostics && Object.keys(event.diagnostics).length > 0) {
+        const diagnosticsBlock = document.createElement('pre');
+        diagnosticsBlock.className = 'debug-entry-diagnostics';
+        diagnosticsBlock.textContent = formatDiagnostics(event.diagnostics);
+        entry.appendChild(diagnosticsBlock);
+      }
 
       debugLog.prepend(entry);
 
@@ -564,6 +748,80 @@
       };
     }
 
+    function sanitizeForLogging(value, seen) {
+      if (value === null || typeof value !== 'object') {
+        return value;
+      }
+
+      const tracker = seen ?? new WeakSet();
+      if (tracker.has(value)) {
+        return '[Circular]';
+      }
+      tracker.add(value);
+
+      if (value instanceof Date) {
+        return value.toISOString();
+      }
+
+      if (value instanceof Error) {
+        const base = {
+          name: value.name,
+          message: value.message,
+        };
+        if (value.stack) {
+          base.stack = value.stack;
+        }
+        for (const key of Object.keys(value)) {
+          if (key in base) continue;
+          base[key] = sanitizeForLogging(value[key], tracker);
+        }
+        return base;
+      }
+
+      if (Array.isArray(value)) {
+        return value.map((item) => sanitizeForLogging(item, tracker));
+      }
+
+      if (value instanceof Map) {
+        return Array.from(value.entries()).map(([key, val]) => [key, sanitizeForLogging(val, tracker)]);
+      }
+
+      if (value instanceof Set) {
+        return Array.from(value.values()).map((item) => sanitizeForLogging(item, tracker));
+      }
+
+      const output = {};
+      for (const [key, val] of Object.entries(value)) {
+        if (typeof val === 'function') {
+          continue;
+        }
+        output[key] = sanitizeForLogging(val, tracker);
+      }
+
+      return output;
+    }
+
+    function formatTimestamp(value) {
+      if (typeof value !== 'number' || Number.isNaN(value)) {
+        return new Date().toLocaleTimeString();
+      }
+      return new Date(value).toLocaleTimeString();
+    }
+
+    function formatDiagnostics(diagnostics) {
+      if (diagnostics === null || diagnostics === undefined) {
+        return '';
+      }
+      if (typeof diagnostics === 'string') {
+        return diagnostics;
+      }
+      try {
+        return JSON.stringify(diagnostics, getCircularReplacer(), 2);
+      } catch (error) {
+        return String(diagnostics);
+      }
+    }
+
     function fallbackCopyToClipboard(text) {
       const textarea = document.createElement('textarea');
       textarea.value = text;
@@ -612,10 +870,14 @@
           return 'Candidate In';
         case 'candidate-error':
           return 'Candidate Error';
+        case 'peer-connection-error':
+          return 'Peer Error';
         case 'peer-connection-state':
           return 'Peer State';
         case 'data-channel-state':
           return 'Data Channel';
+        case 'error-state':
+          return 'Error State';
         default:
           return type;
       }
@@ -639,10 +901,40 @@
           return `Applied ICE candidate ${summarizeCandidate(event.candidateKey, event.candidate)}`;
         case 'candidate-error':
           return `Candidate issue (${event.candidateKey}): ${event.message}`;
+        case 'peer-connection-error':
+          return `Peer connection error (${event.state}): ${event.reason}`;
         case 'peer-connection-state':
           return `Peer connection state changed to ${event.state}`;
         case 'data-channel-state':
           return `Data channel "${event.label}" is ${event.state}`;
+        case 'error-state': {
+          const parts = [];
+          if (event.stateTimestamp) {
+            parts.push(`Entered ${event.state} at ${formatTimestamp(event.stateTimestamp)}`);
+          } else if (event.state) {
+            parts.push(`State: ${event.state}`);
+          }
+          if (event.message) {
+            parts.push(`Message: ${event.message}`);
+          }
+          if (event.code !== undefined) {
+            parts.push(`Code: ${event.code}`);
+          }
+          if (event.status !== undefined) {
+            parts.push(`Status: ${event.status}`);
+          }
+          if (event.retryable !== undefined) {
+            parts.push(`Retryable: ${event.retryable}`);
+          }
+          if (event.diagnostics && Object.keys(event.diagnostics).length > 0) {
+            parts.push(
+              typeof event.diagnostics === 'string'
+                ? `Diagnostics: ${event.diagnostics}`
+                : 'Diagnostics attached'
+            );
+          }
+          return parts.join('\n');
+        }
         default:
           return event.type;
       }
@@ -653,6 +945,32 @@
       const text = candidate || 'empty';
       const truncated = text.length > 60 ? `${text.slice(0, 60)}…` : text;
       return `[${keySuffix}] ${truncated}`;
+    }
+
+    function clearDebugLog() {
+      debugEvents.length = 0;
+      if (debugLog) {
+        debugLog.innerHTML = '';
+      }
+    }
+
+    function toggleDebugLogCollapse() {
+      isLogCollapsed = !isLogCollapsed;
+      if (!debugLog || !collapseDebugLogBtn) return;
+
+      if (isLogCollapsed) {
+        debugLog.classList.add('collapsed');
+        collapseDebugLogBtn.textContent = 'Expand Entries';
+        collapseDebugLogBtn.setAttribute('aria-pressed', 'true');
+      } else {
+        debugLog.classList.remove('collapsed');
+        collapseDebugLogBtn.textContent = 'Collapse Entries';
+        collapseDebugLogBtn.setAttribute('aria-pressed', 'false');
+      }
+    }
+
+    function recordStateTimestamp(state, timestamp = Date.now()) {
+      stateTimestamps.set(state, timestamp);
     }
 
     // Close room
@@ -667,8 +985,10 @@
 
     // Update state display
     function updateState(state) {
+      const timestamp = Date.now();
       stateText.textContent = state;
       stateIndicator.className = `state-indicator state-${state}`;
+      recordStateTimestamp(state, timestamp);
     }
 
     // Show error
