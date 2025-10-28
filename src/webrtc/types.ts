@@ -96,6 +96,12 @@ export type DebugEvent =
       timestamp: number;
     }
   | {
+      type: "peer-connection-error";
+      state: RTCPeerConnectionState;
+      reason: string;
+      timestamp: number;
+    }
+  | {
       type: "data-channel-state";
       state: RTCDataChannelState;
       label: string;
