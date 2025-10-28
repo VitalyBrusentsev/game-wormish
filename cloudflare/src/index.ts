@@ -632,8 +632,15 @@ async function handleCandidate(
   }
   const validated = validateCandidate(body);
   await appendCandidate(env, room.code, role, validated);
-  room.updatedAt = Date.now();
-  await saveRoom(env, room);
+  // Re-read before bumping the timestamp so a stale requireRoom() snapshot
+  // cannot erase newer offer/answer data that just landed in KV. Candidate
+  // writes only extend TTL; if the fresh payload isn't available we simply
+  // skip the update instead of risking a clobber.
+  const latestRoom = await loadRoom(env, room.code);
+  if (latestRoom) {
+    latestRoom.updatedAt = Date.now();
+    await saveRoom(env, latestRoom);
+  }
   return emptyResponse(204, corsOrigin);
 }
 

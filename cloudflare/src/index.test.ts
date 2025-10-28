@@ -273,6 +273,110 @@ describe('registry worker', () => {
     const error = await joinResponse.json();
     expect(error.error.code).toBe('bad_join_code');
   });
+
+  it('keeps the stored offer when candidate updates see a stale room snapshot', async () => {
+    const origin = 'https://game.test';
+    const createResponse = await worker.fetch(
+      new Request('https://example.com/rooms', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-registry-version': '1',
+          Origin: origin,
+        },
+        body: JSON.stringify({ hostUserName: 'Alice1996' }),
+      }),
+      env,
+      createExecutionContext()
+    );
+    expect(createResponse.status).toBe(201);
+    const created = await createResponse.json();
+
+    const joinResponse = await worker.fetch(
+      new Request(`https://example.com/rooms/${created.code}/join`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-registry-version': '1',
+          Origin: origin,
+        },
+        body: JSON.stringify({ joinCode: created.joinCode, guestUserName: 'Bob1997' }),
+      }),
+      env,
+      createExecutionContext()
+    );
+    expect(joinResponse.status).toBe(200);
+    const joined = await joinResponse.json();
+
+    const sdp = 'v=0\no=- 0 0 IN IP4 127.0.0.1\ns=-\nt=0 0\nm=audio 9 RTP/AVP 0';
+    const offerResponse = await worker.fetch(
+      new Request(`https://example.com/rooms/${created.code}/offer`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-registry-version': '1',
+          'x-access-token': created.ownerToken,
+          Origin: origin,
+        },
+        body: JSON.stringify({ type: 'offer', sdp }),
+      }),
+      env,
+      createExecutionContext()
+    );
+    expect(offerResponse.status).toBe(204);
+
+    const kv = env.REGISTRY_KV as MemoryKV;
+    const originalGet = kv.get.bind(kv);
+    let servedStale = false;
+    kv.get = (async (key: string, options?: KVNamespaceGetOptions<string>) => {
+      if (!servedStale && key === `room:${created.code}`) {
+        servedStale = true;
+        const fresh = await originalGet(key, options);
+        if (fresh) {
+          const parsed = JSON.parse(fresh) as Record<string, unknown>;
+          delete parsed.offer;
+          return JSON.stringify(parsed);
+        }
+      }
+      return originalGet(key, options);
+    }) as MemoryKV['get'];
+
+    const candidateResponse = await worker.fetch(
+      new Request(`https://example.com/rooms/${created.code}/candidate`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-registry-version': '1',
+          'x-access-token': created.ownerToken,
+          Origin: origin,
+        },
+        body: JSON.stringify({ candidate: 'candidate:1 1 UDP 1 127.0.0.1 3478 typ host' }),
+      }),
+      env,
+      createExecutionContext()
+    );
+    expect(candidateResponse.status).toBe(204);
+
+    const stored = await kv.get(`room:${created.code}`);
+    expect(stored).not.toBeNull();
+    const parsed = JSON.parse(String(stored)) as { offer?: unknown };
+    expect(parsed.offer).toBeTruthy();
+
+    const snapshotResponse = await worker.fetch(
+      new Request(`https://example.com/rooms/${created.code}`, {
+        headers: {
+          'x-access-token': joined.guestToken,
+          Origin: origin,
+        },
+      }),
+      env,
+      createExecutionContext()
+    );
+    expect(snapshotResponse.status).toBe(200);
+    const snapshot = await snapshotResponse.json();
+    expect(snapshot.offer).toBeTruthy();
+    expect(snapshot.offer.sdp).toBe(sdp);
+  });
 });
 
 function createExecutionContext(): WorkerExecutionContext {
