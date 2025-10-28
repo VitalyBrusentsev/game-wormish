@@ -139,11 +139,41 @@ export class RoomManager implements IRoomManager {
         state,
         timestamp: Date.now(),
       });
-      if (state === "connected") {
-        this.stopPolling();
-      } else if (state === "failed" || state === "closed") {
-        this.stopPolling();
-        this.setState(ConnectionState.DISCONNECTED);
+
+      const currentState = this.stateManager.getState();
+
+      switch (state) {
+        case "connected":
+          this.stopPolling();
+          break;
+        case "disconnected":
+          if (currentState !== ConnectionState.ERROR) {
+            this.setState(ConnectionState.DISCONNECTED);
+          }
+          break;
+        case "failed":
+          this.stopPolling();
+          this.emitDebug({
+            type: "peer-connection-error",
+            state,
+            reason: "Peer connection failed",
+            timestamp: Date.now(),
+          });
+          this.setState(ConnectionState.ERROR);
+          break;
+        case "closed":
+          if (currentState === ConnectionState.IDLE || currentState === ConnectionState.ERROR) {
+            break;
+          }
+          this.stopPolling();
+          this.emitDebug({
+            type: "peer-connection-error",
+            state,
+            reason: "Peer connection closed unexpectedly",
+            timestamp: Date.now(),
+          });
+          this.setState(ConnectionState.ERROR);
+          break;
       }
     });
 
@@ -218,7 +248,9 @@ export class RoomManager implements IRoomManager {
     };
 
     channel.onclose = () => {
-      this.setState(ConnectionState.DISCONNECTED);
+      if (this.stateManager.getState() !== ConnectionState.ERROR) {
+        this.setState(ConnectionState.DISCONNECTED);
+      }
       this.emitDebug({
         type: "data-channel-state",
         state: channel.readyState,
