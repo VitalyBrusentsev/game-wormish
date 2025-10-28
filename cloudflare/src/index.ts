@@ -332,7 +332,7 @@ async function readBodyText(request: Request): Promise<string> {
 }
 
 async function loadRoom(env: Env, code: string): Promise<RoomRecord | null> {
-  const raw = await env.REGISTRY_KV.get(getRoomKey(code));
+  const raw = await env.REGISTRY_KV.get(getRoomKey(code), { cacheTtl: 0 });
   if (!raw) {
     return null;
   }
@@ -358,7 +358,7 @@ function candidateDedupeKey(candidate: CandidateRecord): string {
 
 async function appendCandidate(env: Env, code: string, role: 'host' | 'guest', candidate: CandidateRecord): Promise<void> {
   const key = getIceKey(code, role);
-  const raw = await env.REGISTRY_KV.get(key);
+  const raw = await env.REGISTRY_KV.get(key, { cacheTtl: 0 });
   const existing: CandidateRecord[] = raw ? (JSON.parse(raw) as CandidateRecord[]) : [];
   const dedupe = new Map(existing.map((item) => [candidateDedupeKey(item), item] as const));
   const candidateKey = candidateDedupeKey(candidate);
@@ -373,7 +373,7 @@ async function appendCandidate(env: Env, code: string, role: 'host' | 'guest', c
 }
 
 async function readCandidates(env: Env, code: string, role: 'host' | 'guest'): Promise<CandidateRecord[]> {
-  const raw = await env.REGISTRY_KV.get(getIceKey(code, role));
+  const raw = await env.REGISTRY_KV.get(getIceKey(code, role), { cacheTtl: 0 });
   if (!raw) {
     return [];
   }
@@ -421,7 +421,7 @@ function generateToken(): string {
 async function ensureUniqueRoomCode(env: Env): Promise<string> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const code = generateRoomCode();
-    const existing = await env.REGISTRY_KV.get(getRoomKey(code));
+    const existing = await env.REGISTRY_KV.get(getRoomKey(code), { cacheTtl: 0 });
     if (!existing) {
       return code;
     }
@@ -632,15 +632,6 @@ async function handleCandidate(
   }
   const validated = validateCandidate(body);
   await appendCandidate(env, room.code, role, validated);
-  // Re-read before bumping the timestamp so a stale requireRoom() snapshot
-  // cannot erase newer offer/answer data that just landed in KV. Candidate
-  // writes only extend TTL; if the fresh payload isn't available we simply
-  // skip the update instead of risking a clobber.
-  const latestRoom = await loadRoom(env, room.code);
-  if (latestRoom) {
-    latestRoom.updatedAt = Date.now();
-    await saveRoom(env, latestRoom);
-  }
   return emptyResponse(204, corsOrigin);
 }
 
