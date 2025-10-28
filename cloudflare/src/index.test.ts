@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import worker, {
+  DurableObjectId,
+  DurableObjectNamespace,
+  DurableObjectState,
+  DurableObjectStorage,
+  DurableObjectStub,
   Env,
-  KVNamespace,
-  KVNamespaceGetOptions,
-  KVNamespacePutOptions,
+  RegistryRoomDurableObject,
   WorkerExecutionContext,
 } from './index';
 
@@ -12,33 +15,63 @@ declare const Buffer: {
   from(data: string, encoding: string): { toString(encoding: string): string };
 };
 
-class MemoryKV implements KVNamespace {
-  private store = new Map<string, { value: string; expiration?: number }>();
+class MemoryDurableObjectStorage implements DurableObjectStorage {
+  private store = new Map<string, unknown>();
 
-  async get(key: string, _options?: KVNamespaceGetOptions<string>): Promise<string | null> {
-    const entry = this.store.get(key);
-    if (!entry) {
-      return null;
+  async get<T>(key: string): Promise<T | undefined> {
+    const value = this.store.get(key);
+    if (value === undefined) {
+      return undefined;
     }
-    if (entry.expiration && entry.expiration <= Date.now()) {
-      this.store.delete(key);
-      return null;
-    }
-    return entry.value;
+    return JSON.parse(JSON.stringify(value)) as T;
   }
 
-  async put(key: string, value: string, options?: KVNamespacePutOptions): Promise<void> {
-    let expiration: number | undefined;
-    if (options?.expiration) {
-      expiration = options.expiration * 1000;
-    } else if (options?.expirationTtl) {
-      expiration = Date.now() + options.expirationTtl * 1000;
-    }
-    this.store.set(key, { value, expiration });
+  async put<T>(key: string, value: T): Promise<void> {
+    this.store.set(key, JSON.parse(JSON.stringify(value)));
   }
 
   async delete(key: string): Promise<void> {
     this.store.delete(key);
+  }
+}
+
+class MemoryDurableObjectState implements DurableObjectState {
+  storage: DurableObjectStorage = new MemoryDurableObjectStorage();
+
+  async blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
+    return callback();
+  }
+}
+
+class MemoryDurableObjectStub implements DurableObjectStub {
+  constructor(private readonly object: RegistryRoomDurableObject) {}
+
+  fetch(input: Request | string, init?: RequestInit): Promise<Response> {
+    const request = typeof input === 'string' ? new Request(input, init) : input;
+    return this.object.fetch(request);
+  }
+}
+
+interface MemoryDurableObjectId extends DurableObjectId {
+  name: string;
+}
+
+class MemoryDurableObjectNamespace implements DurableObjectNamespace {
+  private objects = new Map<string, RegistryRoomDurableObject>();
+
+  idFromName(name: string): MemoryDurableObjectId {
+    return { name };
+  }
+
+  get(id: DurableObjectId): DurableObjectStub {
+    const key = (id as MemoryDurableObjectId).name;
+    const existing = this.objects.get(key);
+    if (existing) {
+      return new MemoryDurableObjectStub(existing);
+    }
+    const object = new RegistryRoomDurableObject(new MemoryDurableObjectState(), {} as Env);
+    this.objects.set(key, object);
+    return new MemoryDurableObjectStub(object);
   }
 }
 
@@ -51,7 +84,7 @@ describe('registry worker', () => {
 
   beforeEach(() => {
     env = {
-      REGISTRY_KV: new MemoryKV(),
+      REGISTRY_ROOMS: new MemoryDurableObjectNamespace(),
       ALLOWED_ORIGINS: 'https://game.test',
     } as Env;
   });
@@ -72,8 +105,8 @@ describe('registry worker', () => {
       createExecutionContext()
     );
 
-    expect(createResponse.status).toBe(201);
     const created = await createResponse.json();
+    expect(createResponse.status).toBe(201);
     expect(typeof created.code).toBe('string');
     expect(created.code).toHaveLength(8);
     expect(created.joinCode).toHaveLength(6);
@@ -325,22 +358,6 @@ describe('registry worker', () => {
     );
     expect(offerResponse.status).toBe(204);
 
-    const kv = env.REGISTRY_KV as MemoryKV;
-    const originalGet = kv.get.bind(kv);
-    let servedStale = false;
-    kv.get = (async (key: string, options?: KVNamespaceGetOptions<string>) => {
-      if (!servedStale && key === `room:${created.code}`) {
-        servedStale = true;
-        const fresh = await originalGet(key, options);
-        if (fresh) {
-          const parsed = JSON.parse(fresh) as Record<string, unknown>;
-          delete parsed.offer;
-          return JSON.stringify(parsed);
-        }
-      }
-      return originalGet(key, options);
-    }) as MemoryKV['get'];
-
     const candidateResponse = await worker.fetch(
       new Request(`https://example.com/rooms/${created.code}/candidate`, {
         method: 'POST',
@@ -357,11 +374,6 @@ describe('registry worker', () => {
     );
     expect(candidateResponse.status).toBe(204);
 
-    const stored = await kv.get(`room:${created.code}`);
-    expect(stored).not.toBeNull();
-    const parsed = JSON.parse(String(stored)) as { offer?: unknown };
-    expect(parsed.offer).toBeTruthy();
-
     const snapshotResponse = await worker.fetch(
       new Request(`https://example.com/rooms/${created.code}`, {
         headers: {
@@ -376,6 +388,7 @@ describe('registry worker', () => {
     const snapshot = await snapshotResponse.json();
     expect(snapshot.offer).toBeTruthy();
     expect(snapshot.offer.sdp).toBe(sdp);
+    expect(snapshot.answer).toBeNull();
   });
 });
 

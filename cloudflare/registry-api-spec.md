@@ -8,7 +8,7 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 
 ## Platform & Bindings
 - **Cloudflare Worker** (HTTP JSON API).
-- **KV Namespace**: `REGISTRY_KV`
+- **Durable Object**: `RegistryRoomDurableObject` (binding `REGISTRY_ROOMS`)
 - **Cloudflare WAF/Rate Limiting**: blanket + per‑IP on sensitive endpoints.
 - Optional: **Turnstile** (captcha) or identity JWT on room creation.
 
@@ -17,11 +17,11 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 
 - **Guessing & abuse:** Mitigated via unguessable room codes, short‑lived join codes and tokens, strict payload caps, per‑state TTLs, and rate limits.
 
-## Data Model (KV)
+## Data Model (Durable Object)
 
-- `room:<code>` → Room JSON (below)
-- `ice:<code>:host` → JSON array of RTCIceCandidateInit (bounded, deduped)
-- `ice:<code>:guest` → JSON array of RTCIceCandidateInit (bounded, deduped)
+- `idFromName(roomCode)` resolves to a single Durable Object instance for that room.
+- The Durable Object persists the room JSON (below) in its local storage and keeps per-role ICE candidate arrays (`candidates:host`, `candidates:guest`) with TTL metadata.
+- All state mutations execute within the Durable Object to guarantee strong consistency; concurrent updates are serialized by the platform.
 
 **Room JSON**
 ```json
@@ -47,7 +47,7 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 - `ROOM_TTL_JOINED` = **180s**
 - `ROOM_TTL_PAIRED` = **300s**
 - `ROOM_TTL_CLOSED` = **15s** (expire ASAP)
-- `ICE_TTL` = **300s** (5 minutes) for both `ice:<code>:(host|guest)`
+- `ICE_TTL` = **300s** (5 minutes) for each role's candidate list stored with the room Durable Object
 
 **Rules**
 - Valid mutations “touch” the room TTL for the **current state**.
@@ -223,8 +223,8 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
   }
   ```
 - **Semantics (MVP):** returns the **current complete set** of the *other side’s* candidates, **oldest→newest**:
-  - `ownerToken` → return `ice:<code>:guest`
-  - `guestToken` → return `ice:<code>:host`
+  - `ownerToken` → return the guest list persisted within the room Durable Object
+  - `guestToken` → return the host list persisted within the room Durable Object
 - **Client guidance:** keep a local set keyed by `(candidate, sdpMid, sdpMLineIndex)`; apply set‑difference; tolerate duplicates.
 
 **Future compatibility:** when `since` is provided, backend may return only deltas with `"mode":"delta"` and real `lastSeq`—without breaking old clients.
@@ -274,7 +274,7 @@ Common `code` values: `bad_join_code`, `not_open`, `already_paired`, `no_offer`,
 
 ## Dev & Test
 
-- Local dev: `wrangler dev` with KV binding.
+- Local dev: `wrangler dev` with the Durable Object binding provisioned by Miniflare.
 - Happy path: Create → Join → Offer/Answer → ICE exchange → DataChannel open → Close.
 - Same‑machine test: two tabs/windows; expect host candidates; STUN/TURN not required.
 
@@ -294,7 +294,7 @@ Common `code` values: `bad_join_code`, `not_open`, `already_paired`, `no_offer`,
 
 ## Future Backwards‑Compatible Evolution (improving concurrency handling and data consistency)
 
-- Introduce Durable Objects for exclusive access to room data
+- Explore batching primitives (e.g., per-room alarms) on top of the Durable Object for cleanup hooks
 - Start honoring `If-None-Match`/`ETag` and `?wait/since` on `/rooms/:code` (long‑poll).
 - Start honoring `Idempotency-Key` on candidate appends.
 - Add `"mode":"delta"` + `lastSeq` when `?since` is provided on `/candidates`.
