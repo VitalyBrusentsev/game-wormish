@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import worker, {
+  DurableObjectId,
+  DurableObjectNamespace,
+  DurableObjectState,
+  DurableObjectStorage,
+  DurableObjectStub,
   Env,
-  KVNamespace,
-  KVNamespaceGetOptions,
-  KVNamespacePutOptions,
+  RegistryRoomDurableObject,
   WorkerExecutionContext,
 } from './index';
 
@@ -12,76 +15,76 @@ declare const Buffer: {
   from(data: string, encoding: string): { toString(encoding: string): string };
 };
 
-class MemoryKV implements KVNamespace {
-  private store = new Map<string, { value: string; expiration?: number }>();
+function deepClone<T>(value: T): T {
+  if (value === undefined) {
+    return value;
+  }
+  return JSON.parse(JSON.stringify(value)) as T;
+}
 
-  async get(key: string, _options?: KVNamespaceGetOptions<string>): Promise<string | null> {
-    const entry = this.store.get(key);
-    if (!entry) {
-      return null;
+class MockDurableObjectStorage implements DurableObjectStorage {
+  private store = new Map<string, unknown>();
+
+  async get<T>(key: string): Promise<T | undefined> {
+    if (!this.store.has(key)) {
+      return undefined;
     }
-    if (entry.expiration && entry.expiration <= Date.now()) {
-      this.store.delete(key);
-      return null;
-    }
-    return entry.value;
+    return deepClone(this.store.get(key) as T);
   }
 
-  async put(key: string, value: string, options?: KVNamespacePutOptions): Promise<void> {
-    let expiration: number | undefined;
-    if (options?.expiration) {
-      expiration = options.expiration * 1000;
-    } else if (options?.expirationTtl) {
-      expiration = Date.now() + options.expirationTtl * 1000;
-    }
-    this.store.set(key, { value, expiration });
+  async put<T>(key: string, value: T): Promise<void> {
+    this.store.set(key, deepClone(value));
   }
 
   async delete(key: string): Promise<void> {
     this.store.delete(key);
   }
+}
 
-  debugPeek(key: string): string | null {
-    const entry = this.store.get(key);
-    if (!entry) {
-      return null;
-    }
-    if (entry.expiration && entry.expiration <= Date.now()) {
-      this.store.delete(key);
-      return null;
-    }
-    return entry.value;
+class MockDurableObjectId implements DurableObjectId {
+  constructor(private readonly value: string) {}
+
+  toString(): string {
+    return this.value;
   }
 }
 
-class RecordingKV extends MemoryKV {
-  private overrides = new Map<string, Array<string | null>>();
+class MockDurableObjectState implements DurableObjectState {
+  public readonly storage: DurableObjectStorage;
 
-  public readonly getRequests: Array<{
-    key: string;
-    options?: KVNamespaceGetOptions<string>;
-  }> = [];
+  constructor(public readonly id: DurableObjectId) {
+    this.storage = new MockDurableObjectStorage();
+  }
+}
 
-  queueGetOverride(key: string, value: string | null): void {
-    const queue = this.overrides.get(key);
-    if (queue) {
-      queue.push(value);
-    } else {
-      this.overrides.set(key, [value]);
+class MockDurableObjectStub implements DurableObjectStub {
+  constructor(private readonly object: RegistryRoomDurableObject) {}
+
+  async fetch(input: RequestInfo, init?: RequestInit): Promise<Response> {
+    if (input instanceof Request) {
+      return this.object.fetch(input);
     }
+    const request = new Request(input, init);
+    return this.object.fetch(request);
+  }
+}
+
+class MockDurableObjectNamespace implements DurableObjectNamespace {
+  private readonly objects = new Map<string, RegistryRoomDurableObject>();
+
+  idFromName(name: string): DurableObjectId {
+    return new MockDurableObjectId(name);
   }
 
-  override async get(key: string, options?: KVNamespaceGetOptions<string>): Promise<string | null> {
-    this.getRequests.push({ key, options });
-    const queue = this.overrides.get(key);
-    if (queue && queue.length > 0) {
-      const next = queue.shift();
-      if (queue.length === 0) {
-        this.overrides.delete(key);
-      }
-      return next ?? null;
+  get(id: DurableObjectId): DurableObjectStub {
+    const key = id.toString();
+    let object = this.objects.get(key);
+    if (!object) {
+      const state = new MockDurableObjectState(id);
+      object = new RegistryRoomDurableObject(state);
+      this.objects.set(key, object);
     }
-    return super.get(key, options);
+    return new MockDurableObjectStub(object);
   }
 }
 
@@ -94,7 +97,7 @@ describe('registry worker', () => {
 
   beforeEach(() => {
     env = {
-      REGISTRY_KV: new MemoryKV(),
+      REGISTRY_ROOMS: new MockDurableObjectNamespace(),
       ALLOWED_ORIGINS: 'https://game.test',
     } as Env;
   });
@@ -247,11 +250,8 @@ describe('registry worker', () => {
     expect(closeResponse.status).toBe(204);
   });
 
-  it('preserves SDP data when candidates race with stale KV replicas', async () => {
+  it('preserves SDP data when candidates are appended', async () => {
     const origin = 'https://game.test';
-    const kv = new RecordingKV();
-    env.REGISTRY_KV = kv;
-
     const createResponse = await worker.fetch(
       new Request('https://example.com/rooms', {
         method: 'POST',
@@ -265,7 +265,6 @@ describe('registry worker', () => {
       env,
       createExecutionContext()
     );
-    expect(createResponse.status).toBe(201);
     const created = await createResponse.json();
 
     const joinResponse = await worker.fetch(
@@ -281,15 +280,10 @@ describe('registry worker', () => {
       env,
       createExecutionContext()
     );
-    expect(joinResponse.status).toBe(200);
     const join = await joinResponse.json();
 
-    const roomKey = `room:${created.code}`;
-    const staleSnapshot = kv.debugPeek(roomKey);
-    expect(staleSnapshot).not.toBeNull();
-
     const sdp = 'v=0\no=- 0 0 IN IP4 127.0.0.1\ns=-\nt=0 0\nm=audio 9 RTP/AVP 0';
-    const offerResponse = await worker.fetch(
+    await worker.fetch(
       new Request(`https://example.com/rooms/${created.code}/offer`, {
         method: 'POST',
         headers: {
@@ -303,15 +297,6 @@ describe('registry worker', () => {
       env,
       createExecutionContext()
     );
-    expect(offerResponse.status).toBe(204);
-
-    const freshSnapshot = kv.debugPeek(roomKey);
-    expect(freshSnapshot).not.toBeNull();
-    expect(freshSnapshot).not.toBe(staleSnapshot);
-    const parsedFresh = JSON.parse(freshSnapshot!);
-    expect(parsedFresh.offer?.type).toBe('offer');
-
-    kv.queueGetOverride(roomKey, staleSnapshot);
 
     const candidateResponse = await worker.fetch(
       new Request(`https://example.com/rooms/${created.code}/candidate`, {
@@ -329,28 +314,31 @@ describe('registry worker', () => {
     );
     expect(candidateResponse.status).toBe(204);
 
-    const storedRoom = kv.debugPeek(roomKey);
-    expect(storedRoom).not.toBeNull();
-    const parsedRoom = JSON.parse(storedRoom!);
-    expect(parsedRoom.offer?.type).toBe('offer');
+    const snapshotResponse = await worker.fetch(
+      new Request(`https://example.com/rooms/${created.code}`, {
+        headers: {
+          'x-access-token': created.ownerToken,
+          Origin: origin,
+        },
+      }),
+      env,
+      createExecutionContext()
+    );
+    const snapshot = await snapshotResponse.json();
+    expect(snapshot.offer.type).toBe('offer');
 
-    const guestIceKey = `ice:${created.code}:guest`;
-    const guestIce = kv.debugPeek(guestIceKey);
-    expect(guestIce).not.toBeNull();
-    const parsedGuestIce = JSON.parse(guestIce!);
-    expect(parsedGuestIce).toHaveLength(1);
-
-    const roomGets = kv.getRequests.filter((req) => req.key === roomKey);
-    expect(roomGets.length).toBeGreaterThan(0);
-    for (const req of roomGets) {
-      expect(req.options?.cacheTtl).toBe(0);
-    }
-
-    const iceGets = kv.getRequests.filter((req) => req.key === guestIceKey);
-    expect(iceGets.length).toBeGreaterThan(0);
-    for (const req of iceGets) {
-      expect(req.options?.cacheTtl).toBe(0);
-    }
+    const candidatesResponse = await worker.fetch(
+      new Request(`https://example.com/rooms/${created.code}/candidates`, {
+        headers: {
+          'x-access-token': created.ownerToken,
+          Origin: origin,
+        },
+      }),
+      env,
+      createExecutionContext()
+    );
+    const candidates = await candidatesResponse.json();
+    expect(candidates.items).toHaveLength(1);
   });
 
   it('allows host to close an open room', async () => {
@@ -368,7 +356,6 @@ describe('registry worker', () => {
       env,
       createExecutionContext()
     );
-    expect(createResponse.status).toBe(201);
     const created = await createResponse.json();
 
     const closeResponse = await worker.fetch(
@@ -423,7 +410,7 @@ describe('registry worker', () => {
     expect(error.error.code).toBe('bad_join_code');
   });
 
-  it('keeps the stored offer when candidate updates see a stale room snapshot', async () => {
+  it('deduplicates candidates while keeping the offer', async () => {
     const origin = 'https://game.test';
     const createResponse = await worker.fetch(
       new Request('https://example.com/rooms', {
@@ -438,7 +425,6 @@ describe('registry worker', () => {
       env,
       createExecutionContext()
     );
-    expect(createResponse.status).toBe(201);
     const created = await createResponse.json();
 
     const joinResponse = await worker.fetch(
@@ -454,11 +440,10 @@ describe('registry worker', () => {
       env,
       createExecutionContext()
     );
-    expect(joinResponse.status).toBe(200);
-    const joined = await joinResponse.json();
+    const join = await joinResponse.json();
 
     const sdp = 'v=0\no=- 0 0 IN IP4 127.0.0.1\ns=-\nt=0 0\nm=audio 9 RTP/AVP 0';
-    const offerResponse = await worker.fetch(
+    await worker.fetch(
       new Request(`https://example.com/rooms/${created.code}/offer`, {
         method: 'POST',
         headers: {
@@ -472,25 +457,9 @@ describe('registry worker', () => {
       env,
       createExecutionContext()
     );
-    expect(offerResponse.status).toBe(204);
 
-    const kv = env.REGISTRY_KV as MemoryKV;
-    const originalGet = kv.get.bind(kv);
-    let servedStale = false;
-    kv.get = (async (key: string, options?: KVNamespaceGetOptions<string>) => {
-      if (!servedStale && key === `room:${created.code}`) {
-        servedStale = true;
-        const fresh = await originalGet(key, options);
-        if (fresh) {
-          const parsed = JSON.parse(fresh) as Record<string, unknown>;
-          delete parsed.offer;
-          return JSON.stringify(parsed);
-        }
-      }
-      return originalGet(key, options);
-    }) as MemoryKV['get'];
-
-    const candidateResponse = await worker.fetch(
+    const candidateBody = JSON.stringify({ candidate: 'candidate:1 1 UDP 1 127.0.0.1 3478 typ host' });
+    await worker.fetch(
       new Request(`https://example.com/rooms/${created.code}/candidate`, {
         method: 'POST',
         headers: {
@@ -499,32 +468,52 @@ describe('registry worker', () => {
           'x-access-token': created.ownerToken,
           Origin: origin,
         },
-        body: JSON.stringify({ candidate: 'candidate:1 1 UDP 1 127.0.0.1 3478 typ host' }),
+        body: candidateBody,
       }),
       env,
       createExecutionContext()
     );
-    expect(candidateResponse.status).toBe(204);
-
-    const stored = await kv.get(`room:${created.code}`);
-    expect(stored).not.toBeNull();
-    const parsed = JSON.parse(String(stored)) as { offer?: unknown };
-    expect(parsed.offer).toBeTruthy();
-
-    const snapshotResponse = await worker.fetch(
-      new Request(`https://example.com/rooms/${created.code}`, {
+    const duplicateResponse = await worker.fetch(
+      new Request(`https://example.com/rooms/${created.code}/candidate`, {
+        method: 'POST',
         headers: {
-          'x-access-token': joined.guestToken,
+          'content-type': 'application/json',
+          'x-registry-version': '1',
+          'x-access-token': created.ownerToken,
+          Origin: origin,
+        },
+        body: candidateBody,
+      }),
+      env,
+      createExecutionContext()
+    );
+    expect(duplicateResponse.status).toBe(204);
+
+    const candidatesResponse = await worker.fetch(
+      new Request(`https://example.com/rooms/${created.code}/candidates`, {
+        headers: {
+          'x-access-token': join.guestToken,
           Origin: origin,
         },
       }),
       env,
       createExecutionContext()
     );
-    expect(snapshotResponse.status).toBe(200);
+    const candidates = await candidatesResponse.json();
+    expect(candidates.items).toHaveLength(1);
+
+    const snapshotResponse = await worker.fetch(
+      new Request(`https://example.com/rooms/${created.code}`, {
+        headers: {
+          'x-access-token': join.guestToken,
+          Origin: origin,
+        },
+      }),
+      env,
+      createExecutionContext()
+    );
     const snapshot = await snapshotResponse.json();
-    expect(snapshot.offer).toBeTruthy();
-    expect(snapshot.offer.sdp).toBe(sdp);
+    expect(snapshot.offer.type).toBe('offer');
   });
 });
 

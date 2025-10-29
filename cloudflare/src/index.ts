@@ -1,29 +1,36 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-export interface KVNamespaceGetOptions<T> {
-  type?: 'text' | 'json' | 'arrayBuffer';
-  cacheTtl?: number;
-}
-
-export interface KVNamespacePutOptions {
-  expiration?: number;
-  expirationTtl?: number;
-  metadata?: Record<string, unknown>;
-}
-
-export interface KVNamespace {
-  get(key: string, options?: KVNamespaceGetOptions<string>): Promise<string | null>;
-  put(key: string, value: string, options?: KVNamespacePutOptions): Promise<void>;
-  delete(key: string): Promise<void>;
-}
-
 export interface Env {
-  REGISTRY_KV: KVNamespace;
+  REGISTRY_ROOMS: DurableObjectNamespace;
   ROOM_TTL_OPEN?: string;
   ROOM_TTL_JOINED?: string;
   ROOM_TTL_PAIRED?: string;
   ROOM_TTL_CLOSED?: string;
   ICE_TTL?: string;
   ALLOWED_ORIGINS?: string;
+}
+
+export interface DurableObjectId {
+  toString(): string;
+}
+
+export interface DurableObjectStorage {
+  get<T>(key: string): Promise<T | undefined>;
+  put<T>(key: string, value: T): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
+export interface DurableObjectState {
+  id: DurableObjectId;
+  storage: DurableObjectStorage;
+}
+
+export interface DurableObjectStub {
+  fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
+}
+
+export interface DurableObjectNamespace {
+  idFromName(name: string): DurableObjectId;
+  get(id: DurableObjectId): DurableObjectStub;
 }
 
 export interface WorkerExecutionContext {
@@ -80,7 +87,6 @@ const DEFAULT_TTLS: Record<RoomStatus, number> = {
 };
 
 const DEFAULT_ICE_TTL = 300;
-const MIN_KV_TTL_SECONDS = 60;
 
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -214,6 +220,8 @@ function ensureMutationHeader(request: Request): void {
   }
 }
 
+function getAccessToken(request: Request, required: true): string;
+function getAccessToken(request: Request, required: false): string | null;
 function getAccessToken(request: Request, required: boolean): string | null {
   const token = request.headers.get(HEADER_ACCESS_TOKEN);
   if (required && !token) {
@@ -293,14 +301,6 @@ function validateCandidate(candidate: unknown): IceCandidateInput {
   return result;
 }
 
-function getRoomKey(code: string): string {
-  return `room:${code}`;
-}
-
-function getIceKey(code: string, role: 'host' | 'guest'): string {
-  return `ice:${code}:${role}`;
-}
-
 function getRoomTtl(env: Env, status: RoomStatus): number {
   const override = env[`ROOM_TTL_${status.toUpperCase() as 'ROOM_TTL_OPEN'}` as keyof Env];
   if (override) {
@@ -331,57 +331,127 @@ async function readBodyText(request: Request): Promise<string> {
   return new TextDecoder().decode(buffer);
 }
 
-async function loadRoom(env: Env, code: string): Promise<RoomRecord | null> {
-  const raw = await env.REGISTRY_KV.get(getRoomKey(code), { cacheTtl: 0 });
-  if (!raw) {
-    return null;
-  }
-  try {
-    return JSON.parse(raw) as RoomRecord;
-  } catch (error) {
-    return null;
-  }
+type TtlConfig = Record<RoomStatus, number>;
+
+interface DurableSuccess<T> {
+  status: number;
+  data: T;
 }
 
-async function saveRoom(env: Env, room: RoomRecord): Promise<void> {
-  const logicalTtl = getRoomTtl(env, room.status);
-  const expiresAt = Date.now() + logicalTtl * 1000;
-  room.expiresAt = expiresAt;
-  await env.REGISTRY_KV.put(getRoomKey(room.code), JSON.stringify(room), {
-    expirationTtl: Math.max(logicalTtl, MIN_KV_TTL_SECONDS),
+interface DurableErrorPayload {
+  code: string;
+  message: string;
+  retryable: boolean;
+  retryAfterSec?: number;
+}
+
+type DurableEnvelope<T> =
+  | { ok: true; status: number; data: T }
+  | { ok: false; status: number; error: DurableErrorPayload };
+
+interface CreateRoomPayload {
+  type: 'create';
+  code: string;
+  hostUserName: string;
+  joinCode: string;
+  ownerToken: string;
+  ttlConfig: TtlConfig;
+}
+
+interface PublicLookupPayload {
+  type: 'public_lookup';
+}
+
+interface JoinRoomPayload {
+  type: 'join';
+  joinCode: string;
+  guestUserName: string;
+  ttlConfig: TtlConfig;
+}
+
+interface OfferPayload {
+  type: 'offer';
+  token: string;
+  description: SessionDescription;
+  ttlConfig: TtlConfig;
+}
+
+interface AnswerPayload {
+  type: 'answer';
+  token: string;
+  description: SessionDescription;
+  ttlConfig: TtlConfig;
+}
+
+interface CandidatePayload {
+  type: 'candidate';
+  token: string;
+  candidate: CandidateRecord;
+  iceTtlSeconds: number;
+}
+
+interface SnapshotPayload {
+  type: 'snapshot';
+  token: string;
+}
+
+interface CandidatesPayload {
+  type: 'candidates';
+  token: string;
+}
+
+interface ClosePayload {
+  type: 'close';
+  token: string;
+  ttlConfig: TtlConfig;
+}
+
+type RoomDurableRequest =
+  | CreateRoomPayload
+  | PublicLookupPayload
+  | JoinRoomPayload
+  | OfferPayload
+  | AnswerPayload
+  | CandidatePayload
+  | SnapshotPayload
+  | CandidatesPayload
+  | ClosePayload;
+
+function getRoomTtlConfig(env: Env): TtlConfig {
+  return {
+    open: getRoomTtl(env, 'open'),
+    joined: getRoomTtl(env, 'joined'),
+    paired: getRoomTtl(env, 'paired'),
+    closed: getRoomTtl(env, 'closed'),
+  };
+}
+
+function getRoomStub(env: Env, code: string): DurableObjectStub {
+  const id = env.REGISTRY_ROOMS.idFromName(code);
+  return env.REGISTRY_ROOMS.get(id);
+}
+
+async function sendRoomRequest<T>(env: Env, code: string, payload: RoomDurableRequest): Promise<DurableSuccess<T>> {
+  const stub = getRoomStub(env, code);
+  const response = await stub.fetch('https://registry.internal/', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
   });
+  const envelope = (await response.json()) as DurableEnvelope<T>;
+  if (!envelope.ok) {
+    const error = envelope.error;
+    throw new RegistryError(envelope.status, error.code, error.message, error.retryable, error.retryAfterSec);
+  }
+  return { status: envelope.status, data: envelope.data };
 }
 
 function candidateDedupeKey(candidate: CandidateRecord): string {
   return [candidate.candidate, candidate.sdpMid ?? '', candidate.sdpMLineIndex ?? -1].join('::');
 }
 
-async function appendCandidate(env: Env, code: string, role: 'host' | 'guest', candidate: CandidateRecord): Promise<void> {
-  const key = getIceKey(code, role);
-  const raw = await env.REGISTRY_KV.get(key, { cacheTtl: 0 });
-  const existing: CandidateRecord[] = raw ? (JSON.parse(raw) as CandidateRecord[]) : [];
-  const dedupe = new Map(existing.map((item) => [candidateDedupeKey(item), item] as const));
-  const candidateKey = candidateDedupeKey(candidate);
-  if (!dedupe.has(candidateKey)) {
-    if (existing.length >= MAX_CANDIDATES_PER_PEER) {
-      throw new RegistryError(409, 'too_many_candidates', 'Candidate limit reached', true);
-    }
-    existing.push(candidate);
-  }
-  const ttl = getIceTtl(env);
-  await env.REGISTRY_KV.put(key, JSON.stringify(existing), { expirationTtl: ttl });
-}
-
-async function readCandidates(env: Env, code: string, role: 'host' | 'guest'): Promise<CandidateRecord[]> {
-  const raw = await env.REGISTRY_KV.get(getIceKey(code, role), { cacheTtl: 0 });
-  if (!raw) {
-    return [];
-  }
-  try {
-    return JSON.parse(raw) as CandidateRecord[];
-  } catch (error) {
-    return [];
-  }
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function generateRandomBytes(length: number): Uint8Array {
@@ -418,23 +488,6 @@ function generateToken(): string {
   return base64UrlEncode(generateRandomBytes(32));
 }
 
-async function ensureUniqueRoomCode(env: Env): Promise<string> {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const code = generateRoomCode();
-    const existing = await env.REGISTRY_KV.get(getRoomKey(code), { cacheTtl: 0 });
-    if (!existing) {
-      return code;
-    }
-  }
-  throw new RegistryError(503, 'retry', 'Unable to allocate room code', true, 1);
-}
-
-function ensureRoomAccessible(room: RoomRecord): void {
-  if (room.status === 'closed') {
-    throw new RegistryError(404, 'not_found', 'Room not found', false);
-  }
-}
-
 async function handleCreateRoom(
   request: Request,
   env: Env,
@@ -446,38 +499,38 @@ async function handleCreateRoom(
   const rawBody = await readBodyText(request);
   const body = parseJsonBody<{ hostUserName?: unknown }>(rawBody);
   validateUserName(body.hostUserName);
-
-  const code = await ensureUniqueRoomCode(env);
-  const joinCode = generateJoinCode();
-  const ownerToken = generateToken();
-  const now = Date.now();
-  const room: RoomRecord = {
-    code,
-    hostUserName: body.hostUserName,
-    joinCode,
-    ownerToken,
-    status: 'open',
-    createdAt: now,
-    updatedAt: now,
-    expiresAt: now + getRoomTtl(env, 'open') * 1000,
-  };
-  await saveRoom(env, room);
-  const responseBody = {
-    code,
-    joinCode,
-    ownerToken,
-    expiresAt: room.expiresAt,
-  };
-  return jsonResponse(responseBody, 201, corsOrigin);
-}
-
-async function requireRoom(env: Env, code: string): Promise<RoomRecord> {
-  const room = await loadRoom(env, code);
-  if (!room) {
-    throw new RegistryError(404, 'not_found', 'Room not found', false);
+  const ttlConfig = getRoomTtlConfig(env);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = generateRoomCode();
+    const joinCode = generateJoinCode();
+    const ownerToken = generateToken();
+    try {
+      const { data } = await sendRoomRequest<{ room: RoomRecord }>(env, code, {
+        type: 'create',
+        code,
+        hostUserName: body.hostUserName,
+        joinCode,
+        ownerToken,
+        ttlConfig,
+      });
+      return jsonResponse(
+        {
+          code: data.room.code,
+          joinCode: data.room.joinCode,
+          ownerToken: data.room.ownerToken,
+          expiresAt: data.room.expiresAt,
+        },
+        201,
+        corsOrigin
+      );
+    } catch (error) {
+      if (error instanceof RegistryError && error.code === 'room_exists') {
+        continue;
+      }
+      throw error;
+    }
   }
-  ensureRoomAccessible(room);
-  return room;
+  throw new RegistryError(503, 'retry', 'Unable to allocate room code', true, 1);
 }
 
 async function handlePublicLookup(
@@ -490,19 +543,10 @@ async function handlePublicLookup(
   if (!roomCode) {
     throw new RegistryError(404, 'not_found', 'Room not found', false);
   }
-  const room = await loadRoom(env, roomCode);
-  if (!room || room.status !== 'open') {
-    throw new RegistryError(404, 'not_found', 'Room not found', false);
-  }
-  return jsonResponse(
-    {
-      status: room.status,
-      expiresAt: room.expiresAt,
-      hostUserName: room.hostUserName,
-    },
-    200,
-    corsOrigin
-  );
+  const { data } = await sendRoomRequest<{ status: RoomStatus; expiresAt: number; hostUserName: string }>(env, roomCode, {
+    type: 'public_lookup',
+  });
+  return jsonResponse(data, 200, corsOrigin);
 }
 
 async function handleJoinRoom(
@@ -520,35 +564,14 @@ async function handleJoinRoom(
   const body = parseJsonBody<{ joinCode?: unknown; guestUserName?: unknown }>(rawBody);
   validateJoinCode(body.joinCode);
   validateUserName(body.guestUserName);
-  const room = await requireRoom(env, roomCode);
-  if (room.status !== 'open') {
-    throw new RegistryError(409, 'not_open', 'Room is not open for joining', false);
-  }
-  if (!room.joinCode || room.joinCode !== body.joinCode) {
-    throw new RegistryError(403, 'bad_join_code', 'Join code is invalid', false);
-  }
-  const now = Date.now();
-  const guestToken = generateToken();
-  room.guestUserName = body.guestUserName;
-  room.guestToken = guestToken;
-  delete room.joinCode;
-  room.status = 'joined';
-  room.updatedAt = now;
-  await saveRoom(env, room);
-  return jsonResponse({ guestToken, expiresAt: room.expiresAt }, 200, corsOrigin);
-}
-
-function requireToken(room: RoomRecord, token: string | null): { role: 'host' | 'guest' } {
-  if (!token) {
-    throw new RegistryError(403, 'forbidden', 'Missing access token', false);
-  }
-  if (token === room.ownerToken) {
-    return { role: 'host' };
-  }
-  if (room.guestToken && token === room.guestToken) {
-    return { role: 'guest' };
-  }
-  throw new RegistryError(403, 'forbidden', 'Invalid access token', false);
+  const ttlConfig = getRoomTtlConfig(env);
+  const { data } = await sendRoomRequest<{ guestToken: string; expiresAt: number }>(env, roomCode, {
+    type: 'join',
+    joinCode: body.joinCode,
+    guestUserName: body.guestUserName,
+    ttlConfig,
+  });
+  return jsonResponse(data, 200, corsOrigin);
 }
 
 async function handleOffer(
@@ -565,17 +588,14 @@ async function handleOffer(
   const token = getAccessToken(request, true);
   const rawBody = await readBodyText(request);
   const body = parseJsonBody<SessionDescription>(rawBody);
-  const room = await requireRoom(env, roomCode);
-  const { role } = requireToken(room, token);
-  if (role !== 'host') {
-    throw new RegistryError(403, 'forbidden', 'Only the host can set the offer', false);
-  }
-  if (room.status === 'paired' || room.status === 'closed') {
-    throw new RegistryError(409, 'already_paired', 'Room already paired or closed', false);
-  }
-  room.offer = validateSdp(body, 'offer');
-  room.updatedAt = Date.now();
-  await saveRoom(env, room);
+  const description = validateSdp(body, 'offer');
+  const ttlConfig = getRoomTtlConfig(env);
+  await sendRoomRequest<null>(env, roomCode, {
+    type: 'offer',
+    token: token!,
+    description,
+    ttlConfig,
+  });
   return emptyResponse(204, corsOrigin);
 }
 
@@ -593,21 +613,14 @@ async function handleAnswer(
   const token = getAccessToken(request, true);
   const rawBody = await readBodyText(request);
   const body = parseJsonBody<SessionDescription>(rawBody);
-  const room = await requireRoom(env, roomCode);
-  const { role } = requireToken(room, token);
-  if (role !== 'guest') {
-    throw new RegistryError(403, 'forbidden', 'Only the guest can set the answer', false);
-  }
-  if (!room.offer) {
-    throw new RegistryError(409, 'no_offer', 'Offer must be set before answer', false);
-  }
-  if (room.status === 'paired' || room.status === 'closed') {
-    throw new RegistryError(409, 'already_paired', 'Room already paired or closed', false);
-  }
-  room.answer = validateSdp(body, 'answer');
-  room.status = 'paired';
-  room.updatedAt = Date.now();
-  await saveRoom(env, room);
+  const description = validateSdp(body, 'answer');
+  const ttlConfig = getRoomTtlConfig(env);
+  await sendRoomRequest<null>(env, roomCode, {
+    type: 'answer',
+    token,
+    description,
+    ttlConfig,
+  });
   return emptyResponse(204, corsOrigin);
 }
 
@@ -625,13 +638,13 @@ async function handleCandidate(
   const token = getAccessToken(request, true);
   const rawBody = await readBodyText(request);
   const body = parseJsonBody<IceCandidateInput>(rawBody);
-  const room = await requireRoom(env, roomCode);
-  const { role } = requireToken(room, token);
-  if (room.status === 'closed') {
-    throw new RegistryError(409, 'not_open', 'Room is closed', false);
-  }
   const validated = validateCandidate(body);
-  await appendCandidate(env, room.code, role, validated);
+  await sendRoomRequest<null>(env, roomCode, {
+    type: 'candidate',
+    token,
+    candidate: validated,
+    iceTtlSeconds: getIceTtl(env),
+  });
   return emptyResponse(204, corsOrigin);
 }
 
@@ -646,19 +659,17 @@ async function handleRoomSnapshot(
     throw new RegistryError(404, 'not_found', 'Room not found', false);
   }
   const token = getAccessToken(request, true);
-  const room = await requireRoom(env, roomCode);
-  requireToken(room, token);
-  return jsonResponse(
-    {
-      status: room.status,
-      offer: room.offer ?? null,
-      answer: room.answer ?? null,
-      updatedAt: room.updatedAt,
-      expiresAt: room.expiresAt,
-    },
-    200,
-    corsOrigin
-  );
+  const { data } = await sendRoomRequest<{
+    status: RoomStatus;
+    offer: SessionDescription | null;
+    answer: SessionDescription | null;
+    updatedAt: number;
+    expiresAt: number;
+  }>(env, roomCode, {
+    type: 'snapshot',
+    token,
+  });
+  return jsonResponse(data, 200, corsOrigin);
 }
 
 async function handleCandidates(
@@ -672,19 +683,11 @@ async function handleCandidates(
     throw new RegistryError(404, 'not_found', 'Room not found', false);
   }
   const token = getAccessToken(request, true);
-  const room = await requireRoom(env, roomCode);
-  const { role } = requireToken(room, token);
-  const otherRole = role === 'host' ? 'guest' : 'host';
-  const items = await readCandidates(env, room.code, otherRole);
-  return jsonResponse(
-    {
-      items,
-      mode: 'full',
-      lastSeq: 0,
-    },
-    200,
-    corsOrigin
-  );
+  const { data } = await sendRoomRequest<{ items: CandidateRecord[]; mode: 'full'; lastSeq: number }>(env, roomCode, {
+    type: 'candidates',
+    token,
+  });
+  return jsonResponse(data, 200, corsOrigin);
 }
 
 async function handleCloseRoom(
@@ -699,15 +702,293 @@ async function handleCloseRoom(
   }
   ensureMutationHeader(request);
   const token = getAccessToken(request, true);
-  const room = await requireRoom(env, roomCode);
-  const { role } = requireToken(room, token);
-  if (role !== 'host') {
-    throw new RegistryError(403, 'forbidden', 'Only the host can close the room', false);
-  }
-  room.status = 'closed';
-  room.updatedAt = Date.now();
-  await saveRoom(env, room);
+  const ttlConfig = getRoomTtlConfig(env);
+  await sendRoomRequest<null>(env, roomCode, {
+    type: 'close',
+    token,
+    ttlConfig,
+  });
   return emptyResponse(204, corsOrigin);
+}
+
+interface IceBucket {
+  items: CandidateRecord[];
+  expiresAt: number;
+}
+
+export class RegistryRoomDurableObject {
+  constructor(private readonly state: DurableObjectState) {}
+
+  private json<T>(payload: DurableEnvelope<T>): Response {
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+    });
+  }
+
+  private success<T>(status: number, data: T): Response {
+    return this.json({ ok: true, status, data });
+  }
+
+  private failure(error: RegistryError): Response {
+    const payload: DurableErrorPayload = {
+      code: error.code,
+      message: error.messageText,
+      retryable: error.retryable,
+    };
+    if (typeof error.retryAfterSec === 'number') {
+      payload.retryAfterSec = error.retryAfterSec;
+    }
+    return this.json({ ok: false, status: error.httpStatus, error: payload });
+  }
+
+  private async clearState(): Promise<void> {
+    await this.state.storage.delete('room');
+    await this.state.storage.delete('ice:host');
+    await this.state.storage.delete('ice:guest');
+  }
+
+  private async loadRoom(now: number): Promise<RoomRecord | null> {
+    const stored = await this.state.storage.get<RoomRecord>('room');
+    if (!stored) {
+      return null;
+    }
+    if (stored.expiresAt <= now) {
+      await this.clearState();
+      return null;
+    }
+    return stored;
+  }
+
+  private async requireRoom(now: number): Promise<RoomRecord> {
+    const room = await this.loadRoom(now);
+    if (!room) {
+      throw new RegistryError(404, 'not_found', 'Room not found', false);
+    }
+    if (room.status === 'closed') {
+      throw new RegistryError(404, 'not_found', 'Room not found', false);
+    }
+    return room;
+  }
+
+  private requireToken(room: RoomRecord, token: string): 'host' | 'guest' {
+    if (!token) {
+      throw new RegistryError(403, 'forbidden', 'Missing access token', false);
+    }
+    if (token === room.ownerToken) {
+      return 'host';
+    }
+    if (room.guestToken && token === room.guestToken) {
+      return 'guest';
+    }
+    throw new RegistryError(403, 'forbidden', 'Invalid access token', false);
+  }
+
+  private async saveRoom(room: RoomRecord): Promise<void> {
+    await this.state.storage.put('room', clone(room));
+  }
+
+  private iceKey(role: 'host' | 'guest'): string {
+    return `ice:${role}`;
+  }
+
+  private async readCandidates(role: 'host' | 'guest', now: number): Promise<CandidateRecord[]> {
+    const bucket = await this.state.storage.get<IceBucket>(this.iceKey(role));
+    if (!bucket) {
+      return [];
+    }
+    if (bucket.expiresAt <= now) {
+      await this.state.storage.delete(this.iceKey(role));
+      return [];
+    }
+    return bucket.items.map((item) => clone(item));
+  }
+
+  private async appendCandidate(
+    role: 'host' | 'guest',
+    candidate: CandidateRecord,
+    iceTtlSeconds: number,
+    now: number
+  ): Promise<void> {
+    const key = this.iceKey(role);
+    const bucket = await this.state.storage.get<IceBucket>(key);
+    let items: CandidateRecord[] = [];
+    if (bucket && bucket.expiresAt > now) {
+      items = bucket.items.slice();
+    }
+    const dedupe = new Map(items.map((item) => [candidateDedupeKey(item), item] as const));
+    const candidateKey = candidateDedupeKey(candidate);
+    if (!dedupe.has(candidateKey)) {
+      if (items.length >= MAX_CANDIDATES_PER_PEER) {
+        throw new RegistryError(409, 'too_many_candidates', 'Candidate limit reached', true);
+      }
+      items.push(clone(candidate));
+    }
+    const ttlSeconds = Math.max(1, Math.floor(iceTtlSeconds));
+    await this.state.storage.put(key, {
+      items,
+      expiresAt: now + ttlSeconds * 1000,
+    });
+  }
+
+  private roomTtlForStatus(room: RoomRecord, ttlConfig: TtlConfig): number {
+    return ttlConfig[room.status];
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    try {
+      const payload = (await request.json()) as Partial<RoomDurableRequest>;
+      if (!payload || typeof payload !== 'object' || typeof payload.type !== 'string') {
+        throw new RegistryError(400, 'bad_request', 'Invalid request payload', false);
+      }
+      const now = Date.now();
+      switch (payload.type) {
+        case 'create': {
+          const createPayload = payload as CreateRoomPayload;
+          const existing = await this.loadRoom(now);
+          if (existing) {
+            throw new RegistryError(409, 'room_exists', 'Room already exists', true);
+          }
+          const ttl = Math.max(1, Math.floor(createPayload.ttlConfig.open));
+          const room: RoomRecord = {
+            code: createPayload.code,
+            hostUserName: createPayload.hostUserName,
+            joinCode: createPayload.joinCode,
+            ownerToken: createPayload.ownerToken,
+            status: 'open',
+            createdAt: now,
+            updatedAt: now,
+            expiresAt: now + ttl * 1000,
+          };
+          await this.state.storage.put('room', clone(room));
+          await this.state.storage.delete(this.iceKey('host'));
+          await this.state.storage.delete(this.iceKey('guest'));
+          return this.success(201, { room: clone(room) });
+        }
+        case 'public_lookup': {
+          const room = await this.loadRoom(now);
+          if (!room || room.status !== 'open') {
+            throw new RegistryError(404, 'not_found', 'Room not found', false);
+          }
+          return this.success(200, {
+            status: room.status,
+            expiresAt: room.expiresAt,
+            hostUserName: room.hostUserName,
+          });
+        }
+        case 'join': {
+          const joinPayload = payload as JoinRoomPayload;
+          const room = await this.requireRoom(now);
+          if (room.status !== 'open') {
+            throw new RegistryError(409, 'not_open', 'Room is not open for joining', false);
+          }
+          if (!room.joinCode || room.joinCode !== joinPayload.joinCode) {
+            throw new RegistryError(403, 'bad_join_code', 'Join code is invalid', false);
+          }
+          const guestToken = generateToken();
+          room.guestUserName = joinPayload.guestUserName;
+          room.guestToken = guestToken;
+          delete room.joinCode;
+          room.status = 'joined';
+          room.updatedAt = now;
+          const ttl = Math.max(1, Math.floor(joinPayload.ttlConfig.joined));
+          room.expiresAt = now + ttl * 1000;
+          await this.saveRoom(room);
+          await this.state.storage.delete(this.iceKey('guest'));
+          return this.success(200, { guestToken, expiresAt: room.expiresAt });
+        }
+        case 'offer': {
+          const offerPayload = payload as OfferPayload;
+          const room = await this.requireRoom(now);
+          const role = this.requireToken(room, offerPayload.token);
+          if (role !== 'host') {
+            throw new RegistryError(403, 'forbidden', 'Only the host can set the offer', false);
+          }
+          if (room.status === 'paired' || room.status === 'closed') {
+            throw new RegistryError(409, 'already_paired', 'Room already paired or closed', false);
+          }
+          room.offer = offerPayload.description;
+          room.updatedAt = now;
+          const ttl = Math.max(1, Math.floor(this.roomTtlForStatus(room, offerPayload.ttlConfig)));
+          room.expiresAt = now + ttl * 1000;
+          await this.saveRoom(room);
+          return this.success(204, null);
+        }
+        case 'answer': {
+          const answerPayload = payload as AnswerPayload;
+          const room = await this.requireRoom(now);
+          const role = this.requireToken(room, answerPayload.token);
+          if (role !== 'guest') {
+            throw new RegistryError(403, 'forbidden', 'Only the guest can set the answer', false);
+          }
+          if (!room.offer) {
+            throw new RegistryError(409, 'no_offer', 'Offer must be set before answer', false);
+          }
+          if (room.status === 'paired' || room.status === 'closed') {
+            throw new RegistryError(409, 'already_paired', 'Room already paired or closed', false);
+          }
+          room.answer = answerPayload.description;
+          room.status = 'paired';
+          room.updatedAt = now;
+          const ttl = Math.max(1, Math.floor(answerPayload.ttlConfig.paired));
+          room.expiresAt = now + ttl * 1000;
+          await this.saveRoom(room);
+          return this.success(204, null);
+        }
+        case 'candidate': {
+          const candidatePayload = payload as CandidatePayload;
+          const room = await this.requireRoom(now);
+          const role = this.requireToken(room, candidatePayload.token);
+          if (room.status === 'closed') {
+            throw new RegistryError(409, 'not_open', 'Room is closed', false);
+          }
+          await this.appendCandidate(role, candidatePayload.candidate, candidatePayload.iceTtlSeconds, now);
+          return this.success(204, null);
+        }
+        case 'snapshot': {
+          const snapshotPayload = payload as SnapshotPayload;
+          const room = await this.requireRoom(now);
+          this.requireToken(room, snapshotPayload.token);
+          return this.success(200, {
+            status: room.status,
+            offer: room.offer ? clone(room.offer) : null,
+            answer: room.answer ? clone(room.answer) : null,
+            updatedAt: room.updatedAt,
+            expiresAt: room.expiresAt,
+          });
+        }
+        case 'candidates': {
+          const candidatesPayload = payload as CandidatesPayload;
+          const room = await this.requireRoom(now);
+          const role = this.requireToken(room, candidatesPayload.token);
+          const otherRole = role === 'host' ? 'guest' : 'host';
+          const items = await this.readCandidates(otherRole, now);
+          return this.success(200, { items, mode: 'full', lastSeq: 0 });
+        }
+        case 'close': {
+          const closePayload = payload as ClosePayload;
+          const room = await this.requireRoom(now);
+          const role = this.requireToken(room, closePayload.token);
+          if (role !== 'host') {
+            throw new RegistryError(403, 'forbidden', 'Only the host can close the room', false);
+          }
+          room.status = 'closed';
+          room.updatedAt = now;
+          const ttl = Math.max(1, Math.floor(closePayload.ttlConfig.closed));
+          room.expiresAt = now + ttl * 1000;
+          await this.saveRoom(room);
+          return this.success(204, null);
+        }
+        default:
+          throw new RegistryError(400, 'bad_request', 'Unknown request type', false);
+      }
+    } catch (error) {
+      if (error instanceof RegistryError) {
+        return this.failure(error);
+      }
+      return this.failure(new RegistryError(500, 'internal_error', 'Unexpected error', true));
+    }
+  }
 }
 
 const routes: Array<{ method: string; pattern: RegExp; handler: RouteHandler }> = [
