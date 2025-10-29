@@ -6,7 +6,7 @@ compatibility_date = "2024-05-20"
 name = "REGISTRY_ROOMS"
 class_name = "RegistryRoomDurableObject"
 
-[migrations]
+[[migrations]]
 tag = "v1"
 new_classes = ["RegistryRoomDurableObject"]
 
