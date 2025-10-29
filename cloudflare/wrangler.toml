@@ -7,8 +7,8 @@ name = "REGISTRY_ROOMS"
 class_name = "RegistryRoomDurableObject"
 
 [[migrations]]
-tag = "v1"
-new_classes = ["RegistryRoomDurableObject"]
+tag = "v2"
+new_sqlite_classes = ["RegistryRoomDurableObject"]
 
 [vars]
 ALLOWED_ORIGINS = "http://localhost:5173"
