@@ -8,7 +8,7 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 
 ## Platform & Bindings
 - **Cloudflare Worker** (HTTP JSON API).
-- **KV Namespace**: `REGISTRY_KV`
+- **Durable Object**: `REGISTRY_ROOMS` (per-room authority)
 - **Cloudflare WAF/Rate Limiting**: blanket + per‑IP on sensitive endpoints.
 - Optional: **Turnstile** (captcha) or identity JWT on room creation.
 
@@ -17,11 +17,14 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 
 - **Guessing & abuse:** Mitigated via unguessable room codes, short‑lived join codes and tokens, strict payload caps, per‑state TTLs, and rate limits.
 
-## Data Model (KV)
+## Data Model (Durable Object)
 
-- `room:<code>` → Room JSON (below)
-- `ice:<code>:host` → JSON array of RTCIceCandidateInit (bounded, deduped)
-- `ice:<code>:guest` → JSON array of RTCIceCandidateInit (bounded, deduped)
+- Each room code resolves to a single Durable Object instance that serializes all mutations.
+- The object stores one **Room JSON** payload (below) plus separate candidate lists for `host` and `guest` roles. Lists are bounded,
+  deduped, and expire after the ICE TTL.
+
+> Durable Objects give per-room strong consistency: every mutation is processed in order by the owning instance, eliminating stale
+> replica races that existed with KV writes/reads.
 
 **Room JSON**
 ```json
@@ -47,7 +50,7 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 - `ROOM_TTL_JOINED` = **180s**
 - `ROOM_TTL_PAIRED` = **300s**
 - `ROOM_TTL_CLOSED` = **15s** (expire ASAP)
-- `ICE_TTL` = **300s** (5 minutes) for both `ice:<code>:(host|guest)`
+- `ICE_TTL` = **300s** (5 minutes) for both candidate lists (`host` and `guest`)
 
 **Rules**
 - Valid mutations “touch” the room TTL for the **current state**.
@@ -274,7 +277,7 @@ Common `code` values: `bad_join_code`, `not_open`, `already_paired`, `no_offer`,
 
 ## Dev & Test
 
-- Local dev: `wrangler dev` with KV binding.
+- Local dev: `wrangler dev` with the Durable Object binding configured.
 - Happy path: Create → Join → Offer/Answer → ICE exchange → DataChannel open → Close.
 - Same‑machine test: two tabs/windows; expect host candidates; STUN/TURN not required.
 
@@ -294,7 +297,6 @@ Common `code` values: `bad_join_code`, `not_open`, `already_paired`, `no_offer`,
 
 ## Future Backwards‑Compatible Evolution (improving concurrency handling and data consistency)
 
-- Introduce Durable Objects for exclusive access to room data
 - Start honoring `If-None-Match`/`ETag` and `?wait/since` on `/rooms/:code` (long‑poll).
 - Start honoring `Idempotency-Key` on candidate appends.
 - Add `"mode":"delta"` + `lastSeq` when `?since` is provided on `/candidates`.
