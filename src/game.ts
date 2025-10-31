@@ -306,7 +306,7 @@ export class Game {
       this.canvas.style.cursor = this.startMenu.getCursor();
       return;
     }
-    if (this.session.state.weapon === WeaponType.Rifle && !this.session.state.charging) {
+    if (this.session.state.weapon === WeaponType.Rifle) {
       this.canvas.style.cursor = "none";
       return;
     }
@@ -314,7 +314,7 @@ export class Game {
       this.canvas.style.cursor = "crosshair";
       return;
     }
-    this.canvas.style.cursor = this.session.state.weapon === WeaponType.Rifle ? "none" : "crosshair";
+    this.canvas.style.cursor = "crosshair";
   }
 
   getTeamHealth(id: TeamId) {
