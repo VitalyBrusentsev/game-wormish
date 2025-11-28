@@ -85,10 +85,35 @@ export class Game {
 
     this.initializeTurnControllers();
 
-    this.helpOverlay = new HelpOverlay();
-    this.startMenu = new StartMenuOverlay();
+    this.helpOverlay = new HelpOverlay({
+      onClose: (pausedMs) => this.handleHelpClosed(pausedMs),
+    });
+    this.startMenu = new StartMenuOverlay({
+      onHelp: () => {
+        this.helpOpenedFromMenu = true;
+        this.startMenu.hide();
+        this.showHelp();
+      },
+      onStart: () => {
+        this.startMenu.hide();
+        initialMenuDismissed = true;
+        this.canvas.focus();
+        this.updateCursor();
+      },
+      onRestart: () => {
+        this.startMenu.hide();
+        initialMenuDismissed = true;
+        this.session.restart();
+        this.canvas.focus();
+        this.updateCursor();
+      },
+      onClose: () => {
+        this.canvas.focus();
+        this.updateCursor();
+      },
+    });
     if (!initialMenuDismissed) {
-      this.startMenu.show("start");
+      this.startMenu.show("start", false);
     }
 
     this.updateCursor();
@@ -167,87 +192,57 @@ export class Game {
   }
 
   private hideHelp() {
-    const pausedFor = this.helpOverlay.hide(nowMs());
+    this.helpOverlay.hide();
+  }
+
+  private handleHelpClosed(pausedFor: number) {
     if (this.helpOpenedFromMenu) {
       this.helpOpenedFromMenu = false;
-      this.startMenu.show();
+      this.startMenu.show(this.startMenu.getMode(), initialMenuDismissed);
+      this.updateCursor();
       return;
     }
     if (pausedFor > 0) {
       this.session.state.pauseFor(pausedFor);
     }
+    this.canvas.focus();
+    this.updateCursor();
   }
 
   private processInput() {
     if (this.input.pressed("F1")) {
+      const wasMenuVisible = this.startMenu.isVisible();
       if (this.helpOverlay.isVisible()) {
         this.hideHelp();
       } else {
-        this.helpOpenedFromMenu = this.startMenu.isVisible();
+        this.helpOpenedFromMenu = wasMenuVisible;
+        if (wasMenuVisible) this.startMenu.hide();
         this.showHelp();
       }
       this.updateCursor();
+      return;
     }
 
     if (this.helpOverlay.isVisible()) {
       if (this.input.pressed("Escape")) {
         this.hideHelp();
-        this.updateCursor();
-      } else if (
-        this.input.mouseJustPressed &&
-        this.helpOverlay.isCloseButtonHit(
-          this.input.mouseX - this.cameraOffsetX,
-          this.input.mouseY - this.cameraOffsetY
-        )
-      ) {
-        this.hideHelp();
-        this.updateCursor();
-        this.input.consumeMousePress();
       }
+      this.updateCursor();
       return;
     }
 
     const escapePressed = this.input.pressed("Escape");
-    if (escapePressed) {
-      if (this.startMenu.isVisible()) {
-        if (initialMenuDismissed) {
-          this.startMenu.hide();
-          this.updateCursor();
-          return;
-        }
-      } else {
-        this.startMenu.show(initialMenuDismissed ? "pause" : "start");
-        this.updateCursor();
-        return;
-      }
-    }
 
     if (this.startMenu.isVisible()) {
-      const pointerX = this.input.mouseX - this.cameraOffsetX;
-      const pointerY = this.input.mouseY - this.cameraOffsetY;
-      this.startMenu.updateLayout(this.width, this.height);
-      this.startMenu.updatePointer(pointerX, pointerY, this.input.mouseDown);
-
-      if (this.input.mouseJustPressed) {
-        this.startMenu.handlePress();
+      if (escapePressed && initialMenuDismissed) {
+        this.startMenu.requestClose();
+        this.updateCursor();
       }
+      return;
+    }
 
-      if (this.input.mouseJustReleased) {
-        this.startMenu.updatePointer(pointerX, pointerY, this.input.mouseDown);
-        const action = this.startMenu.handleRelease(pointerX, pointerY);
-        if (action === "help") {
-          this.helpOpenedFromMenu = true;
-          this.showHelp();
-        } else if (action === "start") {
-          this.startMenu.hide();
-          initialMenuDismissed = true;
-        } else if (action === "restart") {
-          this.startMenu.hide();
-          initialMenuDismissed = true;
-          this.session.restart();
-        }
-      }
-
+    if (escapePressed) {
+      this.startMenu.show(initialMenuDismissed ? "pause" : "start", initialMenuDismissed);
       this.updateCursor();
       return;
     }
@@ -298,12 +293,8 @@ export class Game {
   }
 
   private updateCursor() {
-    if (this.helpOverlay.isVisible()) {
+    if (this.helpOverlay.isVisible() || this.startMenu.isVisible()) {
       this.canvas.style.cursor = "default";
-      return;
-    }
-    if (this.startMenu.isVisible()) {
-      this.canvas.style.cursor = this.startMenu.getCursor();
       return;
     }
     if (this.session.state.weapon === WeaponType.Rifle) {
@@ -386,9 +377,6 @@ export class Game {
       message: this.session.message,
       isGameOver: this.session.state.phase === "gameover",
     });
-
-    this.startMenu.render(ctx, this.width, this.height);
-    this.helpOverlay.render(ctx, this.width, this.height);
 
     const fpsText = `FPS: ${this.fps.toFixed(1)}`;
     drawText(ctx, fpsText, this.width - 12, 12, COLORS.white, 14, "right");

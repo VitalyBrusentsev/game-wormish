@@ -1,314 +1,163 @@
-import { COLORS } from "../definitions";
-import { drawRoundedRect, drawText } from "../utils";
-
-type Rect = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
-type MenuItemId = "help" | "start" | "friends";
+import { CommandDialog } from "./dialog";
 
 type MenuMode = "start" | "pause";
 
 type MenuItem = {
-  id: MenuItemId;
+  id: "help" | "start" | "friends";
   label: string;
+  description: string;
   enabled: boolean;
   action: "help" | "start" | "restart" | null;
 };
 
 export type MenuAction = "help" | "start" | "restart" | null;
 
+export type StartMenuCallbacks = {
+  onHelp: () => void;
+  onStart: () => void;
+  onRestart: () => void;
+  onClose: () => void;
+};
+
 export class StartMenuOverlay {
-  private visible = false;
-  private hovered: MenuItemId | null = null;
-  private active: MenuItemId | null = null;
-  private panelRect: Rect | null = null;
+  private readonly dialog: CommandDialog;
+  private readonly callbacks: StartMenuCallbacks;
   private mode: MenuMode = "start";
-  private readonly itemRects = new Map<MenuItemId, Rect>();
+  private closeable = true;
 
-  private readonly items: MenuItem[] = [
-    { id: "help", label: "Help", enabled: true, action: "help" },
-    { id: "start", label: "Start", enabled: true, action: "start" },
-    { id: "friends", label: "Play With Friends", enabled: false, action: null },
-  ];
-
-  private setMode(mode: MenuMode) {
-    this.mode = mode;
-    const startItem = this.items.find((item) => item.id === "start");
-    if (!startItem) return;
-    if (mode === "start") {
-      startItem.label = "Start";
-      startItem.action = "start";
-    } else {
-      startItem.label = "Restart";
-      startItem.action = "restart";
-    }
+  constructor(callbacks: StartMenuCallbacks) {
+    this.callbacks = callbacks;
+    this.dialog = new CommandDialog();
   }
 
-  show(mode: MenuMode = this.mode) {
-    this.setMode(mode);
-    if (this.visible) return;
-    this.visible = true;
-    this.hovered = null;
-    this.active = null;
+  show(mode: MenuMode = this.mode, closeable = true) {
+    this.mode = mode;
+    this.closeable = closeable;
+    this.dialog.show({
+      title: "Worm Command Center",
+      subtitle:
+        mode === "start"
+          ? "Select your briefing"
+          : "Plans change mid-mischief? Choose wisely.",
+      closeable,
+      zIndex: 24,
+      onClose: () => this.callbacks.onClose(),
+      content: this.buildContent(),
+    });
   }
 
   hide() {
-    if (!this.visible) return;
-    this.visible = false;
-    this.hovered = null;
-    this.active = null;
+    this.dialog.hide();
+  }
+
+  requestClose() {
+    if (!this.closeable) return;
+    this.dialog.requestClose();
   }
 
   isVisible() {
-    return this.visible;
+    return this.dialog.isVisible();
   }
 
-  getCursor() {
-    if (!this.visible) return "default";
-    if (!this.hovered) return "default";
-    const item = this.items.find((it) => it.id === this.hovered);
-    if (!item || !item.enabled) return "default";
-    return "pointer";
+  getMode(): MenuMode {
+    return this.mode;
   }
 
-  updateLayout(width: number, height: number) {
-    if (!this.visible) return;
+  private buildContent() {
+    const container = document.createElement("div");
+    container.className = "menu-dialog";
 
-    let panelWidth = Math.min(440, Math.max(340, width - 220));
-    let panelHeight = Math.min(420, Math.max(320, height - 220));
-    panelWidth = Math.min(panelWidth, width - 40);
-    panelHeight = Math.min(panelHeight, height - 40);
+    const blurb = document.createElement("p");
+    blurb.className = "menu-dialog__blurb";
+    blurb.textContent =
+      this.mode === "start"
+        ? "Tune your gadgets, rally your worms, and leap into the fray."
+        : "Storm clouds ahead! Swap gear, call for help, or reboot the chaos.";
+    container.appendChild(blurb);
 
-    const x = (width - panelWidth) / 2;
-    const y = (height - panelHeight) / 2;
-    this.panelRect = { x, y, width: panelWidth, height: panelHeight };
+    const list = document.createElement("div");
+    list.className = "menu-options";
 
-    const buttonWidth = panelWidth - 80;
-    const buttonHeight = 58;
-    const buttonGap = 18;
-    const titleTop = y + 36;
-    const subtitleTop = titleTop + 36;
-    const buttonAreaHeight =
-      this.items.length * buttonHeight + (this.items.length - 1) * buttonGap;
-    const minButtonY = subtitleTop + 54;
-    const maxButtonY = y + panelHeight - 48 - buttonAreaHeight;
-    const startY = Math.max(
-      minButtonY,
-      Math.min(minButtonY + 12, maxButtonY)
-    );
+    for (const item of this.getItems()) {
+      const button = document.createElement("button");
+      button.className = "menu-button";
+      button.disabled = !item.enabled;
+      button.type = "button";
 
-    this.itemRects.clear();
-    for (let i = 0; i < this.items.length; i++) {
-      const item = this.items[i]!;
-      const rect: Rect = {
-        x: x + (panelWidth - buttonWidth) / 2,
-        y: startY + i * (buttonHeight + buttonGap),
-        width: buttonWidth,
-        height: buttonHeight,
-      };
-      this.itemRects.set(item.id, rect);
+      const label = document.createElement("span");
+      label.className = "menu-button__label";
+      label.textContent = item.label;
+
+      const desc = document.createElement("span");
+      desc.className = "menu-button__description";
+      desc.textContent = item.description;
+
+      button.appendChild(label);
+      button.appendChild(desc);
+
+      button.addEventListener("click", () => this.triggerAction(item.action));
+
+      list.appendChild(button);
     }
+
+    container.appendChild(list);
+
+    const footer = document.createElement("p");
+    footer.className = "menu-dialog__footer";
+    footer.textContent = this.closeable
+      ? "Esc also slips you back into the battlefield."
+      : "Press Start to deploy—no backing out of this briefing.";
+    container.appendChild(footer);
+
+    return container;
   }
 
-  updatePointer(x: number, y: number, isDown: boolean) {
-    if (!this.visible) {
-      this.hovered = null;
+  private triggerAction(action: MenuAction) {
+    if (action === "help") {
+      this.callbacks.onHelp();
       return;
     }
-    let hovered: MenuItemId | null = null;
-    for (const item of this.items) {
-      if (!item.enabled) continue;
-      const rect = this.itemRects.get(item.id);
-      if (!rect) continue;
-      if (this.pointInRect(x, y, rect)) {
-        hovered = item.id;
-        break;
-      }
-    }
-    this.hovered = hovered;
-    if (!isDown) return;
-    if (this.active && this.hovered !== this.active) {
-      this.active = null;
-    }
-  }
-
-  handlePress() {
-    if (!this.visible) return;
-    if (this.hovered) this.active = this.hovered;
-    else this.active = null;
-  }
-
-  handleRelease(x: number, y: number): MenuAction {
-    if (!this.visible) return null;
-    const active = this.active;
-    this.active = null;
-    if (!active) return null;
-    const rect = this.itemRects.get(active);
-    const item = this.items.find((it) => it.id === active);
-    if (!rect || !item || !item.enabled) return null;
-    if (!this.pointInRect(x, y, rect)) return null;
-    return item.action;
-  }
-
-  render(ctx: CanvasRenderingContext2D, width: number, height: number) {
-    if (!this.visible) {
-      this.panelRect = null;
-      this.itemRects.clear();
+    if (action === "start") {
+      this.callbacks.onStart();
+      this.dialog.hide();
       return;
     }
-
-    this.updateLayout(width, height);
-
-    ctx.save();
-    ctx.fillStyle = "rgba(4, 8, 18, 0.65)";
-    ctx.fillRect(0, 0, width, height);
-
-    const panel = this.panelRect;
-    if (!panel) {
-      ctx.restore();
+    if (action === "restart") {
+      this.callbacks.onRestart();
+      this.dialog.hide();
       return;
     }
-
-    drawRoundedRect(ctx, panel.x, panel.y, panel.width, panel.height, 24);
-    ctx.fillStyle = "rgba(18, 26, 46, 0.96)";
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
-    ctx.stroke();
-
-    const glowPadding = 8;
-    drawRoundedRect(
-      ctx,
-      panel.x - glowPadding,
-      panel.y - glowPadding,
-      panel.width + glowPadding * 2,
-      panel.height + glowPadding * 2,
-      30
-    );
-    ctx.strokeStyle = "rgba(70, 110, 255, 0.35)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    const titleY = panel.y + 40;
-    drawText(
-      ctx,
-      "Worm Command Center",
-      panel.x + panel.width / 2,
-      titleY,
-      COLORS.white,
-      28,
-      "center"
-    );
-
-    drawText(
-      ctx,
-      "Select your briefing",
-      panel.x + panel.width / 2,
-      titleY + 34,
-      COLORS.white,
-      16,
-      "center"
-    );
-
-    for (const item of this.items) {
-      const rect = this.itemRects.get(item.id);
-      if (!rect) continue;
-      const hovered = this.hovered === item.id && item.enabled;
-      const active = this.active === item.id && item.enabled;
-
-      const drawRect = { ...rect };
-      if (active) {
-        drawRect.y += 2;
-        drawRect.height -= 2;
-      }
-
-      drawRoundedRect(ctx, drawRect.x, drawRect.y, drawRect.width, drawRect.height, 18);
-
-      if (!item.enabled) {
-        const disabledGradient = ctx.createLinearGradient(
-          drawRect.x,
-          drawRect.y,
-          drawRect.x,
-          drawRect.y + drawRect.height
-        );
-        disabledGradient.addColorStop(0, "rgba(120, 126, 142, 0.45)");
-        disabledGradient.addColorStop(1, "rgba(82, 88, 104, 0.45)");
-        ctx.fillStyle = disabledGradient;
-      } else {
-        const gradient = ctx.createLinearGradient(
-          drawRect.x,
-          drawRect.y,
-          drawRect.x,
-          drawRect.y + drawRect.height
-        );
-        if (active) {
-          gradient.addColorStop(0, "rgba(58, 104, 214, 0.96)");
-          gradient.addColorStop(1, "rgba(40, 78, 182, 0.98)");
-        } else if (hovered) {
-          gradient.addColorStop(0, "rgba(111, 175, 255, 0.96)");
-          gradient.addColorStop(1, "rgba(74, 129, 230, 0.98)");
-        } else {
-          gradient.addColorStop(0, "rgba(76, 132, 255, 0.92)");
-          gradient.addColorStop(1, "rgba(58, 104, 214, 0.94)");
-        }
-        ctx.fillStyle = gradient;
-      }
-      ctx.fill();
-
-      ctx.lineWidth = 2;
-      if (!item.enabled) {
-        ctx.strokeStyle = "rgba(160, 168, 186, 0.4)";
-      } else if (hovered) {
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
-      } else {
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
-      }
-      ctx.stroke();
-
-      if (hovered && item.enabled) {
-        drawRoundedRect(
-          ctx,
-          drawRect.x - 4,
-          drawRect.y - 4,
-          drawRect.width + 8,
-          drawRect.height + 8,
-          20
-        );
-        ctx.strokeStyle = "rgba(120, 180, 255, 0.28)";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
-
-      const textColor = item.enabled
-        ? COLORS.white
-        : "rgba(212, 216, 228, 0.55)";
-      drawText(
-        ctx,
-        item.label,
-        drawRect.x + drawRect.width / 2,
-        drawRect.y + drawRect.height / 2,
-        textColor,
-        20,
-        "center",
-        "middle",
-        false
-      );
-
-    }
-
-    ctx.restore();
   }
 
-  private pointInRect(x: number, y: number, rect: Rect) {
-    return (
-      x >= rect.x &&
-      x <= rect.x + rect.width &&
-      y >= rect.y &&
-      y <= rect.y + rect.height
-    );
+  private getItems(): MenuItem[] {
+    const startLabel = this.mode === "start" ? "Start" : "Restart Mission";
+    const startDescription =
+      this.mode === "start"
+        ? "Deploy your crew and make a heroic splash."
+        : "Spin the world back to turn one and try a new gambit.";
+
+    return [
+      {
+        id: "help",
+        label: "Help",
+        description: "Controls, wind wisdom, and other battle tips.",
+        enabled: true,
+        action: "help",
+      },
+      {
+        id: "start",
+        label: startLabel,
+        description: startDescription,
+        enabled: true,
+        action: this.mode === "start" ? "start" : "restart",
+      },
+      {
+        id: "friends",
+        label: "Play With Friends",
+        description: "Co-op chaos coming soon—hold onto your helmets!",
+        enabled: false,
+        action: null,
+      },
+    ];
   }
 }
