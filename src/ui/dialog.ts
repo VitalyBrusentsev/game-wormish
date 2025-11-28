@@ -24,6 +24,9 @@ export class CommandDialog {
     this.requestClose();
   };
 
+  private readonly handleBackdropClick = () => this.requestClose();
+  private readonly handleCloseClick = () => this.requestClose();
+
   constructor() {
     this.root = document.createElement("div");
     this.root.className = "dialog-layer";
@@ -50,7 +53,7 @@ export class CommandDialog {
     this.closeButton.className = "dialog-close";
     this.closeButton.setAttribute("aria-label", "Close dialog");
     this.closeButton.textContent = "✕";
-    this.closeButton.addEventListener("click", () => this.requestClose());
+    this.closeButton.addEventListener("click", this.handleCloseClick);
 
     this.body = document.createElement("div");
     this.body.className = "dialog-body";
@@ -65,7 +68,7 @@ export class CommandDialog {
     this.root.appendChild(this.backdrop);
     this.root.appendChild(this.shell);
 
-    this.backdrop.addEventListener("click", () => this.requestClose());
+    this.backdrop.addEventListener("click", this.handleBackdropClick);
 
     document.body.appendChild(this.root);
   }
@@ -103,5 +106,14 @@ export class CommandDialog {
 
   isVisible() {
     return this.root.classList.contains("dialog-layer--visible");
+  }
+
+  destroy() {
+    this.hide();
+    this.backdrop.removeEventListener("click", this.handleBackdropClick);
+    this.closeButton.removeEventListener("click", this.handleCloseClick);
+    if (this.root.parentElement) {
+      this.root.parentElement.removeChild(this.root);
+    }
   }
 }

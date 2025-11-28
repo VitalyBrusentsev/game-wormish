@@ -159,6 +159,8 @@ export class Game {
       this.frameHandle = null;
     }
     this.running = false;
+    this.startMenu.dispose();
+    this.helpOverlay.dispose();
     this.input.detach();
     this.canvas.removeEventListener("pointerdown", this.pointerDownFocusHandler);
     this.canvas.removeEventListener("mousedown", this.mouseDownFocusHandler);

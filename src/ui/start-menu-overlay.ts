@@ -50,6 +50,10 @@ export class StartMenuOverlay {
     this.dialog.hide();
   }
 
+  dispose() {
+    this.dialog.destroy();
+  }
+
   requestClose() {
     if (!this.closeable) return;
     this.dialog.requestClose();

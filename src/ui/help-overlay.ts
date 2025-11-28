@@ -41,6 +41,10 @@ export class HelpOverlay {
     return this.lastPausedMs;
   }
 
+  dispose() {
+    this.dialog.destroy();
+  }
+
   isVisible() {
     return this.dialog.isVisible();
   }
