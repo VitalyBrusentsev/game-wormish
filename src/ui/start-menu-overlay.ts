@@ -1,4 +1,4 @@
-import { CommandDialog } from "./dialog";
+import { type CloseReason, CommandDialog } from "./dialog";
 
 type MenuMode = "start" | "pause";
 
@@ -16,7 +16,7 @@ export type StartMenuCallbacks = {
   onHelp: () => void;
   onStart: () => void;
   onRestart: () => void;
-  onClose: () => void;
+  onClose: (reason: CloseReason) => void;
 };
 
 export class StartMenuOverlay {
@@ -41,7 +41,7 @@ export class StartMenuOverlay {
           : "Plans change mid-mischief? Choose wisely.",
       closeable,
       zIndex: 24,
-      onClose: () => this.callbacks.onClose(),
+      onClose: (reason) => this.callbacks.onClose(reason),
       content: this.buildContent(),
     });
   }
@@ -54,9 +54,9 @@ export class StartMenuOverlay {
     this.dialog.destroy();
   }
 
-  requestClose() {
+  requestClose(reason: CloseReason = "manual") {
     if (!this.closeable) return;
-    this.dialog.requestClose();
+    this.dialog.requestClose(reason);
   }
 
   isVisible() {

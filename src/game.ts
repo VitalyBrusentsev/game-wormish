@@ -86,7 +86,7 @@ export class Game {
     this.initializeTurnControllers();
 
     this.helpOverlay = new HelpOverlay({
-      onClose: (pausedMs) => this.handleHelpClosed(pausedMs),
+      onClose: (pausedMs, reason) => this.handleHelpClosed(pausedMs, reason),
     });
     this.startMenu = new StartMenuOverlay({
       onHelp: () => {
@@ -107,7 +107,10 @@ export class Game {
         this.canvas.focus();
         this.updateCursor();
       },
-      onClose: () => {
+      onClose: (reason) => {
+        if (reason === "escape") {
+          this.input.consumeKey("Escape");
+        }
         this.canvas.focus();
         this.updateCursor();
       },
@@ -193,11 +196,14 @@ export class Game {
     }
   }
 
-  private hideHelp() {
-    this.helpOverlay.hide();
+  private hideHelp(reason: "manual" | "escape" = "manual") {
+    this.helpOverlay.hide(reason);
   }
 
-  private handleHelpClosed(pausedFor: number) {
+  private handleHelpClosed(pausedFor: number, reason: "manual" | "escape") {
+    if (reason === "escape") {
+      this.input.consumeKey("Escape");
+    }
     if (this.helpOpenedFromMenu) {
       this.helpOpenedFromMenu = false;
       this.startMenu.show(this.startMenu.getMode(), initialMenuDismissed);
@@ -215,7 +221,7 @@ export class Game {
     if (this.input.pressed("F1")) {
       const wasMenuVisible = this.startMenu.isVisible();
       if (this.helpOverlay.isVisible()) {
-        this.hideHelp();
+        this.hideHelp("escape");
       } else {
         this.helpOpenedFromMenu = wasMenuVisible;
         if (wasMenuVisible) this.startMenu.hide();
@@ -227,7 +233,7 @@ export class Game {
 
     if (this.helpOverlay.isVisible()) {
       if (this.input.pressed("Escape")) {
-        this.hideHelp();
+        this.hideHelp("escape");
       }
       this.updateCursor();
       return;
@@ -237,7 +243,7 @@ export class Game {
 
     if (this.startMenu.isVisible()) {
       if (escapePressed && initialMenuDismissed) {
-        this.startMenu.requestClose();
+        this.startMenu.requestClose("escape");
         this.updateCursor();
       }
       return;

@@ -115,6 +115,11 @@ export class Input {
     this.mouseJustReleased = false;
   }
 
+  consumeKey(code: string) {
+    this.keysPressed.delete(code);
+    this.keysDown.delete(code);
+  }
+
   isDown(code: string) {
     return this.keysDown.has(code);
   }

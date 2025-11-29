@@ -1,10 +1,12 @@
+export type CloseReason = "manual" | "escape";
+
 export type DialogOptions = {
   title: string;
   subtitle?: string;
   content: HTMLElement;
   closeable?: boolean;
   zIndex?: number;
-  onClose?: () => void;
+  onClose?: (reason: CloseReason) => void;
 };
 
 export class CommandDialog {
@@ -21,7 +23,8 @@ export class CommandDialog {
 
   private readonly handleKeydown = (event: KeyboardEvent) => {
     if (event.key !== "Escape" && event.key !== "Esc") return;
-    this.requestClose();
+    event.preventDefault();
+    this.requestClose("escape");
   };
 
   private readonly handleBackdropClick = () => this.requestClose();
@@ -98,9 +101,9 @@ export class CommandDialog {
     this.currentOptions = null;
   }
 
-  requestClose() {
+  requestClose(reason: CloseReason = "manual") {
     if (!this.currentOptions || this.currentOptions.closeable === false) return;
-    this.currentOptions.onClose?.();
+    this.currentOptions.onClose?.(reason);
     this.hide();
   }
 

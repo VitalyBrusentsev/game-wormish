@@ -1,10 +1,10 @@
 import { nowMs } from "../definitions";
-import { CommandDialog } from "./dialog";
+import { type CloseReason, CommandDialog } from "./dialog";
 
 type HelpTopic = { title: string; text: string };
 
 export type HelpOverlayCallbacks = {
-  onClose?: (pausedMs: number) => void;
+  onClose?: (pausedMs: number, reason: CloseReason) => void;
 };
 
 export class HelpOverlay {
@@ -28,16 +28,16 @@ export class HelpOverlay {
       subtitle: "(Pause, sip cocoa, then plan your next shenanigan)",
       closeable: true,
       zIndex: 28,
-      onClose: () => this.handleClose(),
+      onClose: (reason) => this.handleClose(reason),
       content: this.buildContent(),
     });
 
     return true;
   }
 
-  hide(): number {
+  hide(reason: CloseReason = "manual"): number {
     if (!this.dialog.isVisible()) return 0;
-    this.dialog.requestClose();
+    this.dialog.requestClose(reason);
     return this.lastPausedMs;
   }
 
@@ -49,12 +49,12 @@ export class HelpOverlay {
     return this.dialog.isVisible();
   }
 
-  private handleClose() {
+  private handleClose(reason: CloseReason) {
     const now = nowMs();
     const pausedFor = this.openedAtMs ? Math.max(0, now - this.openedAtMs) : 0;
     this.lastPausedMs = pausedFor;
     this.openedAtMs = null;
-    this.callbacks.onClose?.(pausedFor);
+    this.callbacks.onClose?.(pausedFor, reason);
   }
 
   private buildContent() {
