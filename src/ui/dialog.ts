@@ -20,7 +20,7 @@ export class CommandDialog {
   private currentOptions: DialogOptions | null = null;
 
   private readonly handleKeydown = (event: KeyboardEvent) => {
-    if (event.key !== "Escape") return;
+    if (event.key !== "Escape" && event.key !== "Esc") return;
     this.requestClose();
   };
 
