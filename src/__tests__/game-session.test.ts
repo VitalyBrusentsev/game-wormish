@@ -250,7 +250,8 @@ describe("GameSession turn logging", () => {
     };
     expect(log.commands).toHaveLength(1);
 
-    const fireCommand = log.commands[0];
+    expect(log.commands[0]).toBeDefined();
+    const fireCommand = log.commands[0]!;
     expect(fireCommand.projectileIds.length).toBeGreaterThan(0);
     const spawnEvents = log.projectileEvents.filter((event) => event.type === "projectile-spawned");
     expect(spawnEvents).toHaveLength(fireCommand.projectileIds.length);
