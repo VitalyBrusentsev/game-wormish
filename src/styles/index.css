@@ -219,6 +219,179 @@ Start menu dialog
 
 /*
 =========================
+Network match dialog
+=========================
+*/
+
+.network-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.network-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.network-tab {
+  flex: 1;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: linear-gradient(160deg, rgba(76, 132, 255, 0.3), rgba(38, 88, 210, 0.3));
+  color: rgba(220, 230, 255, 0.8);
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.network-tab:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+  background: linear-gradient(160deg, rgba(96, 152, 255, 0.4), rgba(58, 108, 230, 0.4));
+}
+
+.network-tab--active {
+  background: linear-gradient(160deg, rgba(76, 132, 255, 0.92), rgba(38, 88, 210, 0.96));
+  color: #fdfdff;
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 4px 12px rgba(76, 132, 255, 0.4);
+}
+
+.network-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.network-label {
+  display: block;
+  color: rgba(220, 230, 255, 0.9);
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.network-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(20, 30, 60, 0.6);
+  color: #f4f6ff;
+  font-size: 15px;
+  transition: all 120ms ease;
+}
+
+.network-input:focus {
+  outline: none;
+  border-color: rgba(120, 180, 255, 0.6);
+  background: rgba(30, 40, 70, 0.8);
+  box-shadow: 0 0 0 3px rgba(76, 132, 255, 0.2);
+}
+
+.network-input::placeholder {
+  color: rgba(180, 190, 220, 0.5);
+}
+
+.network-button-group {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.network-button {
+  flex: 1;
+  padding: 12px 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: linear-gradient(160deg, rgba(110, 120, 150, 0.7), rgba(86, 94, 118, 0.75));
+  color: #fdfdff;
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.network-button:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+}
+
+.network-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.network-button--primary {
+  background: linear-gradient(170deg, rgba(76, 132, 255, 0.92), rgba(38, 88, 210, 0.96));
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3), 0 0 16px rgba(76, 132, 255, 0.3);
+}
+
+.network-button--primary:hover:not(:disabled) {
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4), 0 0 24px rgba(96, 152, 255, 0.4);
+}
+
+.network-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.network-validation {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: linear-gradient(120deg, rgba(88, 138, 255, 0.14), rgba(255, 255, 255, 0.04));
+  border: 1px solid rgba(120, 180, 255, 0.2);
+  min-height: 24px;
+}
+
+.network-validation-message {
+  color: rgba(230, 236, 255, 0.9);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.network-validation-message + .network-validation-message {
+  margin-top: 6px;
+}
+
+.network-info {
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: linear-gradient(140deg, rgba(17, 26, 48, 0.7), rgba(24, 36, 76, 0.7));
+  border: 1px solid rgba(120, 180, 255, 0.25);
+}
+
+.network-info-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(180, 200, 255, 0.8);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+}
+
+.network-info-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  color: rgba(220, 230, 255, 0.85);
+  padding: 4px 0;
+}
+
+.network-info-item span {
+  color: rgba(180, 200, 255, 0.75);
+}
+
+.network-info-item strong {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  font-family: monospace;
+  letter-spacing: 0.02em;
+}
+
+/*
+=========================
 Help dialog
 =========================
 */

@@ -7,15 +7,16 @@ type MenuItem = {
   label: string;
   description: string;
   enabled: boolean;
-  action: "help" | "start" | "restart" | null;
+  action: "help" | "start" | "restart" | "network" | null;
 };
 
-export type MenuAction = "help" | "start" | "restart" | null;
+export type MenuAction = "help" | "start" | "restart" | "network" | null;
 
 export type StartMenuCallbacks = {
   onHelp: () => void;
   onStart: () => void;
   onRestart: () => void;
+  onNetworkMatch: () => void;
   onClose: (reason: CloseReason) => void;
 };
 
@@ -131,6 +132,10 @@ export class StartMenuOverlay {
       this.dialog.hide();
       return;
     }
+    if (action === "network") {
+      this.callbacks.onNetworkMatch();
+      return;
+    }
   }
 
   private getItems(): MenuItem[] {
@@ -158,9 +163,9 @@ export class StartMenuOverlay {
       {
         id: "friends",
         label: "Play With Friends",
-        description: "Co-op chaos coming soon—hold onto your helmets!",
-        enabled: false,
-        action: null,
+        description: "Host or join a network match with a friend.",
+        enabled: true,
+        action: "network",
       },
     ];
   }

@@ -4,6 +4,7 @@ import { Input, drawText } from "./utils";
 import type { Worm } from "./entities";
 import { HelpOverlay } from "./ui/help-overlay";
 import { StartMenuOverlay } from "./ui/start-menu-overlay";
+import { NetworkMatchDialog } from "./ui/network-match-dialog";
 import {
   renderAimHelpers,
   renderBackground,
@@ -11,6 +12,7 @@ import {
   renderHUD,
   type AimInfo,
 } from "./rendering/game-rendering";
+import { renderNetworkStatusHUD } from "./ui/network-status-hud";
 import type { Team } from "./game/team-manager";
 import {
   GameSession,
@@ -18,8 +20,12 @@ import {
 } from "./game/session";
 import {
   LocalTurnController,
+  RemoteTurnController,
   type TurnDriver,
 } from "./game/turn-driver";
+import { NetworkSessionState } from "./network/session-state";
+import { WebRTCRegistryClient } from "./webrtc/client";
+import type { ConnectionState } from "./webrtc/types";
 
 let initialMenuDismissed = false;
 
@@ -34,7 +40,13 @@ export class Game {
 
   private helpOverlay: HelpOverlay;
   private startMenu: StartMenuOverlay;
+  private networkDialog: NetworkMatchDialog;
   private helpOpenedFromMenu = false;
+
+  private readonly networkState: NetworkSessionState;
+  private webrtcClient: WebRTCRegistryClient | null = null;
+  private networkStateChangeCallbacks: ((state: NetworkSessionState) => void)[] = [];
+  private readonly registryUrl: string;
 
   private readonly cameraPadding = 48;
   private cameraOffsetX = 0;
@@ -68,6 +80,12 @@ export class Game {
   constructor(width: number, height: number) {
     this.width = width;
     this.height = height;
+    
+    // Determine registry URL based on environment
+    const isDev = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    this.registryUrl = isDev
+      ? "http://127.0.0.1:8787"
+      : "https://wormish-current-time-production.installcreator.workers.dev";
     this.canvas = document.createElement("canvas");
     this.canvas.width = width;
     this.canvas.height = height;
@@ -77,6 +95,8 @@ export class Game {
 
     this.input = new Input();
     this.input.attach(this.canvas);
+
+    this.networkState = new NetworkSessionState();
 
     this.session = new GameSession(width, height, {
       horizontalPadding: this.cameraPadding,
@@ -88,6 +108,40 @@ export class Game {
     this.helpOverlay = new HelpOverlay({
       onClose: (pausedMs, reason) => this.handleHelpClosed(pausedMs, reason),
     });
+    
+    this.networkDialog = new NetworkMatchDialog({
+      onCreateRoom: async (playerName) => {
+        await this.createHostRoom({ registryUrl: this.registryUrl, playerName });
+      },
+      onJoinRoom: async (roomCode, joinCode, playerName) => {
+        await this.joinRoom({ registryUrl: this.registryUrl, playerName, roomCode, joinCode });
+      },
+      onStartConnection: async () => {
+        await this.startConnection();
+        // Close dialog and start match after successful connection
+        setTimeout(() => {
+          this.networkDialog.hide();
+          initialMenuDismissed = true;
+          this.canvas.focus();
+          this.updateCursor();
+        }, 1000);
+      },
+      onCancel: () => {
+        this.cancelNetworkSetup();
+      },
+      onClose: (reason) => {
+        if (reason === "escape") {
+          this.input.consumeKey("Escape");
+        }
+        this.canvas.focus();
+        this.updateCursor();
+      },
+    });
+    
+    this.onNetworkStateChange((state) => {
+      this.networkDialog.updateFromNetworkState(state);
+    });
+    
     this.startMenu = new StartMenuOverlay({
       onHelp: () => {
         this.helpOpenedFromMenu = true;
@@ -106,6 +160,10 @@ export class Game {
         this.session.restart();
         this.canvas.focus();
         this.updateCursor();
+      },
+      onNetworkMatch: () => {
+        this.startMenu.hide();
+        this.networkDialog.show("host");
       },
       onClose: (reason) => {
         if (reason === "escape") {
@@ -162,7 +220,9 @@ export class Game {
       this.frameHandle = null;
     }
     this.running = false;
+    this.cancelNetworkSetup();
     this.startMenu.dispose();
+    this.networkDialog.dispose();
     this.helpOverlay.dispose();
     this.input.detach();
     this.canvas.removeEventListener("pointerdown", this.pointerDownFocusHandler);
@@ -170,6 +230,181 @@ export class Game {
     this.canvas.removeEventListener("touchstart", this.touchStartFocusHandler);
     if (this.canvas.parentElement) {
       this.canvas.parentElement.removeChild(this.canvas);
+    }
+  }
+
+  getNetworkState(): NetworkSessionState {
+    return this.networkState;
+  }
+
+  onNetworkStateChange(callback: (state: NetworkSessionState) => void) {
+    this.networkStateChangeCallbacks.push(callback);
+  }
+
+  private notifyNetworkStateChange() {
+    for (const cb of this.networkStateChangeCallbacks) {
+      cb(this.networkState);
+    }
+  }
+
+  async createHostRoom(config: { registryUrl: string; playerName: string }): Promise<void> {
+    this.networkState.setMode("network-host");
+    this.networkState.setPlayerNames(config.playerName);
+    this.networkState.updateRegistryInfo({ baseUrl: config.registryUrl });
+
+    const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+    this.webrtcClient = new WebRTCRegistryClient({
+      registryApiUrl: config.registryUrl,
+      iceServers,
+    });
+
+    this.setupWebRTCCallbacks();
+
+    try {
+      await this.webrtcClient.createRoom(config.playerName);
+      const roomInfo = this.webrtcClient.getRoomInfo();
+      if (roomInfo) {
+        this.networkState.updateRegistryInfo({
+          code: roomInfo.code,
+          joinCode: roomInfo.joinCode ?? null,
+          token: roomInfo.token,
+          expiresAt: roomInfo.expiresAt,
+          hostUserName: roomInfo.hostUserName ?? config.playerName,
+        });
+        this.notifyNetworkStateChange();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.networkState.reportConnectionError(message);
+      this.notifyNetworkStateChange();
+      throw error;
+    }
+  }
+
+  async joinRoom(config: {
+    registryUrl: string;
+    playerName: string;
+    roomCode: string;
+    joinCode: string;
+  }): Promise<void> {
+    this.networkState.setMode("network-guest");
+    this.networkState.setPlayerNames(config.playerName);
+    this.networkState.updateRegistryInfo({ baseUrl: config.registryUrl });
+
+    const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+    this.webrtcClient = new WebRTCRegistryClient({
+      registryApiUrl: config.registryUrl,
+      iceServers,
+    });
+
+    this.setupWebRTCCallbacks();
+
+    try {
+      await this.webrtcClient.joinRoom(config.roomCode, config.joinCode, config.playerName);
+      const roomInfo = this.webrtcClient.getRoomInfo();
+      if (roomInfo) {
+        this.networkState.updateRegistryInfo({
+          code: roomInfo.code,
+          token: roomInfo.token,
+          expiresAt: roomInfo.expiresAt,
+          guestUserName: roomInfo.guestUserName ?? config.playerName,
+          hostUserName: roomInfo.hostUserName ?? "",
+        });
+        if (roomInfo.hostUserName) {
+          this.networkState.setRemoteName(roomInfo.hostUserName);
+        }
+        this.notifyNetworkStateChange();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.networkState.reportConnectionError(message);
+      this.notifyNetworkStateChange();
+      throw error;
+    }
+  }
+
+  async startConnection(): Promise<void> {
+    if (!this.webrtcClient) {
+      throw new Error("No WebRTC client initialized");
+    }
+
+    try {
+      await this.webrtcClient.startConnection();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.networkState.reportConnectionError(message);
+      this.notifyNetworkStateChange();
+      throw error;
+    }
+  }
+
+  cancelNetworkSetup(): void {
+    if (this.webrtcClient) {
+      this.webrtcClient.closeRoom().catch(() => {});
+      this.webrtcClient = null;
+    }
+    this.networkState.setMode("local");
+    this.networkState.resetNetworkOnlyState();
+    this.initializeTurnControllers();
+    this.notifyNetworkStateChange();
+  }
+
+  private setupWebRTCCallbacks() {
+    if (!this.webrtcClient) return;
+
+    this.webrtcClient.onStateChange((state: ConnectionState) => {
+      this.networkState.updateConnectionLifecycle(state as any, Date.now());
+      
+      if (state === "connected") {
+        this.networkState.markNetworkReady(true);
+        this.swapToNetworkControllers();
+      }
+      
+      this.notifyNetworkStateChange();
+    });
+
+    this.webrtcClient.onMessage((message: any) => {
+      if (message.type === "turn_resolution") {
+        this.networkState.enqueueResolution(message.payload);
+        this.deliverResolutionToController();
+      }
+    });
+
+    this.webrtcClient.onError((error: Error) => {
+      this.networkState.reportConnectionError(error.message);
+      this.notifyNetworkStateChange();
+    });
+
+    this.webrtcClient.onDebugEvent((_event) => {
+      // Store debug events if needed for diagnostics
+    });
+  }
+
+  private swapToNetworkControllers() {
+    const snapshot = this.networkState.getSnapshot();
+    if (snapshot.mode === "local") return;
+
+    const localTeamId: TeamId = snapshot.mode === "network-host" ? "Red" : "Blue";
+    const remoteTeamId: TeamId = snapshot.mode === "network-host" ? "Blue" : "Red";
+
+    this.networkState.assignTeams(localTeamId, remoteTeamId);
+
+    this.turnControllers.set(localTeamId, new LocalTurnController());
+    this.turnControllers.set(remoteTeamId, new RemoteTurnController());
+    this.session.setTurnControllers(this.turnControllers);
+  }
+
+  private deliverResolutionToController() {
+    const snapshot = this.networkState.getSnapshot();
+    const remoteTeamId = snapshot.player.remoteTeamId;
+    if (!remoteTeamId) return;
+
+    const controller = this.turnControllers.get(remoteTeamId);
+    if (controller && controller.type === "remote") {
+      const resolution = this.networkState.dequeueResolution();
+      if (resolution) {
+        (controller as RemoteTurnController).receiveResolution(resolution);
+      }
     }
   }
 
@@ -379,6 +614,8 @@ export class Game {
       message: this.session.message,
       isGameOver: this.session.state.phase === "gameover",
     });
+
+    renderNetworkStatusHUD(ctx, this.width, this.networkState);
 
     const fpsText = `FPS: ${this.fps.toFixed(1)}`;
     drawText(ctx, fpsText, this.width - 12, 12, COLORS.white, 14, "right");
