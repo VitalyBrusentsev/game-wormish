@@ -192,7 +192,7 @@ export class Game {
   private showHelp() {
     const opened = this.helpOverlay.show(nowMs());
     if (opened && this.session.state.charging) {
-      this.session.state.cancelCharge();
+      this.session.cancelChargeCommand();
     }
   }
 
@@ -321,17 +321,11 @@ export class Game {
   }
 
   predictPath(): PredictedPoint[] {
-    return this.session.predictPath(this.input, {
-      offsetX: this.cameraOffsetX,
-      offsetY: this.cameraOffsetY,
-    });
+    return this.session.predictPath();
   }
 
   private getAimInfo(): AimInfo {
-    return this.session.getAimInfo(this.input, {
-      offsetX: this.cameraOffsetX,
-      offsetY: this.cameraOffsetY,
-    });
+    return this.session.getAimInfo();
   }
 
   render() {

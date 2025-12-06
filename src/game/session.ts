@@ -11,11 +11,11 @@ import type { Input } from "../utils";
 import { Terrain, Worm, Projectile, Particle } from "../entities";
 import { GameState, type Phase } from "../game-state";
 import { TeamManager, type Team } from "./team-manager";
+import type { AimInfo } from "../rendering/game-rendering";
 import {
   computeAimInfo,
   fireWeapon,
   predictTrajectory,
-  resolveCharge01,
   shouldPredictPath,
 } from "./weapon-system";
 import type {
@@ -110,6 +110,7 @@ export class GameSession {
   readonly height: number;
   readonly terrain: Terrain;
   readonly state: GameState;
+  private aim: AimInfo;
 
   private readonly teamManager: TeamManager;
   private readonly callbacks: SessionCallbacks;
@@ -162,6 +163,7 @@ export class GameSession {
     this.teamManager.initialize(this.terrain);
 
     this.state = new GameState();
+    this.aim = this.createDefaultAim();
     this.nextTurn(true);
   }
 
@@ -212,6 +214,7 @@ export class GameSession {
 
     if (initial) this.teamManager.resetActiveWormIndex();
     else this.teamManager.advanceToNextTeam();
+    this.aim = this.createDefaultAim();
 
     const snapshot = this.toSnapshot();
 
@@ -238,39 +241,38 @@ export class GameSession {
     camera: { offsetX: number; offsetY: number }
   ) {
     if (!this.isLocalTurnActive()) return;
-    const active = this.activeWorm;
     const timeLeftMs = this.state.timeLeftMs(this.now(), GAMEPLAY.turnTimeMs);
     if (timeLeftMs <= 0 && this.state.phase === "aim") {
       this.endAimPhaseWithoutShot();
       return;
     }
 
-    if (input.pressed("Digit1")) this.state.setWeapon(WeaponType.Bazooka);
-    if (input.pressed("Digit2")) this.state.setWeapon(WeaponType.HandGrenade);
-    if (input.pressed("Digit3")) this.state.setWeapon(WeaponType.Rifle);
+    const atMs = this.turnTimestampMs();
+
+    if (input.pressed("Digit1")) this.recordWeaponChange(WeaponType.Bazooka, atMs);
+    if (input.pressed("Digit2")) this.recordWeaponChange(WeaponType.HandGrenade, atMs);
+    if (input.pressed("Digit3")) this.recordWeaponChange(WeaponType.Rifle, atMs);
 
     if (input.pressed("KeyR") && this.state.phase === "gameover") {
       this.restart();
       return;
     }
 
+    const aim = this.computeAimFromInput(input, camera);
+    this.recordAim(aim, atMs);
+
     if (this.state.phase === "aim") {
       let move = 0;
       if (input.isDown("ArrowLeft") || input.isDown("KeyA")) move -= 1;
       if (input.isDown("ArrowRight") || input.isDown("KeyD")) move += 1;
       const jump = input.pressed("Space");
-      active.update(dt, this.terrain, move, jump);
 
-      const aim = this.getAimInfo(input, camera);
-      active.facing = aim.targetX < active.x ? -1 : 1;
-
-      if (input.mouseJustPressed) {
-        this.state.beginCharge(this.now());
-      }
+      const movement = (Math.max(-1, Math.min(1, move)) || 0) as -1 | 0 | 1;
+      this.recordMovement(movement, jump, dt, atMs);
+      if (input.mouseJustPressed) this.recordStartCharge(atMs);
       if (this.state.charging && input.mouseJustReleased) {
-        const power01 = this.state.endCharge(this.now());
-        this.fireChargedWeapon(power01, input, camera);
-        this.endAimPhaseAfterShot();
+        const power01 = this.state.getCharge01(this.state.turnStartMs + atMs);
+        this.recordFireChargedWeapon(power01, aim, atMs);
       }
     }
   }
@@ -368,26 +370,14 @@ export class GameSession {
     this.checkVictory();
   }
 
-  getAimInfo(
-    input: Input,
-    camera: { offsetX: number; offsetY: number }
-  ) {
-    return computeAimInfo({
-      input,
-      state: this.state,
-      activeWorm: this.activeWorm,
-      cameraOffsetX: camera.offsetX,
-      cameraOffsetY: camera.offsetY,
-    });
+  getAimInfo(): AimInfo {
+    return this.aim;
   }
 
-  predictPath(
-    input: Input,
-    camera: { offsetX: number; offsetY: number }
-  ): PredictedPoint[] {
+  predictPath(): PredictedPoint[] {
     if (!shouldPredictPath(this.state)) return [];
-    const aim = this.getAimInfo(input, camera);
-    const power01 = resolveCharge01(this.state);
+    const aim = this.aim;
+    const power01 = this.state.getCharge01(this.state.turnStartMs + this.turnTimestampMs());
     return predictTrajectory({
       weapon: this.state.weapon,
       activeWorm: this.activeWorm,
@@ -506,6 +496,7 @@ export class GameSession {
 
     this.projectiles = [];
     this.particles = [];
+    this.aim = this.createDefaultAim();
   }
 
   finalizeTurn(): TurnResolution {
@@ -669,9 +660,132 @@ export class GameSession {
     this.waitingForRemoteResolution = driver.type === "remote";
   }
 
+  private recordWeaponChange(weapon: WeaponType, atMs: number) {
+    if (this.state.weapon === weapon) return;
+    this.recordCommand({ type: "set-weapon", weapon, atMs });
+  }
+
+  private recordAim(aim: AimInfo, atMs: number) {
+    if (this.sameAim(this.aim, aim)) return;
+    this.recordCommand({ type: "aim", aim, atMs });
+  }
+
+  private recordMovement(move: -1 | 0 | 1, jump: boolean, dt: number, atMs: number) {
+    const dtMs = Math.max(0, Math.round(dt * 1000));
+    if (dtMs === 0 && move === 0 && !jump) return;
+    this.recordCommand({ type: "move", move, jump, dtMs, atMs });
+  }
+
+  private recordStartCharge(atMs: number) {
+    if (this.state.charging || this.state.phase !== "aim") return;
+    this.recordCommand({ type: "start-charge", atMs });
+  }
+
+  private recordFireChargedWeapon(power: number, aim: AimInfo, atMs: number) {
+    if (!this.state.charging || this.state.phase !== "aim") return;
+    const power01 = clamp(power, 0, 1);
+    this.recordCommand({
+      type: "fire-charged-weapon",
+      weapon: this.state.weapon,
+      power: power01,
+      aim,
+      atMs,
+      projectileIds: [],
+    });
+  }
+
+  cancelChargeCommand() {
+    if (!this.state.charging) return;
+    this.recordCommand({ type: "cancel-charge", atMs: this.turnTimestampMs() });
+  }
+
+  private recordCommand(command: TurnCommand) {
+    const finalized = this.applyCommand(command);
+    if (finalized) this.turnLog.commands.push(finalized);
+  }
+
+  private applyCommand(command: TurnCommand): TurnCommand | null {
+    switch (command.type) {
+      case "set-weapon": {
+        this.state.setWeapon(command.weapon);
+        return command;
+      }
+      case "aim": {
+        this.aim = command.aim;
+        const worm = this.activeWorm;
+        worm.facing = command.aim.targetX < worm.x ? -1 : 1;
+        return command;
+      }
+      case "move": {
+        if (this.state.phase !== "aim") return null;
+        const dt = command.dtMs / 1000;
+        this.activeWorm.update(dt, this.terrain, command.move, command.jump);
+        return command;
+      }
+      case "start-charge": {
+        if (this.state.phase !== "aim") return null;
+        this.state.beginCharge(this.state.turnStartMs + command.atMs);
+        return command;
+      }
+      case "cancel-charge": {
+        if (!this.state.charging) return null;
+        this.state.cancelCharge();
+        return command;
+      }
+      case "fire-charged-weapon": {
+        return this.applyFireCommand(command);
+      }
+      default:
+        return null;
+    }
+  }
+
+  private applyFireCommand(command: Extract<TurnCommand, { type: "fire-charged-weapon" }>): TurnCommand | null {
+    if (this.state.phase !== "aim") return null;
+    this.state.setWeapon(command.weapon);
+    this.aim = command.aim;
+    const worm = this.activeWorm;
+    worm.facing = command.aim.targetX < worm.x ? -1 : 1;
+    const finalized = this.fireChargedWeapon(command.power, command.aim, command.atMs, command.weapon);
+    this.state.cancelCharge();
+    this.endAimPhaseAfterShot();
+    return finalized;
+  }
+
   private turnTimestampMs(): number {
     if (!this.turnLog.startedAtMs) return 0;
     return Math.max(0, this.now() - this.turnLog.startedAtMs);
+  }
+
+  private createDefaultAim(): AimInfo {
+    const worm = this.activeWorm;
+    const dir = worm.facing >= 0 ? 1 : -1;
+    const targetX = worm.x + dir * 40;
+    const targetY = worm.y;
+    return { targetX, targetY, angle: Math.atan2(targetY - worm.y, targetX - worm.x) };
+  }
+
+  private computeAimFromInput(
+    input: Input,
+    camera: { offsetX: number; offsetY: number }
+  ): AimInfo {
+    return computeAimInfo({
+      input,
+      state: this.state,
+      activeWorm: this.activeWorm,
+      cameraOffsetX: camera.offsetX,
+      cameraOffsetY: camera.offsetY,
+    });
+  }
+
+  private sameAim(a: AimInfo, b: AimInfo) {
+    const angleEps = 1e-3;
+    const posEps = 0.25;
+    return (
+      Math.abs(a.angle - b.angle) < angleEps &&
+      Math.abs(a.targetX - b.targetX) < posEps &&
+      Math.abs(a.targetY - b.targetY) < posEps
+    );
   }
 
   private allocateProjectileId(projectile: Projectile): number {
@@ -755,6 +869,23 @@ export class GameSession {
     });
   }
 
+  private cloneCommand(command: TurnCommand): TurnCommand {
+    if (command.type === "fire-charged-weapon") {
+      return {
+        ...command,
+        aim: { ...command.aim },
+        projectileIds: [...command.projectileIds],
+      };
+    }
+    if (command.type === "aim") {
+      return {
+        ...command,
+        aim: { ...command.aim },
+      };
+    }
+    return { ...command };
+  }
+
   private buildTurnResolution(
     log: TurnLog,
     snapshot: GameSnapshot,
@@ -768,11 +899,7 @@ export class GameSession {
     )
       return null;
 
-    const commands = log.commands.map((command) => ({
-      ...command,
-      aim: { ...command.aim },
-      projectileIds: [...command.projectileIds],
-    }));
+    const commands = log.commands.map((command) => this.cloneCommand(command));
 
     const projectileEvents = log.projectileEvents.map((event) => {
       if (event.type === "projectile-spawned") {
@@ -818,14 +945,13 @@ export class GameSession {
 
   private fireChargedWeapon(
     power01: number,
-    input: Input,
-    camera: { offsetX: number; offsetY: number }
-  ) {
-    const aim = this.getAimInfo(input, camera);
-    const firedAtMs = this.turnTimestampMs();
+    aim: AimInfo,
+    atMs: number,
+    weapon: WeaponType
+  ): Extract<TurnCommand, { type: "fire-charged-weapon" }> {
     const beforeCount = this.projectiles.length;
     fireWeapon({
-      weapon: this.state.weapon,
+      weapon,
       activeWorm: this.activeWorm,
       aim,
       power01,
@@ -848,20 +974,21 @@ export class GameSession {
         position: { x: projectile.x, y: projectile.y },
         velocity: { x: projectile.vx, y: projectile.vy },
         wind: projectile.wind,
-        atMs: firedAtMs,
+        atMs,
       });
     }
 
-    this.turnLog.commands.push({
+    const command = {
       type: "fire-charged-weapon",
-      weapon: this.state.weapon,
+      weapon,
       power: power01,
       aim: { angle: aim.angle, targetX: aim.targetX, targetY: aim.targetY },
-      atMs: firedAtMs,
+      atMs,
       projectileIds,
-    });
+    } as const;
 
     this.turnLog.projectileEvents.push(...spawnEvents);
+    return command;
   }
 
   private onExplosion(

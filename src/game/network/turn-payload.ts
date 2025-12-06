@@ -15,7 +15,47 @@ export interface TurnCommandFireChargedWeapon {
   projectileIds: number[];
 }
 
-export type TurnCommand = TurnCommandFireChargedWeapon;
+export interface TurnCommandSetWeapon {
+  type: "set-weapon";
+  weapon: WeaponType;
+  atMs: number;
+}
+
+export interface TurnCommandAim {
+  type: "aim";
+  aim: {
+    angle: number;
+    targetX: number;
+    targetY: number;
+  };
+  atMs: number;
+}
+
+export interface TurnCommandMovement {
+  type: "move";
+  move: -1 | 0 | 1;
+  jump: boolean;
+  dtMs: number;
+  atMs: number;
+}
+
+export interface TurnCommandStartCharge {
+  type: "start-charge";
+  atMs: number;
+}
+
+export interface TurnCommandCancelCharge {
+  type: "cancel-charge";
+  atMs: number;
+}
+
+export type TurnCommand =
+  | TurnCommandAim
+  | TurnCommandMovement
+  | TurnCommandSetWeapon
+  | TurnCommandStartCharge
+  | TurnCommandCancelCharge
+  | TurnCommandFireChargedWeapon;
 
 export interface ProjectileSpawnEvent {
   type: "projectile-spawned";
