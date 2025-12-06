@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { WeaponType } from "../definitions";
 import { GameSession } from "../game/session";
 
 interface CanvasContextMocks {
@@ -185,5 +186,82 @@ describe("GameSession snapshots", () => {
     restored.loadSnapshot(damagedSnapshot);
 
     expect(restored.toSnapshot()).toEqual(damagedSnapshot);
+  });
+});
+
+describe("GameSession turn logging", () => {
+  it("builds a network-ready turn resolution from the command log", () => {
+    const now = createNow(1000, 250);
+    const session = new GameSession(200, 150, { random: createRng(5), now });
+    const sessionAny = session as any;
+
+    const worm = session.activeWorm;
+    const aim = { angle: 0.2, targetX: worm.x + 30, targetY: worm.y - 10 };
+
+    sessionAny.recordCommand({
+      type: "set-weapon",
+      weapon: WeaponType.HandGrenade,
+      atMs: 50,
+    });
+    sessionAny.recordCommand({ type: "aim", aim, atMs: 100 });
+    sessionAny.recordCommand({ type: "move", move: 1, jump: false, dtMs: 120, atMs: 150 });
+
+    const previousLog = sessionAny.turnLog;
+    expect(previousLog.commands).toHaveLength(3);
+
+    session.nextTurn();
+
+    const resolution = session.finalizeTurn();
+
+    expect(resolution.startedAtMs).toBe(previousLog.startedAtMs);
+    expect(resolution.windAtStart).toBe(previousLog.windAtStart);
+    expect(resolution.commands).toEqual(previousLog.commands);
+
+    expect(resolution.commands[1]).not.toBe(previousLog.commands[1]);
+    const aimCommand = resolution.commands[1] as { type: string; aim: { targetX: number } };
+    expect(aimCommand.type).toBe("aim");
+    (previousLog.commands[1] as { aim: { targetX: number } }).aim.targetX += 10;
+    expect(aimCommand.aim.targetX).not.toBe(
+      (previousLog.commands[1] as { aim: { targetX: number } }).aim.targetX
+    );
+
+    expect((sessionAny.turnLog as { commands: unknown[] }).commands).toHaveLength(0);
+  });
+
+  it("captures projectile ids and spawn events when firing weapons", () => {
+    const now = createNow(0, 100);
+    const session = new GameSession(320, 240, { random: createRng(21), now });
+    const sessionAny = session as any;
+    const worm = session.activeWorm;
+    const aim = { angle: 0, targetX: worm.x + 80, targetY: worm.y };
+
+    sessionAny.recordCommand({
+      type: "fire-charged-weapon",
+      weapon: WeaponType.Bazooka,
+      power: 0.5,
+      aim,
+      atMs: 200,
+      projectileIds: [],
+    });
+
+    const log = sessionAny.turnLog as {
+      commands: Array<{ projectileIds: number[] }>;
+      projectileEvents: Array<{ type: string; id: number }>;
+    };
+    expect(log.commands).toHaveLength(1);
+
+    expect(log.commands[0]).toBeDefined();
+    const fireCommand = log.commands[0]!;
+    expect(fireCommand.projectileIds.length).toBeGreaterThan(0);
+    const spawnEvents = log.projectileEvents.filter((event) => event.type === "projectile-spawned");
+    expect(spawnEvents).toHaveLength(fireCommand.projectileIds.length);
+    expect(spawnEvents.map((event) => event.id)).toEqual(fireCommand.projectileIds);
+
+    session.nextTurn();
+    const resolution = session.finalizeTurn();
+
+    const resolutionCommand = resolution.commands[0] as { projectileIds: number[] };
+    const resolutionSpawns = resolution.projectileEvents.filter((event) => event.type === "projectile-spawned");
+    expect(resolutionCommand.projectileIds).toEqual(resolutionSpawns.map((event) => (event as any).id));
   });
 });
