@@ -6,10 +6,13 @@ export type NetworkRole = "host" | "guest";
 export interface NetworkMatchCallbacks {
   onCreateRoom: (playerName: string) => Promise<void>;
   onJoinRoom: (roomCode: string, joinCode: string, playerName: string) => Promise<void>;
+  onLookupRoom: (roomCode: string) => Promise<void>;
   onStartConnection: () => Promise<void>;
   onCancel: () => void;
   onClose: (reason: CloseReason) => void;
 }
+
+const PLAYER_NAME_STORAGE_KEY = "wormish.network.playerName";
 
 export class NetworkMatchDialog {
   private readonly dialog: CommandDialog;
@@ -19,6 +22,8 @@ export class NetworkMatchDialog {
   private roomCode = "";
   private joinCode = "";
   private hostName = "";
+  private lookedUpRoomCode: string | null = null;
+  private hasJoinedRoom = false;
   private validationMessages: string[] = [];
   private isProcessing = false;
   private contentContainer: HTMLElement | null = null;
@@ -26,12 +31,16 @@ export class NetworkMatchDialog {
   constructor(callbacks: NetworkMatchCallbacks) {
     this.callbacks = callbacks;
     this.dialog = new CommandDialog();
+    this.playerName = this.readStoredPlayerName();
   }
 
   show(initialRole: NetworkRole = "host") {
     this.role = initialRole;
     this.validationMessages = [];
     this.isProcessing = false;
+    if (!this.playerName) {
+      this.playerName = this.readStoredPlayerName();
+    }
     this.dialog.show({
       title: "Network Match Setup",
       subtitle: "Connect with a friend for multiplayer action",
@@ -62,11 +71,11 @@ export class NetworkMatchDialog {
     
     // Update validation messages based on connection state
     this.validationMessages = [];
-    
+
     if (snapshot.connection.lastError) {
       this.validationMessages.push(`Error: ${snapshot.connection.lastError}`);
     }
-    
+
     if (snapshot.connection.lifecycle === "creating") {
       this.validationMessages.push("Creating room...");
     } else if (snapshot.connection.lifecycle === "created") {
@@ -91,7 +100,17 @@ export class NetworkMatchDialog {
     if (snapshot.registry.hostUserName) {
       this.hostName = snapshot.registry.hostUserName;
     }
-    
+
+    if (snapshot.mode === "network-guest") {
+      this.lookedUpRoomCode = snapshot.registry.code || this.lookedUpRoomCode;
+      const lifecycle = snapshot.connection.lifecycle;
+      this.hasJoinedRoom =
+        lifecycle === "joined" || lifecycle === "connecting" || lifecycle === "connected";
+    } else {
+      this.lookedUpRoomCode = null;
+      this.hasJoinedRoom = false;
+    }
+
     this.refreshContent();
   }
 
@@ -99,6 +118,8 @@ export class NetworkMatchDialog {
     const container = document.createElement("div");
     container.className = "network-dialog";
     this.contentContainer = container;
+
+    container.appendChild(this.buildNameField());
 
     // Role tabs
     const tabs = document.createElement("div");
@@ -151,9 +172,9 @@ export class NetworkMatchDialog {
     return container;
   }
 
-  private buildHostContent(): HTMLElement {
-    const section = document.createElement("div");
-    section.className = "network-section";
+  private buildNameField(): HTMLElement {
+    const wrapper = document.createElement("div");
+    wrapper.className = "network-section";
 
     const label = document.createElement("label");
     label.className = "network-label";
@@ -167,7 +188,18 @@ export class NetworkMatchDialog {
     input.maxLength = 32;
     input.addEventListener("input", (e) => {
       this.playerName = (e.target as HTMLInputElement).value;
+      this.persistPlayerName();
     });
+
+    wrapper.appendChild(label);
+    wrapper.appendChild(input);
+
+    return wrapper;
+  }
+
+  private buildHostContent(): HTMLElement {
+    const section = document.createElement("div");
+    section.className = "network-section";
 
     const button = document.createElement("button");
     button.type = "button";
@@ -190,8 +222,6 @@ export class NetworkMatchDialog {
     buttonGroup.appendChild(button);
     buttonGroup.appendChild(cancelButton);
 
-    section.appendChild(label);
-    section.appendChild(input);
     section.appendChild(buttonGroup);
 
     return section;
@@ -200,21 +230,6 @@ export class NetworkMatchDialog {
   private buildGuestContent(): HTMLElement {
     const section = document.createElement("div");
     section.className = "network-section";
-
-    // Player name
-    const nameLabel = document.createElement("label");
-    nameLabel.className = "network-label";
-    nameLabel.textContent = "Your Name";
-
-    const nameInput = document.createElement("input");
-    nameInput.type = "text";
-    nameInput.className = "network-input";
-    nameInput.placeholder = "Enter your display name";
-    nameInput.value = this.playerName;
-    nameInput.maxLength = 32;
-    nameInput.addEventListener("input", (e) => {
-      this.playerName = (e.target as HTMLInputElement).value;
-    });
 
     // Room code
     const roomCodeLabel = document.createElement("label");
@@ -232,6 +247,15 @@ export class NetworkMatchDialog {
       (e.target as HTMLInputElement).value = this.roomCode;
     });
 
+    const hasLookup = this.lookedUpRoomCode === this.roomCode && !!this.hostName;
+
+    if (hasLookup) {
+      const hostPreview = document.createElement("div");
+      hostPreview.className = "network-validation-message";
+      hostPreview.textContent = `Host: ${this.hostName}`;
+      section.appendChild(hostPreview);
+    }
+
     // Join code
     const joinCodeLabel = document.createElement("label");
     joinCodeLabel.className = "network-label";
@@ -247,10 +271,17 @@ export class NetworkMatchDialog {
       this.joinCode = (e.target as HTMLInputElement).value;
     });
 
+    joinCodeLabel.style.display = hasLookup ? "block" : "none";
+    joinCodeInput.style.display = hasLookup ? "block" : "none";
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = "network-button network-button--primary";
-    button.textContent = this.hostName ? "Start Connection" : "Join Room";
+    button.textContent = this.hasJoinedRoom
+      ? "Start Connection"
+      : hasLookup
+        ? "Join Room"
+        : "Find Room";
     button.disabled = this.isProcessing;
     button.addEventListener("click", () => this.handleGuestAction());
 
@@ -268,8 +299,6 @@ export class NetworkMatchDialog {
     buttonGroup.appendChild(button);
     buttonGroup.appendChild(cancelButton);
 
-    section.appendChild(nameLabel);
-    section.appendChild(nameInput);
     section.appendChild(roomCodeLabel);
     section.appendChild(roomCodeInput);
     section.appendChild(joinCodeLabel);
@@ -380,18 +409,36 @@ export class NetworkMatchDialog {
   private async handleGuestAction() {
     if (this.isProcessing) return;
 
-    if (!this.hostName) {
-      // Join room
-      if (!this.playerName.trim()) {
-        this.validationMessages = ["Please enter your name"];
-        this.refreshContent();
-        return;
-      }
+    if (!this.playerName.trim()) {
+      this.validationMessages = ["Please enter your name"];
+      this.refreshContent();
+      return;
+    }
+
+    const hasLookup = this.lookedUpRoomCode === this.roomCode && !!this.hostName;
+
+    if (!hasLookup) {
       if (!this.roomCode.trim()) {
         this.validationMessages = ["Please enter the room code"];
         this.refreshContent();
         return;
       }
+
+      this.isProcessing = true;
+      this.refreshContent();
+
+      try {
+        await this.callbacks.onLookupRoom(this.roomCode.trim());
+      } catch (error) {
+        this.validationMessages = [`Failed to find room: ${error instanceof Error ? error.message : String(error)}`];
+      } finally {
+        this.isProcessing = false;
+        this.refreshContent();
+      }
+      return;
+    }
+
+    if (!this.hasJoinedRoom) {
       if (!this.joinCode.trim()) {
         this.validationMessages = ["Please enter the join code"];
         this.refreshContent();
@@ -413,18 +460,40 @@ export class NetworkMatchDialog {
         this.isProcessing = false;
         this.refreshContent();
       }
-    } else {
-      // Start connection
-      this.isProcessing = true;
-      this.refreshContent();
+      return;
+    }
 
-      try {
-        await this.callbacks.onStartConnection();
-      } catch (error) {
-        this.validationMessages = [`Failed to start connection: ${error instanceof Error ? error.message : String(error)}`];
-        this.isProcessing = false;
-        this.refreshContent();
+    // Start connection
+    this.isProcessing = true;
+    this.refreshContent();
+
+    try {
+      await this.callbacks.onStartConnection();
+    } catch (error) {
+      this.validationMessages = [`Failed to start connection: ${error instanceof Error ? error.message : String(error)}`];
+      this.isProcessing = false;
+      this.refreshContent();
+    }
+  }
+
+  private readStoredPlayerName(): string {
+    try {
+      const stored = window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY);
+      return stored ?? "";
+    } catch {
+      return "";
+    }
+  }
+
+  private persistPlayerName() {
+    try {
+      if (this.playerName) {
+        window.localStorage.setItem(PLAYER_NAME_STORAGE_KEY, this.playerName);
+      } else {
+        window.localStorage.removeItem(PLAYER_NAME_STORAGE_KEY);
       }
+    } catch {
+      // Ignore storage errors
     }
   }
 }

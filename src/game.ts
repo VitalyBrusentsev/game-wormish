@@ -26,6 +26,8 @@ import {
 import { NetworkSessionState } from "./network/session-state";
 import { WebRTCRegistryClient } from "./webrtc/client";
 import type { ConnectionState } from "./webrtc/types";
+import { RegistryClient } from "./webrtc/registry-client";
+import { HttpClient } from "./webrtc/http-client";
 
 let initialMenuDismissed = false;
 
@@ -108,10 +110,13 @@ export class Game {
     this.helpOverlay = new HelpOverlay({
       onClose: (pausedMs, reason) => this.handleHelpClosed(pausedMs, reason),
     });
-    
+
     this.networkDialog = new NetworkMatchDialog({
       onCreateRoom: async (playerName) => {
         await this.createHostRoom({ registryUrl: this.registryUrl, playerName });
+      },
+      onLookupRoom: async (roomCode) => {
+        await this.lookupRoom({ registryUrl: this.registryUrl, roomCode });
       },
       onJoinRoom: async (roomCode, joinCode, playerName) => {
         await this.joinRoom({ registryUrl: this.registryUrl, playerName, roomCode, joinCode });
@@ -318,6 +323,32 @@ export class Game {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.networkState.reportConnectionError(message);
+      this.notifyNetworkStateChange();
+      throw error;
+    }
+  }
+
+  async lookupRoom(config: { registryUrl: string; roomCode: string }): Promise<void> {
+    const roomCode = config.roomCode.trim().toUpperCase();
+    const registryClient = new RegistryClient(config.registryUrl, new HttpClient());
+
+    try {
+      const publicInfo = await registryClient.getPublicRoomInfo(roomCode);
+      this.networkState.reportConnectionError(null);
+      this.networkState.setMode("network-guest");
+      this.networkState.updateRegistryInfo({
+        baseUrl: config.registryUrl,
+        code: roomCode,
+        hostUserName: publicInfo.hostUserName,
+        status: publicInfo.status,
+        expiresAt: publicInfo.expiresAt,
+      });
+      this.networkState.setRemoteName(publicInfo.hostUserName);
+      this.notifyNetworkStateChange();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.networkState.reportConnectionError(message);
+      this.networkState.updateRegistryInfo({ code: roomCode, hostUserName: "" });
       this.notifyNetworkStateChange();
       throw error;
     }

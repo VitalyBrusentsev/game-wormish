@@ -278,6 +278,7 @@ Network match dialog
   padding: 10px 14px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.2);
+  box-sizing: border-box;
   background: rgba(20, 30, 60, 0.6);
   color: #f4f6ff;
   font-size: 15px;
