@@ -329,13 +329,15 @@ export class NetworkMatchDialog {
   }
 
   private refreshContent() {
-    if (!this.contentContainer) return;
-    this.contentContainer.innerHTML = "";
-    
-    const newContent = this.buildContent();
-    while (newContent.firstChild) {
-      this.contentContainer.appendChild(newContent.firstChild);
+    const currentContainer = this.contentContainer;
+    if (!currentContainer || !currentContainer.parentElement) {
+      return;
     }
+
+    const parent = currentContainer.parentElement;
+    const newContent = this.buildContent();
+
+    parent.replaceChild(newContent, currentContainer);
   }
 
   private async handleHostAction() {
