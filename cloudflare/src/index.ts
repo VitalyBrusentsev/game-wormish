@@ -80,9 +80,9 @@ const REQUIRED_SDP_LINES = ['v=', 'o=', 's=', 't=', 'm='];
 const BASE36_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
 const DEFAULT_TTLS: Record<RoomStatus, number> = {
-  open: 60,
-  joined: 180,
-  paired: 300,
+  open: 180,
+  joined: 300,
+  paired: 600,
   closed: 15,
 };
 
