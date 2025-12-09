@@ -17,13 +17,14 @@ We keep the existing start menu as-is, but when the player clicks “Play With F
 
 - Create `NetworkMatchDialog` under `src/ui/` that wraps a `CommandDialog`. Inputs to collect:
   - Player display name
-  - Host mode: no room/join code inputs; show empty info blocks until creation succeeds.
-  - Guest mode:
-    1. Step 1: enter room code, fetch `/rooms/:code/public`. Display host name if found.
-    2. Step 2: prompt for join code, submit to `/rooms/:code/join`.
-  - Buttons for “Create Room” (host) or “Join Room” (guest), plus “Back” to return to the start menu.
-- Validation panel at the bottom shows errors or connection progress (text lines).
-- Keep a detail list on the right showing the current room code, join code, expiration, and remote player name for quick confirmation.
+  - Landing view that offers two primary choices: “Start a new Game” (host) or “Join a Game” (guest). The cancel button on this view dismisses the dialog.
+  - Host flow: clicking “Start a new Game” immediately creates a room, then replaces the layout with room details (room code, join code, host name) and a single Cancel control that resets the dialog to its initial state.
+  - Guest flow:
+    1. Step 1: prompt only for the room code with a **Find** action and Cancel (which resets to landing).
+    2. Step 2: once `/rooms/:code/public` returns the host, show a prominent “Found: Host <name>” callout plus the join-code input and a **Join** button.
+    3. After a successful join, only the Cancel control remains while connection progress is displayed.
+- Validation panel at the bottom shows errors or connection progress (text lines). Progress should be readable across all states (creating room, lookup, join, connecting, connected).
+- Keep a detail list on the right showing the current room code, join code, expiration, and remote player name for quick confirmation whenever a network flow is active.
 
 ### 2.2 Dialog → Game wiring
 
@@ -31,7 +32,6 @@ We keep the existing start menu as-is, but when the player clicks “Play With F
   - `createHostRoom(config: { registryUrl: string; playerName: string; })`.
     - `registryUrl` should be hardcoded to `http://127.0.0.1:8787` for dev builds, or to `https://wormish-current-time-production.installcreator.workers.dev` for production builds.
   - `joinRoom(config: { registryUrl: string; playerName: string; roomCode: string; joinCode: string; })`.
-  - `startConnection()` (once both sides are ready to start `WebRTCRegistryClient.startConnection()`).
   - `cancelNetworkSetup()` (to tear down partially initialized state if the dialog is closed mid-flow).
 - `Game` implements these methods by mutating `NetworkSessionState`, instantiating the registry client when needed, and forwarding success/error diagnostics back into the dialog.
 - Validation panel entries are derived from `NetworkSessionState.connection.lifecycle`, `registry.status`, and any recent diagnostics stored in the state (`lastError`, `debugEvents`).
@@ -75,10 +75,10 @@ We keep the existing start menu as-is, but when the player clicks “Play With F
 3. **Registry flows**
    - Host:
      - `createRoom` → update state with `code`, `joinCode`, `token`, `expiresAt`, `hostUserName`.
-     - Display info, allow user to hit “Start Connection” once ready.
+     - Immediately begin polling and connection setup; no explicit start button.
    - Guest:
      - `getPublicRoomInfo` to show host name.
-     - `joinRoom` to acquire token, then show confirmation.
+     - `joinRoom` to acquire token, then automatically begin connection.
 4. **WebRTC handshake**
    - Share the registry base URL + token with the client, call `startConnection`, feed debug events/state transitions into `NetworkSessionState`.
 5. **Bridge→GameSession**

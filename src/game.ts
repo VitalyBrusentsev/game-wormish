@@ -25,7 +25,7 @@ import {
 } from "./game/turn-driver";
 import { NetworkSessionState } from "./network/session-state";
 import { WebRTCRegistryClient } from "./webrtc/client";
-import type { ConnectionState } from "./webrtc/types";
+import { ConnectionState } from "./webrtc/types";
 import { RegistryClient } from "./webrtc/registry-client";
 import { HttpClient } from "./webrtc/http-client";
 
@@ -49,6 +49,7 @@ export class Game {
   private webrtcClient: WebRTCRegistryClient | null = null;
   private networkStateChangeCallbacks: ((state: NetworkSessionState) => void)[] = [];
   private readonly registryUrl: string;
+  private connectionStartRequested = false;
 
   private readonly cameraPadding = 48;
   private cameraOffsetX = 0;
@@ -121,16 +122,6 @@ export class Game {
       onJoinRoom: async (roomCode, joinCode, playerName) => {
         await this.joinRoom({ registryUrl: this.registryUrl, playerName, roomCode, joinCode });
       },
-      onStartConnection: async () => {
-        await this.startConnection();
-        // Close dialog and start match after successful connection
-        setTimeout(() => {
-          this.networkDialog.hide();
-          initialMenuDismissed = true;
-          this.canvas.focus();
-          this.updateCursor();
-        }, 1000);
-      },
       onCancel: () => {
         this.cancelNetworkSetup();
       },
@@ -142,9 +133,16 @@ export class Game {
         this.updateCursor();
       },
     });
-    
+
     this.onNetworkStateChange((state) => {
       this.networkDialog.updateFromNetworkState(state);
+      const snapshot = state.getSnapshot();
+      if (snapshot.connection.lifecycle === "connected") {
+        this.networkDialog.hide();
+        initialMenuDismissed = true;
+        this.canvas.focus();
+        this.updateCursor();
+      }
     });
     
     this.startMenu = new StartMenuOverlay({
@@ -256,6 +254,7 @@ export class Game {
     this.networkState.setMode("network-host");
     this.networkState.setPlayerNames(config.playerName);
     this.networkState.updateRegistryInfo({ baseUrl: config.registryUrl });
+    this.connectionStartRequested = false;
 
     const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
     this.webrtcClient = new WebRTCRegistryClient({
@@ -278,6 +277,7 @@ export class Game {
         });
         this.notifyNetworkStateChange();
       }
+      await this.startConnection();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.networkState.reportConnectionError(message);
@@ -295,6 +295,7 @@ export class Game {
     this.networkState.setMode("network-guest");
     this.networkState.setPlayerNames(config.playerName);
     this.networkState.updateRegistryInfo({ baseUrl: config.registryUrl });
+    this.connectionStartRequested = false;
 
     const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
     this.webrtcClient = new WebRTCRegistryClient({
@@ -320,6 +321,7 @@ export class Game {
         }
         this.notifyNetworkStateChange();
       }
+      await this.startConnection();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.networkState.reportConnectionError(message);
@@ -358,12 +360,24 @@ export class Game {
     if (!this.webrtcClient) {
       throw new Error("No WebRTC client initialized");
     }
+    if (this.connectionStartRequested) {
+      return;
+    }
+
+    const currentState = this.webrtcClient.getConnectionState();
+    if (currentState === ConnectionState.CONNECTING || currentState === ConnectionState.CONNECTED) {
+      this.connectionStartRequested = true;
+      return;
+    }
+
+    this.connectionStartRequested = true;
 
     try {
       await this.webrtcClient.startConnection();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.networkState.reportConnectionError(message);
+      this.connectionStartRequested = false;
       this.notifyNetworkStateChange();
       throw error;
     }
@@ -374,6 +388,7 @@ export class Game {
       this.webrtcClient.closeRoom().catch(() => {});
       this.webrtcClient = null;
     }
+    this.connectionStartRequested = false;
     this.networkState.setMode("local");
     this.networkState.resetNetworkOnlyState();
     this.initializeTurnControllers();
