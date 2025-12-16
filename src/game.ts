@@ -609,7 +609,48 @@ export class Game {
     return this.session.getAimInfo();
   }
 
+  private renderTurnSwitchHighlight(
+    ctx: CanvasRenderingContext2D,
+    worm: Worm,
+    elapsedMs: number
+  ) {
+    const durationMs = 1400;
+    if (elapsedMs > durationMs) return;
+
+    const t = 1 - elapsedMs / durationMs;
+    const pulse = 0.55 + 0.45 * Math.sin((elapsedMs / 120) * Math.PI * 2);
+    const teamColor = worm.team === "Red" ? "255,77,77" : "77,163,255";
+    const innerRadius = worm.radius + 4;
+    const outerRadius = worm.radius + 12 + 12 * t * pulse;
+
+    ctx.save();
+    const gradient = ctx.createRadialGradient(
+      worm.x,
+      worm.y,
+      innerRadius,
+      worm.x,
+      worm.y,
+      outerRadius
+    );
+    gradient.addColorStop(0, `rgba(${teamColor}, ${0.3 * t})`);
+    gradient.addColorStop(1, `rgba(${teamColor}, 0)`);
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(worm.x, worm.y, outerRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = `rgba(${teamColor}, ${0.8 * t})`;
+    ctx.lineWidth = 3;
+    const ringRadius = worm.radius + 6 + 6 * pulse * t;
+    ctx.beginPath();
+    ctx.arc(worm.x, worm.y, ringRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   render() {
+    const now = nowMs();
+    const turnElapsedMs = Math.max(0, now - this.session.state.turnStartMs);
     const ctx = this.ctx;
     ctx.save();
     ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
@@ -627,6 +668,9 @@ export class Game {
           i === this.activeWormIndex &&
           this.session.state.phase !== "gameover";
         worm.render(ctx, isActive);
+        if (isActive) {
+          this.renderTurnSwitchHighlight(ctx, worm, turnElapsedMs);
+        }
       }
     }
 
@@ -645,7 +689,7 @@ export class Game {
       width: this.width,
       height: this.height,
       state: this.session.state,
-      now: nowMs(),
+      now,
       activeTeamId: this.activeTeam.id,
       getTeamHealth: (teamId) => this.getTeamHealth(teamId),
       wind: this.session.wind,
