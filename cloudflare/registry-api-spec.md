@@ -46,9 +46,9 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 
 ## TTLs (Per‑State, Aligned)
 
-- `ROOM_TTL_OPEN` = **60s**
-- `ROOM_TTL_JOINED` = **180s**
-- `ROOM_TTL_PAIRED` = **300s**
+- `ROOM_TTL_OPEN` = **180s**
+- `ROOM_TTL_JOINED` = **300s**
+- `ROOM_TTL_PAIRED` = **600s**
 - `ROOM_TTL_CLOSED` = **15s** (expire ASAP)
 - `ICE_TTL` = **300s** (5 minutes) for both candidate lists (`host` and `guest`)
 
@@ -266,9 +266,9 @@ Common `code` values: `bad_join_code`, `not_open`, `already_paired`, `no_offer`,
 
 ## Config (Env)
 
-- `ROOM_TTL_OPEN=60`
-- `ROOM_TTL_JOINED=180`
-- `ROOM_TTL_PAIRED=300`
+- `ROOM_TTL_OPEN=180`
+- `ROOM_TTL_JOINED=300`
+- `ROOM_TTL_PAIRED=600`
 - `ROOM_TTL_CLOSED=15`
 - `ICE_TTL=300`
 - `ALLOWED_ORIGINS`
