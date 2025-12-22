@@ -7,6 +7,12 @@ export interface Env {
   ROOM_TTL_CLOSED?: string;
   ICE_TTL?: string;
   ALLOWED_ORIGINS?: string;
+  RATE_LIMIT_CREATE: RateLimiter;
+  RATE_LIMIT_PUBLIC: RateLimiter;
+  RATE_LIMIT_JOIN_IP: RateLimiter;
+  RATE_LIMIT_JOIN_ROOM: RateLimiter;
+  RATE_LIMIT_POLL_ROOM: RateLimiter;
+  RATE_LIMIT_MUTATION_ROOM: RateLimiter;
 }
 
 export interface DurableObjectId {
@@ -36,6 +42,10 @@ export interface DurableObjectNamespace {
 export interface WorkerExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
   passThroughOnException(): void;
+}
+
+export interface RateLimiter {
+  limit(input: { key: string }): Promise<{ success: boolean }>;
 }
 
 type RoomStatus = 'open' | 'joined' | 'paired' | 'closed';
@@ -488,6 +498,17 @@ function generateToken(): string {
   return base64UrlEncode(generateRandomBytes(32));
 }
 
+function getClientIp(request: Request): string {
+  return request.headers.get('cf-connecting-ip') || 'unknown';
+}
+
+async function enforceWorkerRateLimit(limiter: RateLimiter, request: Request): Promise<void> {
+  const { success } = await limiter.limit({ key: `ip:${getClientIp(request)}` });
+  if (!success) {
+    throw new RegistryError(429, 'rate_limited', 'Too many requests', true);
+  }
+}
+
 async function handleCreateRoom(
   request: Request,
   env: Env,
@@ -495,6 +516,7 @@ async function handleCreateRoom(
   _ctx: WorkerExecutionContext,
   corsOrigin: AllowedOrigin
 ): Promise<Response> {
+  await enforceWorkerRateLimit(env.RATE_LIMIT_CREATE, request);
   ensureMutationHeader(request);
   const rawBody = await readBodyText(request);
   const body = parseJsonBody<{ hostUserName?: unknown }>(rawBody);
@@ -534,7 +556,7 @@ async function handleCreateRoom(
 }
 
 async function handlePublicLookup(
-  _request: Request,
+  request: Request,
   env: Env,
   roomCode: string | null,
   _ctx: WorkerExecutionContext,
@@ -543,6 +565,7 @@ async function handlePublicLookup(
   if (!roomCode) {
     throw new RegistryError(404, 'not_found', 'Room not found', false);
   }
+  await enforceWorkerRateLimit(env.RATE_LIMIT_PUBLIC, request);
   const { data } = await sendRoomRequest<{ status: RoomStatus; expiresAt: number; hostUserName: string }>(env, roomCode, {
     type: 'public_lookup',
   });
@@ -559,6 +582,7 @@ async function handleJoinRoom(
   if (!roomCode) {
     throw new RegistryError(404, 'not_found', 'Room not found', false);
   }
+  await enforceWorkerRateLimit(env.RATE_LIMIT_JOIN_IP, request);
   ensureMutationHeader(request);
   const rawBody = await readBodyText(request);
   const body = parseJsonBody<{ joinCode?: unknown; guestUserName?: unknown }>(rawBody);
@@ -717,7 +741,10 @@ interface IceBucket {
 }
 
 export class RegistryRoomDurableObject {
-  constructor(private readonly state: DurableObjectState) {}
+  constructor(
+    private readonly state: DurableObjectState,
+    private readonly env: Env
+  ) {}
 
   private json<T>(payload: DurableEnvelope<T>): Response {
     return new Response(JSON.stringify(payload), {
@@ -835,6 +862,13 @@ export class RegistryRoomDurableObject {
     return ttlConfig[room.status];
   }
 
+  private async enforceRateLimit(limiter: RateLimiter, key: string): Promise<void> {
+    const result = await limiter.limit({ key });
+    if (!result.success) {
+      throw new RegistryError(429, 'rate_limited', 'Too many requests', true);
+    }
+  }
+
   async fetch(request: Request): Promise<Response> {
     try {
       const payload = (await request.json()) as Partial<RoomDurableRequest>;
@@ -879,6 +913,7 @@ export class RegistryRoomDurableObject {
         case 'join': {
           const joinPayload = payload as JoinRoomPayload;
           const room = await this.requireRoom(now);
+          await this.enforceRateLimit(this.env.RATE_LIMIT_JOIN_ROOM, `room:${room.code}:join`);
           if (room.status !== 'open') {
             throw new RegistryError(409, 'not_open', 'Room is not open for joining', false);
           }
@@ -901,6 +936,7 @@ export class RegistryRoomDurableObject {
           const offerPayload = payload as OfferPayload;
           const room = await this.requireRoom(now);
           const role = this.requireToken(room, offerPayload.token);
+          await this.enforceRateLimit(this.env.RATE_LIMIT_MUTATION_ROOM, `room:${room.code}:mutation`);
           if (role !== 'host') {
             throw new RegistryError(403, 'forbidden', 'Only the host can set the offer', false);
           }
@@ -918,6 +954,7 @@ export class RegistryRoomDurableObject {
           const answerPayload = payload as AnswerPayload;
           const room = await this.requireRoom(now);
           const role = this.requireToken(room, answerPayload.token);
+          await this.enforceRateLimit(this.env.RATE_LIMIT_MUTATION_ROOM, `room:${room.code}:mutation`);
           if (role !== 'guest') {
             throw new RegistryError(403, 'forbidden', 'Only the guest can set the answer', false);
           }
@@ -939,6 +976,7 @@ export class RegistryRoomDurableObject {
           const candidatePayload = payload as CandidatePayload;
           const room = await this.requireRoom(now);
           const role = this.requireToken(room, candidatePayload.token);
+          await this.enforceRateLimit(this.env.RATE_LIMIT_MUTATION_ROOM, `room:${room.code}:mutation`);
           if (room.status === 'closed') {
             throw new RegistryError(409, 'not_open', 'Room is closed', false);
           }
@@ -949,6 +987,7 @@ export class RegistryRoomDurableObject {
           const snapshotPayload = payload as SnapshotPayload;
           const room = await this.requireRoom(now);
           this.requireToken(room, snapshotPayload.token);
+          await this.enforceRateLimit(this.env.RATE_LIMIT_POLL_ROOM, `room:${room.code}:poll`);
           return this.success(200, {
             status: room.status,
             offer: room.offer ? clone(room.offer) : null,
