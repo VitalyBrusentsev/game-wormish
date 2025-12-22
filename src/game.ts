@@ -44,6 +44,7 @@ export class Game {
   private startMenu: StartMenuOverlay;
   private networkDialog: NetworkMatchDialog;
   private helpOpenedFromMenu = false;
+  private startMenuOpenedAtMs: number | null = null;
 
   private readonly networkState: NetworkSessionState;
   private webrtcClient: WebRTCRegistryClient | null = null;
@@ -129,6 +130,7 @@ export class Game {
         if (reason === "escape") {
           this.input.consumeKey("Escape");
         }
+        this.hideStartMenu();
         this.canvas.focus();
         this.updateCursor();
       },
@@ -148,24 +150,24 @@ export class Game {
     this.startMenu = new StartMenuOverlay({
       onHelp: () => {
         this.helpOpenedFromMenu = true;
-        this.startMenu.hide();
+        this.hideStartMenu();
         this.showHelp();
       },
       onStart: () => {
-        this.startMenu.hide();
+        this.hideStartMenu();
         initialMenuDismissed = true;
         this.canvas.focus();
         this.updateCursor();
       },
       onRestart: () => {
-        this.startMenu.hide();
+        this.hideStartMenu();
         initialMenuDismissed = true;
         this.session.restart();
         this.canvas.focus();
         this.updateCursor();
       },
       onNetworkMatch: () => {
-        this.startMenu.hide();
+        this.hideStartMenu();
         this.networkDialog.show("host");
       },
       onClose: (reason) => {
@@ -177,7 +179,7 @@ export class Game {
       },
     });
     if (!initialMenuDismissed) {
-      this.startMenu.show("start", false);
+      this.showStartMenu("start", false);
     }
 
     this.updateCursor();
@@ -481,13 +483,35 @@ export class Game {
     this.helpOverlay.hide(reason);
   }
 
+  private showStartMenu(
+    mode: "start" | "pause" = this.startMenu.getMode(),
+    closeable = true
+  ) {
+    if (!this.startMenu.isVisible()) {
+      this.startMenuOpenedAtMs = nowMs();
+    }
+    this.startMenu.show(mode, closeable);
+  }
+
+  private hideStartMenu() {
+    if (!this.startMenu.isVisible()) return;
+    if (this.startMenuOpenedAtMs !== null) {
+      const pausedFor = nowMs() - this.startMenuOpenedAtMs;
+      if (pausedFor > 0) {
+        this.session.state.pauseFor(pausedFor);
+      }
+    }
+    this.startMenuOpenedAtMs = null;
+    this.startMenu.hide();
+  }
+
   private handleHelpClosed(pausedFor: number, reason: "manual" | "escape") {
     if (reason === "escape") {
       this.input.consumeKey("Escape");
     }
     if (this.helpOpenedFromMenu) {
       this.helpOpenedFromMenu = false;
-      this.startMenu.show(this.startMenu.getMode(), initialMenuDismissed);
+      this.showStartMenu(this.startMenu.getMode(), initialMenuDismissed);
       this.updateCursor();
       return;
     }
@@ -505,7 +529,7 @@ export class Game {
         this.hideHelp("escape");
       } else {
         this.helpOpenedFromMenu = wasMenuVisible;
-        if (wasMenuVisible) this.startMenu.hide();
+        if (wasMenuVisible) this.hideStartMenu();
         this.showHelp();
       }
       this.updateCursor();
@@ -531,7 +555,7 @@ export class Game {
     }
 
     if (escapePressed) {
-      this.startMenu.show(initialMenuDismissed ? "pause" : "start", initialMenuDismissed);
+      this.showStartMenu(initialMenuDismissed ? "pause" : "start", initialMenuDismissed);
       this.updateCursor();
       return;
     }
