@@ -7,6 +7,7 @@ import worker, {
   DurableObjectStorage,
   DurableObjectStub,
   Env,
+  RateLimiter,
   RegistryRoomDurableObject,
   WorkerExecutionContext,
 } from './index';
@@ -72,6 +73,8 @@ class MockDurableObjectStub implements DurableObjectStub {
 class MockDurableObjectNamespace implements DurableObjectNamespace {
   private readonly objects = new Map<string, RegistryRoomDurableObject>();
 
+  constructor(private readonly env: Env) {}
+
   idFromName(name: string): DurableObjectId {
     return new MockDurableObjectId(name);
   }
@@ -81,10 +84,16 @@ class MockDurableObjectNamespace implements DurableObjectNamespace {
     let object = this.objects.get(key);
     if (!object) {
       const state = new MockDurableObjectState(id);
-      object = new RegistryRoomDurableObject(state);
+      object = new RegistryRoomDurableObject(state, this.env);
       this.objects.set(key, object);
     }
     return new MockDurableObjectStub(object);
+  }
+}
+
+class MockRateLimiter implements RateLimiter {
+  async limit(_input: { key: string }): Promise<{ success: boolean }> {
+    return { success: true };
   }
 }
 
@@ -97,9 +106,15 @@ describe('registry worker', () => {
 
   beforeEach(() => {
     env = {
-      REGISTRY_ROOMS: new MockDurableObjectNamespace(),
+      RATE_LIMIT_CREATE: new MockRateLimiter(),
+      RATE_LIMIT_PUBLIC: new MockRateLimiter(),
+      RATE_LIMIT_JOIN_IP: new MockRateLimiter(),
+      RATE_LIMIT_JOIN_ROOM: new MockRateLimiter(),
+      RATE_LIMIT_POLL_ROOM: new MockRateLimiter(),
+      RATE_LIMIT_MUTATION_ROOM: new MockRateLimiter(),
       ALLOWED_ORIGINS: 'https://game.test',
     } as Env;
+    env.REGISTRY_ROOMS = new MockDurableObjectNamespace(env);
   });
 
   it('supports the happy path room lifecycle', async () => {

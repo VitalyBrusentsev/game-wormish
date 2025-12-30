@@ -82,7 +82,7 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 - **Public lookup**: **5 / min / IP**
 - **Create**: ≤ **5 / min / IP** (token bucket).
 - **Join attempts**: ≤ **10 / min / IP** and ≤ **10 / min / room**.
-- **Polling state**: **1 / s / room** (with token present!)
+- **Polling state**: **2 / s / room** (with token present!)
 - **Per‑room mutations** (offer/answer/candidate): ≤ **200 / 5 min** (combined roles).
 - Friendly `429` JSON with `retryAfterSec` for UI backoff.
 
