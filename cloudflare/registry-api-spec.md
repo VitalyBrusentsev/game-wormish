@@ -60,7 +60,7 @@ This proposal relies on a **human‑friendly, short‑lived room & join codes**.
 
 ## Security & Access
 
-- **Room codes**: base36, 8 chars, no “list rooms” API. 200/404 behavior avoids oracle leakage, IP rate limit prevents enumeration attempts.
+- **Room codes**: 8 chars from an alphanumeric alphabet that excludes optically similar characters (`0/O`, `1/I/L`, `8/B`), no “list rooms” API. 200/404 behavior avoids oracle leakage, IP rate limit prevents enumeration attempts.
 - **Join codes**: 6 digits, **single‑use**, deleted on successful join.
 - **Access tokens**: opaque, 256‑bit crypto random, **room‑scoped**, **short‑lived** (no longer than room TTL), base64url-encoded, ~43chars
 - **Header**: all sensitive reads/writes require `X-Access-Token`.

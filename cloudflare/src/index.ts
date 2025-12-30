@@ -87,7 +87,7 @@ const MAX_SDP_BYTES = 20 * 1024;
 const MAX_CANDIDATE_BYTES = 1024;
 const MAX_CANDIDATES_PER_PEER = 40;
 const REQUIRED_SDP_LINES = ['v=', 'o=', 's=', 't=', 'm='];
-const BASE36_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const ROOM_CODE_ALPHABET = '2345679ACDEFGHJKMNPQRSTUVWXYZ';
 
 const DEFAULT_TTLS: Record<RoomStatus, number> = {
   open: 180,
@@ -474,7 +474,7 @@ function generateRoomCode(): string {
   const bytes = generateRandomBytes(ROOM_CODE_LENGTH);
   let result = '';
   for (let i = 0; i < bytes.length; i += 1) {
-    result += BASE36_ALPHABET[bytes[i] % BASE36_ALPHABET.length];
+    result += ROOM_CODE_ALPHABET[bytes[i] % ROOM_CODE_ALPHABET.length];
   }
   return result;
 }
