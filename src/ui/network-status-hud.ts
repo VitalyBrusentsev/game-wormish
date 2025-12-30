@@ -100,9 +100,11 @@ export function renderNetworkStatusHUD(
 
   // Waiting indicator (when remote turn is active)
   if (snapshot.bridge.networkReady && snapshot.bridge.waitingForRemoteSnapshot) {
+    const waitText =
+      snapshot.mode === "network-guest" ? "Waiting for host sync..." : "Waiting for remote sync...";
     drawText(
       ctx,
-      "Waiting for remote turn...",
+      waitText,
       x,
       currentY,
       "#FFFF00",

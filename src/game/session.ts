@@ -69,6 +69,7 @@ export interface TerrainSnapshot {
   width: number;
   height: number;
   horizontalPadding: number;
+  tileIndex: number;
   solid: number[];
   heightMap: number[];
 }
@@ -87,6 +88,18 @@ export interface GameSnapshot {
   wind: number;
   message: string | null;
   terrain: TerrainSnapshot;
+  teams: TeamSnapshot[];
+  state: GameStateSnapshot;
+  activeTeamIndex: number;
+  activeWormIndex: number;
+}
+
+export interface MatchInitSnapshot {
+  width: number;
+  height: number;
+  wind: number;
+  message: string | null;
+  terrain: Omit<TerrainSnapshot, "solid">;
   teams: TeamSnapshot[];
   state: GameStateSnapshot;
   activeTeamIndex: number;
@@ -418,7 +431,48 @@ export class GameSession {
         width: this.terrain.width,
         height: this.terrain.height,
         horizontalPadding: this.horizontalPadding,
+        tileIndex: this.terrain.tileIndex,
         solid: Array.from(this.terrain.solid),
+        heightMap: [...this.terrain.heightMap],
+      },
+      teams: this.teams.map((team) => ({
+        id: team.id,
+        worms: team.worms.map((worm) => ({
+          name: worm.name,
+          x: worm.x,
+          y: worm.y,
+          vx: worm.vx,
+          vy: worm.vy,
+          health: worm.health,
+          alive: worm.alive,
+          facing: worm.facing,
+          onGround: worm.onGround,
+          age: worm.age,
+        })),
+      })),
+      state: {
+        phase: this.state.phase,
+        weapon: this.state.weapon,
+        turnStartMs: this.state.turnStartMs,
+        charging: this.state.charging,
+        chargeStartMs: this.state.chargeStartMs,
+      },
+      activeTeamIndex: this.teamManager.activeTeamIndex,
+      activeWormIndex: this.teamManager.activeWormIndex,
+    };
+  }
+
+  toMatchInitSnapshot(): MatchInitSnapshot {
+    return {
+      width: this.width,
+      height: this.height,
+      wind: this.wind,
+      message: this.message,
+      terrain: {
+        width: this.terrain.width,
+        height: this.terrain.height,
+        horizontalPadding: this.horizontalPadding,
+        tileIndex: this.terrain.tileIndex,
         heightMap: [...this.terrain.heightMap],
       },
       teams: this.teams.map((team) => ({
@@ -463,12 +517,57 @@ export class GameSession {
       throw new Error("Snapshot terrain dimensions do not match");
     }
 
+    const tileIndex = Number.isFinite(snapshot.terrain.tileIndex)
+      ? snapshot.terrain.tileIndex
+      : 0;
+    this.terrain.setTileIndex(tileIndex);
     this.terrain.solid = new Uint8Array(snapshot.terrain.solid);
     this.terrain.heightMap = [...snapshot.terrain.heightMap];
     this.terrain.syncHeightMapFromSolid();
     this.terrain.repaint();
 
-    const restoredTeams: Team[] = snapshot.teams.map((teamData) => {
+    this.teamManager.teams = this.restoreTeams(snapshot.teams);
+    this.applySnapshotState(snapshot.state, snapshot.activeTeamIndex, snapshot.activeWormIndex);
+
+    this.projectiles = [];
+    this.particles = [];
+    this.aim = this.createDefaultAim();
+  }
+
+  loadMatchInitSnapshot(snapshot: MatchInitSnapshot) {
+    if (snapshot.width !== this.width || snapshot.height !== this.height) {
+      throw new Error("Snapshot dimensions do not match session dimensions");
+    }
+
+    this.wind = snapshot.wind;
+    this.message = snapshot.message;
+
+    if (
+      snapshot.terrain.width !== this.terrain.width ||
+      snapshot.terrain.height !== this.terrain.height
+    ) {
+      throw new Error("Snapshot terrain dimensions do not match");
+    }
+
+    const expectedTotalWidth =
+      snapshot.terrain.width + snapshot.terrain.horizontalPadding * 2;
+    if (snapshot.terrain.heightMap.length !== expectedTotalWidth) {
+      throw new Error("Snapshot terrain height map size mismatch");
+    }
+
+    this.terrain.setTileIndex(snapshot.terrain.tileIndex);
+    this.terrain.applyHeightMap(snapshot.terrain.heightMap);
+
+    this.teamManager.teams = this.restoreTeams(snapshot.teams);
+    this.applySnapshotState(snapshot.state, snapshot.activeTeamIndex, snapshot.activeWormIndex);
+
+    this.projectiles = [];
+    this.particles = [];
+    this.aim = this.createDefaultAim();
+  }
+
+  private restoreTeams(teams: TeamSnapshot[]): Team[] {
+    return teams.map((teamData) => {
       const team: Team = { id: teamData.id, worms: [] };
       for (const wormData of teamData.worms) {
         const worm = new Worm(wormData.x, wormData.y, teamData.id, wormData.name);
@@ -483,20 +582,20 @@ export class GameSession {
       }
       return team;
     });
+  }
 
-    this.teamManager.teams = restoredTeams;
-    this.teamManager.setCurrentTeamIndex(snapshot.activeTeamIndex);
-    this.teamManager.setActiveWormIndex(snapshot.activeWormIndex);
-
-    this.state.phase = snapshot.state.phase;
-    this.state.weapon = snapshot.state.weapon;
-    this.state.turnStartMs = snapshot.state.turnStartMs;
-    this.state.charging = snapshot.state.charging;
-    this.state.chargeStartMs = snapshot.state.chargeStartMs;
-
-    this.projectiles = [];
-    this.particles = [];
-    this.aim = this.createDefaultAim();
+  private applySnapshotState(
+    state: GameStateSnapshot,
+    activeTeamIndex: number,
+    activeWormIndex: number
+  ) {
+    this.teamManager.setCurrentTeamIndex(activeTeamIndex);
+    this.teamManager.setActiveWormIndex(activeWormIndex);
+    this.state.phase = state.phase;
+    this.state.weapon = state.weapon;
+    this.state.turnStartMs = state.turnStartMs;
+    this.state.charging = state.charging;
+    this.state.chargeStartMs = state.chargeStartMs;
   }
 
   finalizeTurn(): TurnResolution {

@@ -1,5 +1,5 @@
 import type { TeamId } from "../definitions";
-import type { GameSnapshot } from "../game/session";
+import type { MatchInitSnapshot } from "../game/session";
 import type { TurnResolution } from "../game/network/turn-payload";
 import {
   ConnectionState as WebRTCConnectionState,
@@ -44,7 +44,7 @@ export interface WebRTCConnectionInfo {
 export interface NetworkMatchBridgeState {
   networkReady: boolean;
   waitingForRemoteSnapshot: boolean;
-  pendingSnapshot: GameSnapshot | null;
+  pendingSnapshot: MatchInitSnapshot | null;
   pendingResolutions: TurnResolution[];
 }
 
@@ -259,7 +259,7 @@ export class NetworkSessionState {
     this.state.bridge.waitingForRemoteSnapshot = waiting;
   }
 
-  storePendingSnapshot(snapshot: GameSnapshot | null) {
+  storePendingSnapshot(snapshot: MatchInitSnapshot | null) {
     this.state.bridge.pendingSnapshot = snapshot;
   }
 

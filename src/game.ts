@@ -17,6 +17,7 @@ import type { Team } from "./game/team-manager";
 import {
   GameSession,
   type SessionCallbacks,
+  type MatchInitSnapshot,
 } from "./game/session";
 import {
   LocalTurnController,
@@ -24,6 +25,7 @@ import {
   type TurnDriver,
 } from "./game/turn-driver";
 import { NetworkSessionState } from "./network/session-state";
+import type { MatchInitMessage, NetworkMessage, PlayerHelloMessage } from "./game/network/messages";
 import { WebRTCRegistryClient } from "./webrtc/client";
 import { ConnectionState } from "./webrtc/types";
 import { RegistryClient } from "./webrtc/registry-client";
@@ -426,14 +428,29 @@ export class Game {
       this.networkState.updateConnectionLifecycle(state as any, Date.now());
       
       if (state === "connected") {
-        this.networkState.markNetworkReady(true);
         this.swapToNetworkControllers();
+        this.sendPlayerHello();
+        const snapshot = this.networkState.getSnapshot();
+        if (snapshot.mode === "network-host") {
+          this.networkState.setWaitingForSnapshot(false);
+          this.sendMatchInit();
+        } else if (snapshot.mode === "network-guest") {
+          this.networkState.setWaitingForSnapshot(true);
+        }
       }
       
       this.notifyNetworkStateChange();
     });
 
-    this.webrtcClient.onMessage((message: any) => {
+    this.webrtcClient.onMessage((message: NetworkMessage) => {
+      if (message.type === "match_init") {
+        this.handleMatchInit(message.payload.snapshot);
+        return;
+      }
+      if (message.type === "player_hello") {
+        this.handlePlayerHello(message);
+        return;
+      }
       if (message.type === "turn_resolution") {
         this.networkState.enqueueResolution(message.payload);
         this.deliverResolutionToController();
@@ -448,6 +465,74 @@ export class Game {
     this.webrtcClient.onDebugEvent((_event) => {
       // Store debug events if needed for diagnostics
     });
+  }
+
+  private sendMatchInit() {
+    if (!this.webrtcClient) return;
+    const message: MatchInitMessage = {
+      type: "match_init",
+      payload: {
+        snapshot: this.session.toMatchInitSnapshot(),
+      },
+    };
+    this.webrtcClient.sendMessage(message);
+  }
+
+  private handleMatchInit(snapshot: MatchInitSnapshot) {
+    const state = this.networkState.getSnapshot();
+    if (state.mode !== "network-guest") return;
+    this.networkState.storePendingSnapshot(snapshot);
+    this.applySnapshot(snapshot);
+    this.networkState.storePendingSnapshot(null);
+    this.networkState.setWaitingForSnapshot(false);
+    this.notifyNetworkStateChange();
+  }
+
+  private applySnapshot(snapshot: MatchInitSnapshot) {
+    if (snapshot.height !== this.height) {
+      this.resize(this.width, snapshot.height);
+    }
+    const nextSession = new GameSession(snapshot.width, this.height, {
+      horizontalPadding: snapshot.terrain.horizontalPadding,
+      callbacks: this.sessionCallbacks,
+    });
+    nextSession.loadMatchInitSnapshot(snapshot);
+    this.session = nextSession;
+    this.lastTurnStartMs = this.session.state.turnStartMs;
+    this.cameraX = this.clampCameraX(this.activeWorm.x - this.width / 2);
+    this.cameraTargetX = this.cameraX;
+    this.cameraVelocityX = 0;
+    this.turnControllers.clear();
+    const mode = this.networkState.getSnapshot().mode;
+    if (mode === "local") {
+      this.initializeTurnControllers();
+    } else {
+      this.swapToNetworkControllers();
+    }
+    this.updateCursor();
+  }
+
+  private sendPlayerHello() {
+    if (!this.webrtcClient) return;
+    const snapshot = this.networkState.getSnapshot();
+    if (snapshot.mode === "local") return;
+    const message: PlayerHelloMessage = {
+      type: "player_hello",
+      payload: {
+        name: snapshot.player.localName,
+        role: snapshot.mode === "network-host" ? "host" : "guest",
+      },
+    };
+    this.webrtcClient.sendMessage(message);
+  }
+
+  private handlePlayerHello(message: PlayerHelloMessage) {
+    const snapshot = this.networkState.getSnapshot();
+    if (snapshot.mode === "local") return;
+    if (message.payload.name) {
+      this.networkState.setRemoteName(message.payload.name);
+      this.notifyNetworkStateChange();
+    }
   }
 
   private swapToNetworkControllers() {
@@ -877,12 +962,16 @@ export class Game {
       this.helpOverlay.isVisible() ||
       this.startMenu.isVisible() ||
       this.networkDialog.isVisible();
+    const networkSnapshot = this.networkState.getSnapshot();
+    const waitingForSync =
+      networkSnapshot.mode !== "local" &&
+      networkSnapshot.bridge.waitingForRemoteSnapshot;
     this.updateTurnFocus();
     this.updateCamera(dt, !overlaysBlocking);
     const worldCameraOffsetX = -this.cameraX + this.cameraOffsetX;
     const worldCameraOffsetY = this.cameraOffsetY;
     this.session.updateActiveTurnDriver(dt, {
-      allowInput: !overlaysBlocking,
+      allowInput: !overlaysBlocking && !waitingForSync,
       input: this.input,
       camera: { offsetX: worldCameraOffsetX, offsetY: worldCameraOffsetY },
     });

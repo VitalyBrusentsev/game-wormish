@@ -8,6 +8,7 @@ export class Terrain {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   heightMap: number[];
+  tileIndex = 0;
   private tilePattern: CanvasPattern | null = null;
   private readonly horizontalPadding: number;
   private readonly totalWidth: number;
@@ -44,8 +45,7 @@ export class Terrain {
   generate(seed = this.random()) {
     // Select and start loading a seamless ground tile (bundled by Vite)
     const idx = Math.floor(this.random() * groundTiles.length);
-    const tileUrl = groundTiles[idx] ?? groundTiles[0]!;
-    this.loadTile(tileUrl);
+    this.setTileIndex(idx);
 
     // Generate height map using layered sines + jitter
     const base = this.height * this.randomRange(WORLD.minGround, WORLD.maxGround);
@@ -87,6 +87,20 @@ export class Terrain {
 
   syncHeightMapFromSolid() {
     this.updateHeightMapRange(0, this.totalWidth - 1, true);
+  }
+
+  applyHeightMap(heightMap: number[]) {
+    this.heightMap = [...heightMap];
+    for (let x = 0; x < this.totalWidth; x++) {
+      const raw = this.heightMap[x];
+      const groundY = Number.isFinite(raw ?? NaN)
+        ? Math.min(this.height, Math.max(0, Math.floor(raw!)))
+        : this.height;
+      for (let y = 0; y < this.height; y++) {
+        this.solid[y * this.totalWidth + x] = y >= groundY ? 1 : 0;
+      }
+    }
+    this.repaint();
   }
 
   private redrawVisual() {
@@ -149,6 +163,16 @@ export class Terrain {
       }
     };
     img.src = url;
+  }
+
+  setTileIndex(tileIndex: number) {
+    const count = groundTiles.length;
+    const normalized = Number.isFinite(tileIndex) ? Math.floor(tileIndex) : 0;
+    const bounded = count > 0 ? Math.max(0, Math.min(count - 1, normalized)) : 0;
+    this.tileIndex = bounded;
+    this.tilePattern = null;
+    const tileUrl = groundTiles[bounded] ?? groundTiles[0]!;
+    this.loadTile(tileUrl);
   }
 
   private randomRange(min: number, max: number) {

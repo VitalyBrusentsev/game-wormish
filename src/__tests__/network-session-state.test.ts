@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WeaponType } from "../definitions";
-import type { GameSnapshot } from "../game/session";
+import type { GameSnapshot, MatchInitSnapshot } from "../game/session";
 import type { TurnResolution } from "../game/network/turn-payload";
 import { NetworkSessionState } from "../network/session-state";
 import { ConnectionState as WebRTCConnectionState } from "../webrtc/types";
@@ -14,6 +14,7 @@ const createGameSnapshot = (): GameSnapshot => ({
     width: 320,
     height: 200,
     horizontalPadding: 0,
+    tileIndex: 0,
     solid: [],
     heightMap: [],
   },
@@ -31,6 +32,15 @@ const createGameSnapshot = (): GameSnapshot => ({
   activeTeamIndex: 0,
   activeWormIndex: 0,
 });
+
+const createMatchInitSnapshot = (): MatchInitSnapshot => {
+  const snapshot = createGameSnapshot();
+  const { solid, ...terrain } = snapshot.terrain;
+  return {
+    ...snapshot,
+    terrain,
+  };
+};
 
 const createTurnResolution = (): TurnResolution => ({
   actingTeamId: "Red",
@@ -135,7 +145,7 @@ describe("NetworkSessionState", () => {
 
   it("stores pending snapshots and resolutions safely", () => {
     const state = new NetworkSessionState();
-    const pending = createGameSnapshot();
+    const pending = createMatchInitSnapshot();
     state.storePendingSnapshot(pending);
     state.enqueueResolution(createTurnResolution());
     state.enqueueResolution(createTurnResolution());
