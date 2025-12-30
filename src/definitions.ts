@@ -36,6 +36,7 @@ export const WORLD = {
   jumpSpeed: 300, // px/s
   wormRadius: 12, // px
   projectileRadius: 6,
+  groundWidth: 2500,
   minGround: 0.5, // fraction of height for min ground level
   maxGround: 0.8, // fraction of height for max ground level
 };

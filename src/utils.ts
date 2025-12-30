@@ -10,6 +10,7 @@ export class Input {
   mouseDown = false;
   mouseJustPressed = false;
   mouseJustReleased = false;
+  mouseInside = false;
 
   private readonly keyDownHandler = (e: KeyboardEvent) => {
     if (!this.keysDown.has(e.code)) {
@@ -41,7 +42,16 @@ export class Input {
       const rect = canvas.getBoundingClientRect();
       this.mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
       this.mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+      this.mouseInside = true;
     }
+  };
+
+  private readonly mouseEnterHandler = () => {
+    this.mouseInside = true;
+  };
+
+  private readonly mouseLeaveHandler = () => {
+    this.mouseInside = false;
   };
 
   private readonly mouseDownHandler = (e: MouseEvent) => {
@@ -67,6 +77,7 @@ export class Input {
   private readonly blurHandler = () => {
     this.keysDown.clear();
     this.mouseDown = false;
+    this.mouseInside = false;
   };
 
   attach(canvas: HTMLCanvasElement) {
@@ -79,6 +90,8 @@ export class Input {
     window.addEventListener("mouseup", this.mouseUpHandler);
     window.addEventListener("blur", this.blurHandler);
     canvas.addEventListener("mousemove", this.mouseMoveHandler);
+    canvas.addEventListener("mouseenter", this.mouseEnterHandler);
+    canvas.addEventListener("mouseleave", this.mouseLeaveHandler);
     canvas.addEventListener("mousedown", this.mouseDownHandler);
     canvas.addEventListener("touchstart", this.touchStartHandler);
     canvas.addEventListener("contextmenu", this.contextMenuHandler);
@@ -92,6 +105,8 @@ export class Input {
     window.removeEventListener("blur", this.blurHandler);
     if (canvas) {
       canvas.removeEventListener("mousemove", this.mouseMoveHandler);
+      canvas.removeEventListener("mouseenter", this.mouseEnterHandler);
+      canvas.removeEventListener("mouseleave", this.mouseLeaveHandler);
       canvas.removeEventListener("mousedown", this.mouseDownHandler);
       canvas.removeEventListener("touchstart", this.touchStartHandler);
       canvas.removeEventListener("contextmenu", this.contextMenuHandler);
@@ -102,6 +117,7 @@ export class Input {
     this.mouseDown = false;
     this.mouseJustPressed = false;
     this.mouseJustReleased = false;
+    this.mouseInside = false;
   }
 
   update() {

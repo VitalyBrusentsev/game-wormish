@@ -39,6 +39,7 @@ Comments should be kept to a minimum. Prefer code readability and clean structur
 - Entities under [src/entities/](src/entities/) are mutable classes updated each frame. Prefer methods on those classes over sprawling helper functions.
 - Rendering helpers in [src/rendering/](src/rendering/) should stay pure with respect to game state: pass everything needed as parameters and keep DOM interactions centralized in `Game`.
 - Input glue and overlays live under [src/ui/](src/ui/); keep UI-specific state there.
+- Camera behavior and constraints are documented in [camera.md](camera.md).
 
 ## Unit tests
 

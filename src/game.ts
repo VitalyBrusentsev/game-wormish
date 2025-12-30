@@ -1,5 +1,5 @@
 import type { TeamId, PredictedPoint } from "./definitions";
-import { GAMEPLAY, WeaponType, nowMs, COLORS } from "./definitions";
+import { GAMEPLAY, WeaponType, nowMs, COLORS, WORLD, clamp } from "./definitions";
 import { Input, drawText } from "./utils";
 import type { Worm } from "./entities";
 import { HelpOverlay } from "./ui/help-overlay";
@@ -58,6 +58,10 @@ export class Game {
   private cameraShakeTime = 0;
   private cameraShakeDuration = 0;
   private cameraShakeMagnitude = 0;
+  private cameraX = 0;
+  private cameraVelocityX = 0;
+  private cameraTargetX = 0;
+  private lastTurnStartMs = -1;
 
   private readonly frameTimes: number[] = [];
   private frameTimeSum = 0;
@@ -102,12 +106,16 @@ export class Game {
 
     this.networkState = new NetworkSessionState();
 
-    this.session = new GameSession(width, height, {
-      horizontalPadding: this.cameraPadding,
+    const groundWidth = WORLD.groundWidth;
+    this.session = new GameSession(groundWidth, height, {
+      horizontalPadding: 0,
       callbacks: this.sessionCallbacks,
     });
 
     this.initializeTurnControllers();
+    this.cameraX = this.clampCameraX(this.activeWorm.x - this.width / 2);
+    this.cameraTargetX = this.cameraX;
+    this.lastTurnStartMs = this.session.state.turnStartMs;
 
     this.helpOverlay = new HelpOverlay({
       onClose: (pausedMs, reason) => this.handleHelpClosed(pausedMs, reason),
@@ -207,6 +215,20 @@ export class Game {
     this.canvas.addEventListener("pointerdown", this.pointerDownFocusHandler);
     this.canvas.addEventListener("mousedown", this.mouseDownFocusHandler);
     this.canvas.addEventListener("touchstart", this.touchStartFocusHandler);
+  }
+
+  resize(width: number, height: number) {
+    const nextWidth = width | 0;
+    const nextHeight = height | 0;
+    if (nextWidth === this.width && nextHeight === this.height) return;
+    const centerX = this.cameraX + this.width / 2;
+    this.width = nextWidth;
+    this.height = nextHeight;
+    this.canvas.width = this.width;
+    this.canvas.height = this.height;
+    this.cameraX = this.clampCameraX(centerX - this.width / 2);
+    this.cameraTargetX = this.cameraX;
+    this.cameraVelocityX = 0;
   }
 
   start() {
@@ -605,6 +627,97 @@ export class Game {
     this.cameraOffsetY = Math.sin(angle) * magnitude;
   }
 
+  private getCameraBounds() {
+    const groundWidth = this.session.width;
+    const viewWidth = this.width;
+    const minVisible = Math.min(groundWidth * 0.5, viewWidth);
+    const minX = minVisible - viewWidth;
+    const maxX = groundWidth - minVisible;
+    return { minX, maxX };
+  }
+
+  private clampCameraX(x: number) {
+    const { minX, maxX } = this.getCameraBounds();
+    return clamp(x, minX, maxX);
+  }
+
+  private getCameraMargin() {
+    const base = Math.min(240, Math.max(120, this.width * 0.2));
+    return Math.min(base, this.width * 0.45);
+  }
+
+  private getEdgeScrollDelta(dt: number, bounds: { minX: number; maxX: number }) {
+    if (!this.input.mouseInside) return 0;
+    const threshold = Math.min(160, Math.max(80, this.width * 0.15));
+    if (threshold <= 0) return 0;
+    const maxSpeed = 520;
+    const mouseX = this.input.mouseX;
+    if (mouseX <= threshold && this.cameraX > bounds.minX + 0.5) {
+      const t = (threshold - mouseX) / threshold;
+      return -maxSpeed * t * dt;
+    }
+    if (mouseX >= this.width - threshold && this.cameraX < bounds.maxX - 0.5) {
+      const t = (mouseX - (this.width - threshold)) / threshold;
+      return maxSpeed * t * dt;
+    }
+    return 0;
+  }
+
+  private updateCamera(dt: number, allowEdgeScroll: boolean) {
+    const bounds = this.getCameraBounds();
+    let targetX = this.cameraTargetX;
+
+    if (allowEdgeScroll) {
+      const edgeDelta = this.getEdgeScrollDelta(dt, bounds);
+      if (edgeDelta !== 0) {
+        targetX += edgeDelta;
+      }
+    }
+
+    targetX = clamp(targetX, bounds.minX, bounds.maxX);
+    this.cameraTargetX = targetX;
+
+    const stiffness = 18;
+    const damping = 10;
+    const delta = this.cameraTargetX - this.cameraX;
+    this.cameraVelocityX += delta * stiffness * dt;
+    const decay = Math.exp(-damping * dt);
+    this.cameraVelocityX *= decay;
+    this.cameraX += this.cameraVelocityX * dt;
+
+    const clampedX = clamp(this.cameraX, bounds.minX, bounds.maxX);
+    if (clampedX !== this.cameraX) {
+      this.cameraX = clampedX;
+      this.cameraVelocityX = 0;
+    }
+  }
+
+  private focusCameraOnActiveWorm() {
+    const margin = this.getCameraMargin();
+    const bounds = this.getCameraBounds();
+    const wormX = this.activeWorm.x;
+    const leftEdge = this.cameraX + margin;
+    const rightEdge = this.cameraX + this.width - margin;
+    let targetX = this.cameraTargetX;
+
+    if (wormX < leftEdge) {
+      targetX = wormX - margin;
+    } else if (wormX > rightEdge) {
+      targetX = wormX - (this.width - margin);
+    } else {
+      return;
+    }
+
+    this.cameraTargetX = clamp(targetX, bounds.minX, bounds.maxX);
+  }
+
+  private updateTurnFocus() {
+    const turnStartMs = this.session.state.turnStartMs;
+    if (turnStartMs === this.lastTurnStartMs) return;
+    this.lastTurnStartMs = turnStartMs;
+    this.focusCameraOnActiveWorm();
+  }
+
   private updateCursor() {
     if (this.helpOverlay.isVisible() || this.startMenu.isVisible()) {
       this.canvas.style.cursor = "default";
@@ -679,6 +792,10 @@ export class Game {
     ctx.save();
     ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
     renderBackground(ctx, this.width, this.height, this.cameraPadding);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(-this.cameraX + this.cameraOffsetX, this.cameraOffsetY);
     this.session.terrain.render(ctx);
 
     for (const particle of this.session.particles) particle.render(ctx);
@@ -707,7 +824,10 @@ export class Game {
       aim: this.getAimInfo(),
       predictedPath: this.predictPath(),
     });
+    ctx.restore();
 
+    ctx.save();
+    ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
     renderHUD({
       ctx,
       width: this.width,
@@ -754,11 +874,17 @@ export class Game {
 
     this.processInput();
     const overlaysBlocking =
-      this.helpOverlay.isVisible() || this.startMenu.isVisible();
+      this.helpOverlay.isVisible() ||
+      this.startMenu.isVisible() ||
+      this.networkDialog.isVisible();
+    this.updateTurnFocus();
+    this.updateCamera(dt, !overlaysBlocking);
+    const worldCameraOffsetX = -this.cameraX + this.cameraOffsetX;
+    const worldCameraOffsetY = this.cameraOffsetY;
     this.session.updateActiveTurnDriver(dt, {
       allowInput: !overlaysBlocking,
       input: this.input,
-      camera: { offsetX: this.cameraOffsetX, offsetY: this.cameraOffsetY },
+      camera: { offsetX: worldCameraOffsetX, offsetY: worldCameraOffsetY },
     });
     if (!overlaysBlocking) {
       this.session.update(dt);
