@@ -1,22 +1,30 @@
 # Networked Gameplay Design Summary
 
-## Architecture separation
-- `GameSession` ([session.ts](src/game/session.ts)) encapsulates the deterministic simulation (terrain, teams, turn flow, projectiles, particles, wind) while the browser-facing `Game` class delegates to it for input wiring, rendering, and DOM concerns. This keeps networking concerns focused on the session while preserving the existing hotseat loop.
+## Responsibilities
+- `Game` ([game.ts](src/game.ts)) owns WebRTC wiring + the frame loop; it forwards local turn commands/resolutions onto the data channel and routes incoming messages to the correct turn controller.
+- `GameSession` ([session.ts](src/game/session.ts)) owns deterministic simulation + turn bookkeeping; it exposes snapshots, accepts `TurnCommand`s, and can apply an authoritative `TurnResolution`.
+- `TurnDriver`s ([turn-driver.ts](src/game/turn-driver.ts)) decide whether the active team is locally driven or remote-driven (spectator/passive) for the current turn.
 
-## Snapshot and restoration workflow
-- `GameSession` can serialize the full match via `toSnapshot`, capturing terrain data, team rosters, worm state, and turn metadata for sharing between peers.
-- `loadSnapshot` validates dimensions, reinstates terrain masks, repaints the canvas to keep visuals aligned with collisions, and rebuilds teams before clearing transient projectiles/particles.
-- Deterministic seeds and test doubles ensure snapshots remain stable; regression tests assert terrain rebuilds and serialized data round-trip correctly.
+## Message protocol (data channel)
+- `match_init` carries a `MatchInitSnapshot` (terrain heightmap + tile selection, teams/worms, `turnIndex`, active indices, turn state) to bootstrap or fully resync a match.
+- `turn_command` carries `{ turnIndex, teamId, command }` for live remote playback during the active team’s turn.
+- `turn_resolution` is the authoritative end-of-turn sync: terrain carve operations + worm health changes + `result` (`NetworkTurnSnapshot`) describing the post-turn state.
+- `match_restart_request` lets a guest request a reset; the host performs the restart and re-sends `match_init`.
+- `player_hello` is metadata (names + host/guest role).
 
-## Turn capture and authoritative resolutions
-- Each turn initializes a fresh `TurnLog`, recording the acting team, wind baseline, fired weapon commands, projectile lifecycle events, terrain carve operations, and worm health changes.
-- When the turn ends, `buildTurnResolution` packages a deep-cloned log plus the resulting snapshot to produce an authoritative payload. `finalizeTurn` exposes the payload locally, while remote peers ingest it through `applyTurnResolution`, which runs extensive validation (team/worm identities, terrain sizes, world bounds) before mutating state.
-- Payload types live under `src/game/network/turn-payload.ts`, defining command/event schemas that can be streamed or sent in bulk after the turn completes.
+## Turn sync model
+- Each turn is identified by a monotonically increasing `turnIndex` (included in snapshots, commands, and resolutions) and validated on receipt.
+- The active peer streams `TurnCommand`s (aim/move/weapon/charge/fire). Aim/move are throttled (`src/game/network/aim-throttle.ts`, `src/game/network/move-throttle.ts`) to reduce message volume while keeping playback smooth.
+- The passive peer applies streamed commands for animation/projectiles but suppresses irreversible sim effects while waiting for the authoritative resolution (`waitingForRemoteResolution` gates damage, terrain carve, deaths, auto-advance, victory).
+- When the turn ends, the active peer sends `TurnResolution`. The receiver validates (turn/team/wind/bounds), applies terrain + health deltas, then loads the authoritative `result` snapshot which already represents the next turn and reconfigures turn drivers.
 
-## Turn control orchestration
-- `GameSession` supports pluggable `TurnDriver`s (`src/game/turn-driver.ts`) per team, allowing local hotseat play, remote spectators, or future AI controllers to coexist. A `LocalTurnController` forwards input when the turn is local, while `RemoteTurnController` queues incoming resolutions and applies them once available.
+## Time model
+- Commands use `atMs` relative to the local `turnStartMs` (not wall-clock synchronization).
+- Receivers localize timing on snapshot/resolution load (`handleMatchInit`, `applyTurnResolution(..., { localizeTime: true })`) so UI timers and charge logic stay consistent across machines.
 
-## Known limitations / next steps
-- `TurnLog` does not currently capture worm locomotion (walks, jumps) or passive deaths, so remote clients must rely on the final snapshot rather than replaying movement moment-to-moment. Consider extending the log if real-time remote playback is required.
-- `startedAtMs` is derived from each client’s local clock, causing validation failures when ingesting remote payloads. Replacing it with a deterministic turn counter or relative timestamp would make resolutions portable across machines.
-- Network streaming of turn events is not yet implemented; once payloads are authoritative, we can forward the same records incrementally to approximate real-time remote playback.
+## Debugging & observability
+- `NetworkSessionState` keeps a capped in-memory log of recent send/recv messages; toggle with `I` and render via `src/ui/network-log-hud.ts`.
+- `TurnResolution` intentionally ships only counts for recorded commands/projectile events; authoritative state transfer is via `terrainOperations`, `wormHealth`, and the `result` snapshot.
+
+## WebRTC connection behavior
+- `RoomManager` debounces transient `disconnected` states before surfacing them, reducing UI flapping during brief network hiccups.
