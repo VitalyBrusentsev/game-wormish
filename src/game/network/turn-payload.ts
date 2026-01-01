@@ -123,8 +123,8 @@ export interface TurnResolution {
   windAfter: number;
   startedAtMs: number;
   completedAtMs: number;
-  commands: TurnCommand[];
-  projectileEvents: TurnEvent[];
+  commandCount: number;
+  projectileEventCount: number;
   terrainOperations: TerrainOperation[];
   wormHealth: WormHealthChange[];
   result: NetworkTurnSnapshot;

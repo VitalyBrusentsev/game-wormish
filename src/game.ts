@@ -34,6 +34,8 @@ import type {
   TurnCommandMessage,
   TurnResolutionMessage,
 } from "./game/network/messages";
+import { applyAimThrottle, type AimThrottleState } from "./game/network/aim-throttle";
+import { applyMoveThrottle, flushMoveThrottle, type MoveThrottleState } from "./game/network/move-throttle";
 import { WebRTCRegistryClient } from "./webrtc/client";
 import { ConnectionState } from "./webrtc/types";
 import { RegistryClient } from "./webrtc/registry-client";
@@ -95,6 +97,8 @@ export class Game {
   };
 
   private readonly turnControllers = new Map<TeamId, TurnDriver>();
+  private aimThrottleState: AimThrottleState | null = null;
+  private moveThrottleState: MoveThrottleState | null = null;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -296,6 +300,71 @@ export class Game {
     const snapshot = this.networkState.getSnapshot();
     if (snapshot.mode === "local") return;
     if (snapshot.connection.lifecycle !== "connected") return;
+
+    if (command.type !== "aim" && command.type !== "move") {
+      const flushed = flushMoveThrottle({ state: this.moveThrottleState, nowMs: nowMs() });
+      this.moveThrottleState = flushed.nextState;
+      for (const movement of flushed.toSend) {
+        const message: TurnCommandMessage = {
+          type: "turn_command",
+          payload: {
+            turnIndex: meta.turnIndex,
+            teamId: meta.teamId,
+            command: movement,
+          },
+        };
+        this.sendNetworkMessage(message);
+      }
+    }
+
+    if (command.type === "aim") {
+      const worm = this.session.activeWorm;
+      const decision = applyAimThrottle({
+        state: this.aimThrottleState,
+        config: {
+          minIntervalMs: 60,
+          maxIntervalMs: 250,
+          diffThreshold: 0.2,
+          angleThresholdRad: 0.2,
+        },
+        nowMs: nowMs(),
+        turnIndex: meta.turnIndex,
+        teamId: meta.teamId,
+        wormX: worm.x,
+        wormY: worm.y,
+        aim: command.aim,
+      });
+      this.aimThrottleState = decision.nextState;
+      if (!decision.shouldSend) return;
+    }
+
+    if (command.type === "move") {
+      const decision = applyMoveThrottle({
+        state: this.moveThrottleState,
+        config: {
+          minIntervalMs: 60,
+          suppressIdle: true,
+        },
+        nowMs: nowMs(),
+        turnIndex: meta.turnIndex,
+        teamId: meta.teamId,
+        movement: command,
+      });
+      this.moveThrottleState = decision.nextState;
+      if (decision.toSend.length === 0) return;
+      for (const movement of decision.toSend) {
+        const message: TurnCommandMessage = {
+          type: "turn_command",
+          payload: {
+            turnIndex: meta.turnIndex,
+            teamId: meta.teamId,
+            command: movement,
+          },
+        };
+        this.sendNetworkMessage(message);
+      }
+      return;
+    }
 
     const message: TurnCommandMessage = {
       type: "turn_command",

@@ -912,10 +912,27 @@ export class GameSession {
     const finalized = this.applyCommand(command);
     if (!finalized) return;
     this.turnLog.commands.push(finalized);
-    this.callbacks.onTurnCommand?.(this.cloneCommand(finalized), {
+    this.callbacks.onTurnCommand?.(this.cloneTurnCommand(finalized), {
       turnIndex: this.turnIndex,
       teamId: this.activeTeam.id,
     });
+  }
+
+  private cloneTurnCommand(command: TurnCommand): TurnCommand {
+    if (command.type === "fire-charged-weapon") {
+      return {
+        ...command,
+        aim: { ...command.aim },
+        projectileIds: [...command.projectileIds],
+      };
+    }
+    if (command.type === "aim") {
+      return {
+        ...command,
+        aim: { ...command.aim },
+      };
+    }
+    return { ...command };
   }
 
   private applyCommand(command: TurnCommand): TurnCommand | null {
@@ -1091,23 +1108,6 @@ export class GameSession {
     });
   }
 
-  private cloneCommand(command: TurnCommand): TurnCommand {
-    if (command.type === "fire-charged-weapon") {
-      return {
-        ...command,
-        aim: { ...command.aim },
-        projectileIds: [...command.projectileIds],
-      };
-    }
-    if (command.type === "aim") {
-      return {
-        ...command,
-        aim: { ...command.aim },
-      };
-    }
-    return { ...command };
-  }
-
   private buildTurnResolution(
     log: TurnLog,
     snapshot: NetworkTurnSnapshot,
@@ -1121,22 +1121,6 @@ export class GameSession {
       log.startedAtMs === 0
     )
       return null;
-
-    const commands = log.commands.map((command) => this.cloneCommand(command));
-
-    const projectileEvents = log.projectileEvents.map((event) => {
-      if (event.type === "projectile-spawned") {
-        return {
-          ...event,
-          position: { ...event.position },
-          velocity: { ...event.velocity },
-        };
-      }
-      return {
-        ...event,
-        position: { ...event.position },
-      };
-    });
 
     const terrainOperations = log.terrainOperations.map((operation) => ({
       ...operation,
@@ -1155,8 +1139,8 @@ export class GameSession {
       windAfter: snapshot.wind,
       startedAtMs: log.startedAtMs,
       completedAtMs,
-      commands,
-      projectileEvents,
+      commandCount: log.commands.length,
+      projectileEventCount: log.projectileEvents.length,
       terrainOperations,
       wormHealth,
       result: snapshot,

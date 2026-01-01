@@ -215,15 +215,8 @@ describe("GameSession turn logging", () => {
 
     expect(resolution.startedAtMs).toBe(previousLog.startedAtMs);
     expect(resolution.windAtStart).toBe(previousLog.windAtStart);
-    expect(resolution.commands).toEqual(previousLog.commands);
-
-    expect(resolution.commands[1]).not.toBe(previousLog.commands[1]);
-    const aimCommand = resolution.commands[1] as { type: string; aim: { targetX: number } };
-    expect(aimCommand.type).toBe("aim");
-    (previousLog.commands[1] as { aim: { targetX: number } }).aim.targetX += 10;
-    expect(aimCommand.aim.targetX).not.toBe(
-      (previousLog.commands[1] as { aim: { targetX: number } }).aim.targetX
-    );
+    expect(resolution.commandCount).toBe(previousLog.commands.length);
+    expect(resolution.projectileEventCount).toBe(previousLog.projectileEvents.length);
 
     expect((sessionAny.turnLog as { commands: unknown[] }).commands).toHaveLength(0);
   });
@@ -260,8 +253,7 @@ describe("GameSession turn logging", () => {
     session.nextTurn();
     const resolution = session.finalizeTurn();
 
-    const resolutionCommand = resolution.commands[0] as { projectileIds: number[] };
-    const resolutionSpawns = resolution.projectileEvents.filter((event) => event.type === "projectile-spawned");
-    expect(resolutionCommand.projectileIds).toEqual(resolutionSpawns.map((event) => (event as any).id));
+    expect(resolution.commandCount).toBe(log.commands.length);
+    expect(resolution.projectileEventCount).toBe(log.projectileEvents.length);
   });
 });

@@ -377,11 +377,13 @@ const formatNetworkMessage = (message: NetworkMessage): string => {
     }
     case "turn_resolution": {
       const r = message.payload;
+      const commandCount = r.commandCount;
+      const eventCount = r.projectileEventCount;
       return `turn_resolution#${r.turnIndex} ${r.actingTeamId} -> turn=${
         r.result.turnIndex
       } wind=${r.windAtStart.toFixed(1)}→${r.windAfter.toFixed(1)} cmds=${
-        r.commands.length
-      } events=${r.projectileEvents.length} terrain=${r.terrainOperations.length} health=${
+        commandCount
+      } events=${eventCount} terrain=${r.terrainOperations.length} health=${
         r.wormHealth.length
       }`;
     }
