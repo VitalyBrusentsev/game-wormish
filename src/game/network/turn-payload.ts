@@ -1,6 +1,6 @@
 import type { TeamId } from "../../definitions";
 import type { WeaponType } from "../../definitions";
-import type { GameSnapshot } from "../session";
+import type { NetworkTurnSnapshot } from "../session";
 
 export interface TurnCommandFireChargedWeapon {
   type: "fire-charged-weapon";
@@ -115,6 +115,7 @@ export interface WormHealthChange {
 }
 
 export interface TurnResolution {
+  turnIndex: number;
   actingTeamId: TeamId;
   actingTeamIndex: number;
   actingWormIndex: number;
@@ -126,5 +127,5 @@ export interface TurnResolution {
   projectileEvents: TurnEvent[];
   terrainOperations: TerrainOperation[];
   wormHealth: WormHealthChange[];
-  snapshot: GameSnapshot;
+  result: NetworkTurnSnapshot;
 }

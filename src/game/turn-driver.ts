@@ -1,5 +1,5 @@
 import type { Input } from "../utils";
-import type { TurnResolution } from "./network/turn-payload";
+import type { TurnCommand, TurnResolution } from "./network/turn-payload";
 import type { GameSession } from "./session";
 import type { Team } from "./team-manager";
 
@@ -55,6 +55,7 @@ export class RemoteTurnController implements TurnDriver {
 
   private awaitingResolution = false;
   private pendingResolutions: TurnResolution[] = [];
+  private pendingCommands: Array<{ turnIndex: number; command: TurnCommand }> = [];
   private context: TurnContext | null = null;
 
   beginTurn(context: TurnContext) {
@@ -71,6 +72,16 @@ export class RemoteTurnController implements TurnDriver {
     if (!context.session.isWaitingForRemoteResolution()) {
       this.clearPending();
       return;
+    }
+
+    while (this.pendingCommands.length > 0) {
+      const next = this.pendingCommands[0]!;
+      if (next.turnIndex !== context.session.getTurnIndex()) {
+        this.pendingCommands.shift();
+        continue;
+      }
+      this.pendingCommands.shift();
+      context.session.applyRemoteTurnCommand(next.command);
     }
 
     const resolution = this.pendingResolutions.shift();
@@ -91,17 +102,31 @@ export class RemoteTurnController implements TurnDriver {
     this.pendingResolutions.push(resolution);
   }
 
+  receiveCommand(turnIndex: number, command: TurnCommand) {
+    if (
+      this.context &&
+      this.awaitingResolution &&
+      this.context.session.isWaitingForRemoteResolution() &&
+      this.context.session.getTurnIndex() === turnIndex
+    ) {
+      this.context.session.applyRemoteTurnCommand(command);
+      return;
+    }
+    this.pendingCommands.push({ turnIndex, command });
+  }
+
   private applyResolution(context: TurnContext, resolution: TurnResolution) {
     this.awaitingResolution = false;
     this.context = null;
     this.pendingResolutions.length = 0;
-    context.session.applyTurnResolution(resolution);
-    context.session.nextTurn();
+    this.pendingCommands.length = 0;
+    context.session.applyTurnResolution(resolution, { localizeTime: true });
   }
 
   private clearPending() {
     this.awaitingResolution = false;
     this.context = null;
     this.pendingResolutions.length = 0;
+    this.pendingCommands.length = 0;
   }
 }

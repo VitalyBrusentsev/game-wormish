@@ -56,6 +56,10 @@ const buildSnapshot = (overrides: SnapshotOverride): NetworkSessionStateSnapshot
       pendingSnapshot: null,
       pendingResolutions: [],
     },
+    debug: {
+      showLog: false,
+      recentMessages: [],
+    },
   };
 
   return snapshot;

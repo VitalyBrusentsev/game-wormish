@@ -123,7 +123,11 @@ describe("RoomManager connection state handling", () => {
 
     const handler = await startRoomManager();
 
+    vi.useFakeTimers();
+    dataChannel.readyState = "closed";
     handler("disconnected");
+    vi.advanceTimersByTime(2600);
+    vi.useRealTimers();
 
     expect(stateChanges).toContain(ConnectionState.DISCONNECTED);
     expect(stateChanges).not.toContain(ConnectionState.ERROR);

@@ -13,6 +13,7 @@ import {
   type AimInfo,
 } from "./rendering/game-rendering";
 import { renderNetworkStatusHUD } from "./ui/network-status-hud";
+import { renderNetworkLogHUD } from "./ui/network-log-hud";
 import type { Team } from "./game/team-manager";
 import {
   GameSession,
@@ -25,7 +26,14 @@ import {
   type TurnDriver,
 } from "./game/turn-driver";
 import { NetworkSessionState } from "./network/session-state";
-import type { MatchInitMessage, NetworkMessage, PlayerHelloMessage } from "./game/network/messages";
+import type { TurnCommand } from "./game/network/turn-payload";
+import type {
+  MatchInitMessage,
+  NetworkMessage,
+  PlayerHelloMessage,
+  TurnCommandMessage,
+  TurnResolutionMessage,
+} from "./game/network/messages";
 import { WebRTCRegistryClient } from "./webrtc/client";
 import { ConnectionState } from "./webrtc/types";
 import { RegistryClient } from "./webrtc/registry-client";
@@ -83,6 +91,7 @@ export class Game {
   private readonly sessionCallbacks: SessionCallbacks = {
     onExplosion: (info) => this.handleSessionExplosion(info),
     onRestart: () => this.resetCameraShake(),
+    onTurnCommand: (command, meta) => this.handleLocalTurnCommand(command, meta),
   };
 
   private readonly turnControllers = new Map<TeamId, TurnDriver>();
@@ -276,6 +285,44 @@ export class Game {
     }
   }
 
+  private sendNetworkMessage(message: NetworkMessage) {
+    if (!this.webrtcClient) return;
+    this.networkState.appendNetworkMessageLog({ direction: "send", message });
+    this.webrtcClient.sendMessage(message);
+  }
+
+  private handleLocalTurnCommand(command: TurnCommand, meta: { turnIndex: number; teamId: TeamId }) {
+    if (!this.webrtcClient) return;
+    const snapshot = this.networkState.getSnapshot();
+    if (snapshot.mode === "local") return;
+    if (snapshot.connection.lifecycle !== "connected") return;
+
+    const message: TurnCommandMessage = {
+      type: "turn_command",
+      payload: {
+        turnIndex: meta.turnIndex,
+        teamId: meta.teamId,
+        command,
+      },
+    };
+    this.sendNetworkMessage(message);
+  }
+
+  private flushTurnResolution() {
+    if (!this.webrtcClient) return;
+    const snapshot = this.networkState.getSnapshot();
+    if (snapshot.mode === "local") return;
+    if (snapshot.connection.lifecycle !== "connected") return;
+
+    const resolution = this.session.consumeTurnResolution();
+    if (!resolution) return;
+    const message: TurnResolutionMessage = {
+      type: "turn_resolution",
+      payload: resolution,
+    };
+    this.sendNetworkMessage(message);
+  }
+
   async createHostRoom(config: { registryUrl: string; playerName: string }): Promise<void> {
     this.networkState.setMode("network-host");
     this.networkState.setPlayerNames(config.playerName);
@@ -443,12 +490,21 @@ export class Game {
     });
 
     this.webrtcClient.onMessage((message: NetworkMessage) => {
+      this.networkState.appendNetworkMessageLog({ direction: "recv", message });
       if (message.type === "match_init") {
         this.handleMatchInit(message.payload.snapshot);
         return;
       }
       if (message.type === "player_hello") {
         this.handlePlayerHello(message);
+        return;
+      }
+      if (message.type === "match_restart_request") {
+        this.handleRestartRequest();
+        return;
+      }
+      if (message.type === "turn_command") {
+        this.deliverCommandToController(message.payload);
         return;
       }
       if (message.type === "turn_resolution") {
@@ -475,7 +531,23 @@ export class Game {
         snapshot: this.session.toMatchInitSnapshot(),
       },
     };
-    this.webrtcClient.sendMessage(message);
+    this.sendNetworkMessage(message);
+  }
+
+  private handleRestartRequest() {
+    const snapshot = this.networkState.getSnapshot();
+    if (snapshot.mode !== "network-host") return;
+    this.restartNetworkMatchAsHost();
+  }
+
+  private restartNetworkMatchAsHost() {
+    this.session.restart({ startingTeamIndex: 0 });
+    this.lastTurnStartMs = this.session.state.turnStartMs;
+    this.cameraX = this.clampCameraX(this.activeWorm.x - this.width / 2);
+    this.cameraTargetX = this.cameraX;
+    this.cameraVelocityX = 0;
+    this.updateCursor();
+    this.sendMatchInit();
   }
 
   private handleMatchInit(snapshot: MatchInitSnapshot) {
@@ -497,6 +569,10 @@ export class Game {
       callbacks: this.sessionCallbacks,
     });
     nextSession.loadMatchInitSnapshot(snapshot);
+    nextSession.state.turnStartMs = nowMs();
+    if (nextSession.state.charging) {
+      nextSession.state.chargeStartMs = nextSession.state.turnStartMs;
+    }
     this.session = nextSession;
     this.lastTurnStartMs = this.session.state.turnStartMs;
     this.cameraX = this.clampCameraX(this.activeWorm.x - this.width / 2);
@@ -523,7 +599,7 @@ export class Game {
         role: snapshot.mode === "network-host" ? "host" : "guest",
       },
     };
-    this.webrtcClient.sendMessage(message);
+    this.sendNetworkMessage(message);
   }
 
   private handlePlayerHello(message: PlayerHelloMessage) {
@@ -550,16 +626,22 @@ export class Game {
   }
 
   private deliverResolutionToController() {
-    const snapshot = this.networkState.getSnapshot();
-    const remoteTeamId = snapshot.player.remoteTeamId;
-    if (!remoteTeamId) return;
-
-    const controller = this.turnControllers.get(remoteTeamId);
+    const resolution = this.networkState.dequeueResolution();
+    if (!resolution) return;
+    const controller = this.turnControllers.get(resolution.actingTeamId);
     if (controller && controller.type === "remote") {
-      const resolution = this.networkState.dequeueResolution();
-      if (resolution) {
-        (controller as RemoteTurnController).receiveResolution(resolution);
-      }
+      (controller as RemoteTurnController).receiveResolution(resolution);
+      return;
+    }
+    this.networkState.enqueueResolution(resolution);
+  }
+
+  private deliverCommandToController(payload: TurnCommandMessage["payload"]) {
+    if (payload.turnIndex !== this.session.getTurnIndex()) return;
+    if (payload.teamId !== this.session.activeTeam.id) return;
+    const controller = this.turnControllers.get(payload.teamId);
+    if (controller && controller.type === "remote") {
+      (controller as RemoteTurnController).receiveCommand(payload.turnIndex, payload.command);
     }
   }
 
@@ -659,6 +741,23 @@ export class Game {
         this.updateCursor();
       }
       return;
+    }
+
+    if (this.input.pressed("KeyI")) {
+      this.networkState.toggleNetworkLog();
+      this.input.consumeKey("KeyI");
+    }
+
+    if (this.input.pressed("KeyR") && this.session.state.phase === "gameover") {
+      const snapshot = this.networkState.getSnapshot();
+      if (snapshot.mode !== "local") {
+        this.input.consumeKey("KeyR");
+        if (snapshot.mode === "network-host") {
+          this.restartNetworkMatchAsHost();
+        } else {
+          this.sendNetworkMessage({ type: "match_restart_request", payload: {} });
+        }
+      }
     }
 
     if (escapePressed) {
@@ -775,6 +874,21 @@ export class Game {
       this.cameraX = clampedX;
       this.cameraVelocityX = 0;
     }
+  }
+
+  private updatePassiveProjectileFocus(): boolean {
+    const networkSnapshot = this.networkState.getSnapshot();
+    if (networkSnapshot.mode === "local") return false;
+    const localTeamId = networkSnapshot.player.localTeamId;
+    if (!localTeamId) return false;
+    if (this.activeTeam.id === localTeamId) return false;
+    if (this.session.state.phase !== "projectile") return false;
+    if (this.session.projectiles.length === 0) return false;
+
+    const projectile = this.session.projectiles[this.session.projectiles.length - 1]!;
+    const bounds = this.getCameraBounds();
+    this.cameraTargetX = clamp(projectile.x - this.width / 2, bounds.minX, bounds.maxX);
+    return true;
   }
 
   private focusCameraOnActiveWorm() {
@@ -935,6 +1049,7 @@ export class Game {
     });
 
     renderNetworkStatusHUD(ctx, this.width, this.networkState);
+    renderNetworkLogHUD(ctx, this.width, this.height, this.networkState);
 
     const fpsText = `FPS: ${this.fps.toFixed(1)}`;
     drawText(ctx, fpsText, this.width - 12, 12, COLORS.white, 14, "right");
@@ -967,7 +1082,8 @@ export class Game {
       networkSnapshot.mode !== "local" &&
       networkSnapshot.bridge.waitingForRemoteSnapshot;
     this.updateTurnFocus();
-    this.updateCamera(dt, !overlaysBlocking);
+    const followingProjectile = this.updatePassiveProjectileFocus();
+    this.updateCamera(dt, !overlaysBlocking && !followingProjectile);
     const worldCameraOffsetX = -this.cameraX + this.cameraOffsetX;
     const worldCameraOffsetY = this.cameraOffsetY;
     this.session.updateActiveTurnDriver(dt, {
@@ -978,6 +1094,7 @@ export class Game {
     if (!overlaysBlocking) {
       this.session.update(dt);
     }
+    this.flushTurnResolution();
     this.updateCameraShake(dt);
     this.render();
     this.input.update();

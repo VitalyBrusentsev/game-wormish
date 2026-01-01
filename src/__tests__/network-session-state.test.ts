@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WeaponType } from "../definitions";
-import type { GameSnapshot, MatchInitSnapshot } from "../game/session";
+import type { GameSnapshot, MatchInitSnapshot, NetworkTurnSnapshot } from "../game/session";
 import type { TurnResolution } from "../game/network/turn-payload";
 import { NetworkSessionState } from "../network/session-state";
 import { ConnectionState as WebRTCConnectionState } from "../webrtc/types";
@@ -8,6 +8,7 @@ import { ConnectionState as WebRTCConnectionState } from "../webrtc/types";
 const createGameSnapshot = (): GameSnapshot => ({
   width: 320,
   height: 200,
+  turnIndex: 0,
   wind: 0,
   message: null,
   terrain: {
@@ -42,7 +43,21 @@ const createMatchInitSnapshot = (): MatchInitSnapshot => {
   };
 };
 
+const createNetworkTurnSnapshot = (): NetworkTurnSnapshot => {
+  const snapshot = createGameSnapshot();
+  return {
+    turnIndex: snapshot.turnIndex,
+    wind: snapshot.wind,
+    message: snapshot.message,
+    teams: snapshot.teams,
+    state: snapshot.state,
+    activeTeamIndex: snapshot.activeTeamIndex,
+    activeWormIndex: snapshot.activeWormIndex,
+  };
+};
+
 const createTurnResolution = (): TurnResolution => ({
+  turnIndex: 0,
   actingTeamId: "Red",
   actingTeamIndex: 0,
   actingWormIndex: 0,
@@ -54,7 +69,7 @@ const createTurnResolution = (): TurnResolution => ({
   projectileEvents: [],
   terrainOperations: [],
   wormHealth: [],
-  snapshot: createGameSnapshot(),
+  result: createNetworkTurnSnapshot(),
 });
 
 describe("NetworkSessionState", () => {
@@ -163,5 +178,25 @@ describe("NetworkSessionState", () => {
     }
     const reread = state.getSnapshot();
     expect(reread.bridge.pendingSnapshot?.wind).toBe(0);
+  });
+
+  it("keeps a rolling log of network messages", () => {
+    const state = new NetworkSessionState();
+    state.setMode("network-host");
+
+    for (let i = 0; i < 55; i++) {
+      state.appendNetworkMessageLog({
+        direction: i % 2 === 0 ? "send" : "recv",
+        message: {
+          type: "player_hello",
+          payload: { name: `P${i}`, role: "host" },
+        },
+      });
+    }
+
+    const snapshot = state.getSnapshot();
+    expect(snapshot.debug.recentMessages).toHaveLength(50);
+    expect(snapshot.debug.recentMessages[0]?.text).toContain("P5");
+    expect(snapshot.debug.recentMessages[snapshot.debug.recentMessages.length - 1]?.text).toContain("P54");
   });
 });

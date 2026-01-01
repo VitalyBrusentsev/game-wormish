@@ -1,4 +1,6 @@
 import type { MatchInitSnapshot } from "../session";
+import type { TeamId } from "../../definitions";
+import type { TurnCommand } from "./turn-payload";
 import type { TurnResolution } from "./turn-payload";
 
 export interface MatchInitMessage {
@@ -16,9 +18,28 @@ export interface PlayerHelloMessage {
   };
 }
 
+export interface MatchRestartRequestMessage {
+  type: "match_restart_request";
+  payload: Record<string, never>;
+}
+
 export interface TurnResolutionMessage {
   type: "turn_resolution";
   payload: TurnResolution;
 }
 
-export type NetworkMessage = MatchInitMessage | PlayerHelloMessage | TurnResolutionMessage;
+export interface TurnCommandMessage {
+  type: "turn_command";
+  payload: {
+    turnIndex: number;
+    teamId: TeamId;
+    command: TurnCommand;
+  };
+}
+
+export type NetworkMessage =
+  | MatchInitMessage
+  | PlayerHelloMessage
+  | MatchRestartRequestMessage
+  | TurnCommandMessage
+  | TurnResolutionMessage;

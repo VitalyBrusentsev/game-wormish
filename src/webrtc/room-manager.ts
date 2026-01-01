@@ -26,6 +26,8 @@ export class RoomManager implements IRoomManager {
   private processedCandidates = new Set<string>();
   private pendingCandidates = new Map<string, RTCIceCandidateInit>();
   private debugCallbacks: ((event: DebugEvent) => void)[] = [];
+  private peerConnectionState: RTCPeerConnectionState | null = null;
+  private disconnectedTimer: number | null = null;
 
   constructor(
     private readonly registryClient: IRegistryClient,
@@ -134,6 +136,7 @@ export class RoomManager implements IRoomManager {
 
     // Set up connection state change handler
     this.webRTCManager.onConnectionStateChange((state) => {
+      this.peerConnectionState = state;
       this.emitDebug({
         type: "peer-connection-state",
         state,
@@ -144,14 +147,37 @@ export class RoomManager implements IRoomManager {
 
       switch (state) {
         case "connected":
+          if (this.disconnectedTimer !== null) {
+            clearTimeout(this.disconnectedTimer);
+            this.disconnectedTimer = null;
+          }
+          if (currentState === ConnectionState.DISCONNECTED) {
+            const channel = this.stateManager.getDataChannel();
+            if (channel && channel.readyState === "open") {
+              this.setState(ConnectionState.CONNECTED);
+            }
+          }
           this.stopPolling();
           break;
         case "disconnected":
-          if (currentState !== ConnectionState.ERROR) {
-            this.setState(ConnectionState.DISCONNECTED);
-          }
+          if (currentState === ConnectionState.ERROR) break;
+          if (this.disconnectedTimer !== null) break;
+          this.disconnectedTimer = setTimeout(() => {
+            this.disconnectedTimer = null;
+            const channel = this.stateManager.getDataChannel();
+            if (channel && channel.readyState === "open") return;
+            if (this.peerConnectionState !== "disconnected") return;
+            const latestState = this.stateManager.getState();
+            if (latestState !== ConnectionState.ERROR) {
+              this.setState(ConnectionState.DISCONNECTED);
+            }
+          }, 2500);
           break;
         case "failed":
+          if (this.disconnectedTimer !== null) {
+            clearTimeout(this.disconnectedTimer);
+            this.disconnectedTimer = null;
+          }
           this.stopPolling();
           this.emitDebug({
             type: "peer-connection-error",
@@ -162,6 +188,10 @@ export class RoomManager implements IRoomManager {
           this.setState(ConnectionState.ERROR);
           break;
         case "closed":
+          if (this.disconnectedTimer !== null) {
+            clearTimeout(this.disconnectedTimer);
+            this.disconnectedTimer = null;
+          }
           if (currentState === ConnectionState.IDLE || currentState === ConnectionState.ERROR) {
             break;
           }
@@ -456,6 +486,10 @@ export class RoomManager implements IRoomManager {
     this.stateManager.reset();
     this.processedCandidates.clear();
     this.pendingCandidates.clear();
+    if (this.disconnectedTimer !== null) {
+      clearTimeout(this.disconnectedTimer);
+      this.disconnectedTimer = null;
+    }
     this.setState(ConnectionState.IDLE);
   }
 

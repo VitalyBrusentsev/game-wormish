@@ -45,6 +45,7 @@ export interface SessionCallbacks {
     cause: WeaponType;
   }) => void;
   onRestart?: () => void;
+  onTurnCommand?: (command: TurnCommand, meta: { turnIndex: number; teamId: TeamId }) => void;
 }
 
 export interface WormSnapshot {
@@ -85,6 +86,7 @@ export interface GameStateSnapshot {
 export interface GameSnapshot {
   width: number;
   height: number;
+  turnIndex: number;
   wind: number;
   message: string | null;
   terrain: TerrainSnapshot;
@@ -94,9 +96,20 @@ export interface GameSnapshot {
   activeWormIndex: number;
 }
 
+export interface NetworkTurnSnapshot {
+  turnIndex: number;
+  wind: number;
+  message: string | null;
+  teams: TeamSnapshot[];
+  state: GameStateSnapshot;
+  activeTeamIndex: number;
+  activeWormIndex: number;
+}
+
 export interface MatchInitSnapshot {
   width: number;
   height: number;
+  turnIndex: number;
   wind: number;
   message: string | null;
   terrain: Omit<TerrainSnapshot, "solid">;
@@ -108,6 +121,7 @@ export interface MatchInitSnapshot {
 
 type TurnLog = {
   startedAtMs: number;
+  turnIndex: number;
   actingTeamId: TeamId | null;
   actingTeamIndex: number | null;
   actingWormIndex: number | null;
@@ -138,6 +152,7 @@ export class GameSession {
 
   private turnLog: TurnLog;
   private pendingTurnResolution: TurnResolution | null = null;
+  private turnIndex = 0;
   private projectileIds = new Map<Projectile, number>();
   private terminatedProjectiles = new Set<number>();
   private nextProjectileId = 1;
@@ -180,6 +195,14 @@ export class GameSession {
     this.nextTurn(true);
   }
 
+  getTurnIndex(): number {
+    return this.turnIndex;
+  }
+
+  hasPendingTurnResolution(): boolean {
+    return this.pendingTurnResolution !== null;
+  }
+
   setTurnControllers(controllers: Map<TeamId, TurnDriver>) {
     this.turnControllers = new Map(controllers);
     this.configureTurnDriver(this.currentTurnInitial);
@@ -219,8 +242,10 @@ export class GameSession {
 
   nextTurn(initial = false) {
     const previousLog = this.turnLog;
+    const previousTurnIndex = this.turnIndex;
     const completedAtMs = this.now();
 
+    this.turnIndex = initial ? 0 : this.turnIndex + 1;
     this.wind = this.randomRange(-WORLD.windMax, WORLD.windMax);
     this.state.startTurn(this.now(), WeaponType.Bazooka);
     this.message = initial ? "Welcome! Eliminate the other team!" : null;
@@ -229,10 +254,15 @@ export class GameSession {
     else this.teamManager.advanceToNextTeam();
     this.aim = this.createDefaultAim();
 
-    const snapshot = this.toSnapshot();
+    const snapshot = this.toNetworkTurnSnapshot();
 
     if (!initial) {
-      const resolution = this.buildTurnResolution(previousLog, snapshot, completedAtMs);
+      const resolution = this.buildTurnResolution(
+        previousLog,
+        snapshot,
+        completedAtMs,
+        previousTurnIndex
+      );
       if (resolution) {
         this.pendingTurnResolution = resolution;
       }
@@ -290,6 +320,10 @@ export class GameSession {
     }
   }
 
+  applyRemoteTurnCommand(command: TurnCommand) {
+    this.applyCommand(command);
+  }
+
   update(dt: number) {
     if (this.state.phase === "projectile") {
       const specBaz = {
@@ -322,19 +356,21 @@ export class GameSession {
               if (!worm.alive) continue;
               const d = distance(projectile.x, projectile.y, worm.x, worm.y);
               if (d <= worm.radius) {
-                const wasAlive = worm.alive;
-                const beforeHealth = worm.health;
-                worm.takeDamage(GAMEPLAY.rifle.directDamage);
-                this.recordWormHealthChange(
-                  worm,
-                  team,
-                  beforeHealth,
-                  wasAlive,
-                  WeaponType.Rifle
-                );
-                const dirx = (worm.x - projectile.x) / (d || 1);
-                const diry = (worm.y - projectile.y) / (d || 1);
-                worm.applyImpulse(dirx * 120, diry * 120);
+                if (this.isLocalTurnActive()) {
+                  const wasAlive = worm.alive;
+                  const beforeHealth = worm.health;
+                  worm.takeDamage(GAMEPLAY.rifle.directDamage);
+                  this.recordWormHealthChange(
+                    worm,
+                    team,
+                    beforeHealth,
+                    wasAlive,
+                    WeaponType.Rifle
+                  );
+                  const dirx = (worm.x - projectile.x) / (d || 1);
+                  const diry = (worm.y - projectile.y) / (d || 1);
+                  worm.applyImpulse(dirx * 120, diry * 120);
+                }
                 projectile.explode(specRifle);
                 break;
               }
@@ -359,9 +395,11 @@ export class GameSession {
 
       if (this.projectiles.length === 0) {
         this.state.endProjectilePhase();
-        setTimeout(() => {
-          if (this.state.phase === "post") this.nextTurn();
-        }, GAMEPLAY.postShotDelayMs);
+        if (this.isLocalTurnActive()) {
+          setTimeout(() => {
+            if (this.state.phase === "post" && this.isLocalTurnActive()) this.nextTurn();
+          }, GAMEPLAY.postShotDelayMs);
+        }
       }
     }
 
@@ -379,8 +417,10 @@ export class GameSession {
       }
     }
 
-    this.teamManager.killWormsBelow(this.height - 8);
-    this.checkVictory();
+    if (this.isLocalTurnActive()) {
+      this.teamManager.killWormsBelow(this.height - 8);
+      this.checkVictory();
+    }
   }
 
   getAimInfo(): AimInfo {
@@ -407,12 +447,16 @@ export class GameSession {
     return this.teamManager.getTeamHealth(id);
   }
 
-  restart() {
+  restart(options?: { startingTeamIndex?: number }) {
     this.terrain.generate();
     this.teamManager.initialize(this.terrain);
     this.projectiles = [];
     this.particles = [];
-    this.teamManager.setCurrentTeamIndex(this.random() < 0.5 ? 0 : 1);
+    if (options?.startingTeamIndex !== undefined) {
+      this.teamManager.setCurrentTeamIndex(options.startingTeamIndex);
+    } else {
+      this.teamManager.setCurrentTeamIndex(this.random() < 0.5 ? 0 : 1);
+    }
     this.pendingTurnResolution = null;
     this.projectileIds.clear();
     this.terminatedProjectiles.clear();
@@ -425,6 +469,7 @@ export class GameSession {
     return {
       width: this.width,
       height: this.height,
+      turnIndex: this.turnIndex,
       wind: this.wind,
       message: this.message,
       terrain: {
@@ -462,10 +507,43 @@ export class GameSession {
     };
   }
 
+  toNetworkTurnSnapshot(): NetworkTurnSnapshot {
+    return {
+      turnIndex: this.turnIndex,
+      wind: this.wind,
+      message: this.message,
+      teams: this.teams.map((team) => ({
+        id: team.id,
+        worms: team.worms.map((worm) => ({
+          name: worm.name,
+          x: worm.x,
+          y: worm.y,
+          vx: worm.vx,
+          vy: worm.vy,
+          health: worm.health,
+          alive: worm.alive,
+          facing: worm.facing,
+          onGround: worm.onGround,
+          age: worm.age,
+        })),
+      })),
+      state: {
+        phase: this.state.phase,
+        weapon: this.state.weapon,
+        turnStartMs: this.state.turnStartMs,
+        charging: this.state.charging,
+        chargeStartMs: this.state.chargeStartMs,
+      },
+      activeTeamIndex: this.teamManager.activeTeamIndex,
+      activeWormIndex: this.teamManager.activeWormIndex,
+    };
+  }
+
   toMatchInitSnapshot(): MatchInitSnapshot {
     return {
       width: this.width,
       height: this.height,
+      turnIndex: this.turnIndex,
       wind: this.wind,
       message: this.message,
       terrain: {
@@ -507,6 +585,7 @@ export class GameSession {
       throw new Error("Snapshot dimensions do not match session dimensions");
     }
 
+    this.turnIndex = snapshot.turnIndex;
     this.wind = snapshot.wind;
     this.message = snapshot.message;
 
@@ -539,6 +618,7 @@ export class GameSession {
       throw new Error("Snapshot dimensions do not match session dimensions");
     }
 
+    this.turnIndex = snapshot.turnIndex;
     this.wind = snapshot.wind;
     this.message = snapshot.message;
 
@@ -561,6 +641,17 @@ export class GameSession {
     this.teamManager.teams = this.restoreTeams(snapshot.teams);
     this.applySnapshotState(snapshot.state, snapshot.activeTeamIndex, snapshot.activeWormIndex);
 
+    this.projectiles = [];
+    this.particles = [];
+    this.aim = this.createDefaultAim();
+  }
+
+  loadNetworkTurnSnapshot(snapshot: NetworkTurnSnapshot) {
+    this.turnIndex = snapshot.turnIndex;
+    this.wind = snapshot.wind;
+    this.message = snapshot.message;
+    this.teamManager.teams = this.restoreTeams(snapshot.teams);
+    this.applySnapshotState(snapshot.state, snapshot.activeTeamIndex, snapshot.activeWormIndex);
     this.projectiles = [];
     this.particles = [];
     this.aim = this.createDefaultAim();
@@ -610,7 +701,15 @@ export class GameSession {
     return resolution;
   }
 
-  applyTurnResolution(resolution: TurnResolution) {
+  consumeTurnResolution(): TurnResolution | null {
+    if (!this.pendingTurnResolution) return null;
+    return this.finalizeTurn();
+  }
+
+  applyTurnResolution(resolution: TurnResolution, options?: { localizeTime?: boolean }) {
+    if (resolution.turnIndex !== this.turnIndex) {
+      throw new Error("Incoming resolution turn index mismatch");
+    }
     if (resolution.actingTeamId !== this.activeTeam.id) {
       throw new Error("Incoming resolution does not match active team");
     }
@@ -623,9 +722,16 @@ export class GameSession {
     if (resolution.windAtStart !== this.wind) {
       throw new Error("Incoming resolution wind baseline mismatch");
     }
-    if (resolution.startedAtMs !== this.state.turnStartMs) {
-      throw new Error("Incoming resolution turn start mismatch");
+    const expectedNextTurnIndex = resolution.turnIndex + 1;
+    if (
+      resolution.result.turnIndex !== expectedNextTurnIndex &&
+      !(resolution.result.turnIndex === resolution.turnIndex && resolution.result.state.phase === "gameover")
+    ) {
+      throw new Error("Incoming resolution snapshot turn index mismatch");
     }
+
+    const previousDriver = this.currentTurnDriver;
+    const previousContext = this.currentTurnContext;
 
     for (const change of resolution.wormHealth) {
       const team = this.teams.find((t) => t.id === change.teamId);
@@ -648,25 +754,13 @@ export class GameSession {
     }
 
     const knownTeamIds = new Set(this.teams.map((t) => t.id));
-    const snapshotTerrain = resolution.snapshot.terrain;
-    if (snapshotTerrain.horizontalPadding !== this.horizontalPadding) {
-      throw new Error("Resolution terrain padding mismatch");
-    }
-    const expectedTotalWidth =
-      snapshotTerrain.width + snapshotTerrain.horizontalPadding * 2;
-    if (snapshotTerrain.solid.length !== expectedTotalWidth * snapshotTerrain.height) {
-      throw new Error("Resolution terrain mask size mismatch");
-    }
-    if (snapshotTerrain.heightMap.length !== expectedTotalWidth) {
-      throw new Error("Resolution terrain height map size mismatch");
-    }
 
     const worldLeft = this.terrain.worldLeft;
     const worldRight = this.terrain.worldRight;
     const minY = -this.height;
     const maxY = this.height * 2;
 
-    for (const teamSnapshot of resolution.snapshot.teams) {
+    for (const teamSnapshot of resolution.result.teams) {
       if (!knownTeamIds.has(teamSnapshot.id)) {
         throw new Error(`Unknown team found in resolution snapshot: ${teamSnapshot.id}`);
       }
@@ -705,7 +799,19 @@ export class GameSession {
       }
     }
 
-    this.loadSnapshot(resolution.snapshot);
+    for (const operation of resolution.terrainOperations) {
+      if (operation.type !== "carve-circle") continue;
+      this.terrain.carveCircle(operation.x, operation.y, operation.radius);
+    }
+
+    this.loadNetworkTurnSnapshot(resolution.result);
+    if (options?.localizeTime && this.state.phase === "aim") {
+      const localStart = this.now();
+      this.state.turnStartMs = localStart;
+      if (this.state.charging) {
+        this.state.chargeStartMs = localStart;
+      }
+    }
 
     this.turnLog = this.createEmptyTurnLog();
     this.projectileIds.clear();
@@ -714,14 +820,16 @@ export class GameSession {
     this.beginTurnLog();
     this.pendingTurnResolution = null;
     this.waitingForRemoteResolution = false;
-    if (this.currentTurnDriver && this.currentTurnContext) {
-      this.currentTurnDriver.endTurn?.(this.currentTurnContext, resolution);
+    if (previousDriver?.endTurn && previousContext) {
+      previousDriver.endTurn(previousContext, resolution);
     }
+    this.configureTurnDriver(false);
   }
 
   private createEmptyTurnLog(): TurnLog {
     return {
       startedAtMs: 0,
+      turnIndex: 0,
       actingTeamId: null,
       actingTeamIndex: null,
       actingWormIndex: null,
@@ -735,6 +843,7 @@ export class GameSession {
 
   private beginTurnLog() {
     this.turnLog.startedAtMs = this.state.turnStartMs;
+    this.turnLog.turnIndex = this.turnIndex;
     this.turnLog.actingTeamId = this.activeTeam.id;
     this.turnLog.actingTeamIndex = this.teamManager.activeTeamIndex;
     this.turnLog.actingWormIndex = this.teamManager.activeWormIndex;
@@ -794,13 +903,19 @@ export class GameSession {
   }
 
   cancelChargeCommand() {
+    if (!this.isLocalTurnActive()) return;
     if (!this.state.charging) return;
     this.recordCommand({ type: "cancel-charge", atMs: this.turnTimestampMs() });
   }
 
   private recordCommand(command: TurnCommand) {
     const finalized = this.applyCommand(command);
-    if (finalized) this.turnLog.commands.push(finalized);
+    if (!finalized) return;
+    this.turnLog.commands.push(finalized);
+    this.callbacks.onTurnCommand?.(this.cloneCommand(finalized), {
+      turnIndex: this.turnIndex,
+      teamId: this.activeTeam.id,
+    });
   }
 
   private applyCommand(command: TurnCommand): TurnCommand | null {
@@ -839,13 +954,21 @@ export class GameSession {
     }
   }
 
-  private applyFireCommand(command: Extract<TurnCommand, { type: "fire-charged-weapon" }>): TurnCommand | null {
+  private applyFireCommand(
+    command: Extract<TurnCommand, { type: "fire-charged-weapon" }>
+  ): TurnCommand | null {
     if (this.state.phase !== "aim") return null;
     this.state.setWeapon(command.weapon);
     this.aim = command.aim;
     const worm = this.activeWorm;
     worm.facing = command.aim.targetX < worm.x ? -1 : 1;
-    const finalized = this.fireChargedWeapon(command.power, command.aim, command.atMs, command.weapon);
+    const finalized = this.fireChargedWeapon(
+      command.power,
+      command.aim,
+      command.atMs,
+      command.weapon,
+      command.projectileIds
+    );
     this.state.cancelCharge();
     this.endAimPhaseAfterShot();
     return finalized;
@@ -987,8 +1110,9 @@ export class GameSession {
 
   private buildTurnResolution(
     log: TurnLog,
-    snapshot: GameSnapshot,
-    completedAtMs: number
+    snapshot: NetworkTurnSnapshot,
+    completedAtMs: number,
+    previousTurnIndex: number
   ): TurnResolution | null {
     if (
       !log.actingTeamId ||
@@ -1023,6 +1147,7 @@ export class GameSession {
     }));
 
     return {
+      turnIndex: previousTurnIndex,
       actingTeamId: log.actingTeamId,
       actingTeamIndex: log.actingTeamIndex!,
       actingWormIndex: log.actingWormIndex,
@@ -1034,7 +1159,7 @@ export class GameSession {
       projectileEvents,
       terrainOperations,
       wormHealth,
-      snapshot,
+      result: snapshot,
     };
   }
 
@@ -1046,7 +1171,8 @@ export class GameSession {
     power01: number,
     aim: AimInfo,
     atMs: number,
-    weapon: WeaponType
+    weapon: WeaponType,
+    forcedProjectileIds: number[]
   ): Extract<TurnCommand, { type: "fire-charged-weapon" }> {
     const beforeCount = this.projectiles.length;
     fireWeapon({
@@ -1062,8 +1188,14 @@ export class GameSession {
     const newProjectiles = this.projectiles.slice(beforeCount);
     const projectileIds: number[] = [];
     const spawnEvents: TurnEvent[] = [];
+    const forcedIds = forcedProjectileIds.length > 0 ? [...forcedProjectileIds] : null;
     for (const projectile of newProjectiles) {
-      const id = this.allocateProjectileId(projectile);
+      const forcedId = forcedIds?.shift();
+      const id = forcedId ?? this.allocateProjectileId(projectile);
+      if (forcedId !== undefined) {
+        this.projectileIds.set(projectile, id);
+        this.nextProjectileId = Math.max(this.nextProjectileId, id + 1);
+      }
       projectileIds.push(id);
       this.wrapProjectileExplosion(projectile, id);
       spawnEvents.push({
@@ -1097,9 +1229,6 @@ export class GameSession {
     damage: number,
     cause: WeaponType
   ) {
-    this.recordTerrainCarve(x, y, radius);
-    this.terrain.carveCircle(x, y, radius);
-
     const particleCount = cause === WeaponType.Rifle ? 12 : 50;
     for (let i = 0; i < particleCount; i++) {
       const ang = this.random() * Math.PI * 2;
@@ -1116,6 +1245,14 @@ export class GameSession {
         i % 2 === 0 ? "rgba(120,120,120,0.8)" : "rgba(200,180,120,0.8)";
       this.particles.push(new Particle(x, y, vx, vy, life, r, col));
     }
+
+    if (!this.isLocalTurnActive()) {
+      this.callbacks.onExplosion?.({ x, y, radius, damage, cause });
+      return;
+    }
+
+    this.recordTerrainCarve(x, y, radius);
+    this.terrain.carveCircle(x, y, radius);
 
     if (cause !== WeaponType.Rifle) {
       for (const team of this.teams) {
@@ -1166,8 +1303,9 @@ export class GameSession {
 
   private endAimPhaseWithoutShot() {
     this.state.expireAimPhase();
+    if (!this.isLocalTurnActive()) return;
     setTimeout(() => {
-      this.nextTurn();
+      if (this.isLocalTurnActive()) this.nextTurn();
     }, 400);
   }
 
@@ -1183,6 +1321,17 @@ export class GameSession {
       this.state.phase = "gameover";
       const winner = redAlive ? "Red" : blueAlive ? "Blue" : "Nobody";
       this.message = `${winner} wins! Press R to restart.`;
+      if (this.isLocalTurnActive() && !this.pendingTurnResolution) {
+        const resolution = this.buildTurnResolution(
+          this.turnLog,
+          this.toNetworkTurnSnapshot(),
+          this.now(),
+          this.turnIndex
+        );
+        if (resolution) {
+          this.pendingTurnResolution = resolution;
+        }
+      }
     }
   }
 }

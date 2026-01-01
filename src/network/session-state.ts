@@ -1,6 +1,8 @@
 import type { TeamId } from "../definitions";
 import type { MatchInitSnapshot } from "../game/session";
 import type { TurnResolution } from "../game/network/turn-payload";
+import type { NetworkMessage } from "../game/network/messages";
+import { nowMs } from "../definitions";
 import {
   ConnectionState as WebRTCConnectionState,
   type RoomInfo,
@@ -48,12 +50,26 @@ export interface NetworkMatchBridgeState {
   pendingResolutions: TurnResolution[];
 }
 
+export type NetworkLogDirection = "send" | "recv";
+
+export interface NetworkLogEntry {
+  atMs: number;
+  direction: NetworkLogDirection;
+  text: string;
+}
+
+export interface NetworkDebugState {
+  showLog: boolean;
+  recentMessages: NetworkLogEntry[];
+}
+
 export interface NetworkSessionStateSnapshot {
   mode: SessionMode;
   player: PlayerIdentity;
   registry: RegistryRoomState;
   connection: WebRTCConnectionInfo;
   bridge: NetworkMatchBridgeState;
+  debug: NetworkDebugState;
 }
 
 const jsonClone = <T>(value: T): T => {
@@ -103,12 +119,18 @@ const createBridgeState = (): NetworkMatchBridgeState => ({
   pendingResolutions: [],
 });
 
+const createDebugState = (): NetworkDebugState => ({
+  showLog: false,
+  recentMessages: [],
+});
+
 const createSnapshot = (): NetworkSessionStateSnapshot => ({
   mode: "local",
   player: createPlayerIdentity(),
   registry: createRegistryState(),
   connection: createConnectionInfo(),
   bridge: createBridgeState(),
+  debug: createDebugState(),
 });
 
 const candidateKey = (candidate: RTCIceCandidateInit) => {
@@ -122,6 +144,7 @@ export class NetworkSessionState {
   private state: NetworkSessionStateSnapshot = createSnapshot();
   private readonly bufferedLocalCandidateKeys = new Set<string>();
   private readonly pendingRemoteCandidateKeys = new Set<string>();
+  private readonly logLimit = 50;
 
   getSnapshot(): NetworkSessionStateSnapshot {
     return {
@@ -145,6 +168,10 @@ export class NetworkSessionState {
           ? jsonClone(this.state.bridge.pendingSnapshot)
           : null,
         pendingResolutions: [...this.state.bridge.pendingResolutions],
+      },
+      debug: {
+        showLog: this.state.debug.showLog,
+        recentMessages: this.state.debug.recentMessages.map((entry) => ({ ...entry })),
       },
     };
   }
@@ -275,6 +302,7 @@ export class NetworkSessionState {
     this.state.registry = createRegistryState();
     this.resetConnectionArtifacts();
     this.state.bridge = createBridgeState();
+    this.state.debug = createDebugState();
   }
 
   resetConnectionArtifacts() {
@@ -282,4 +310,82 @@ export class NetworkSessionState {
     this.bufferedLocalCandidateKeys.clear();
     this.pendingRemoteCandidateKeys.clear();
   }
+
+  toggleNetworkLog() {
+    this.state.debug.showLog = !this.state.debug.showLog;
+  }
+
+  appendNetworkMessageLog(entry: { direction: NetworkLogDirection; message: NetworkMessage }) {
+    const formatted = formatNetworkMessage(entry.message);
+    let bytes = 0;
+    try {
+      bytes = JSON.stringify(entry.message).length;
+    } catch {
+      bytes = 0;
+    }
+    const timestamp = nowMs();
+    this.state.debug.recentMessages.push({
+      atMs: timestamp,
+      direction: entry.direction,
+      text: bytes > 0 ? `${formatted} bytes=${bytes}` : formatted,
+    });
+    if (this.state.debug.recentMessages.length > this.logLimit) {
+      this.state.debug.recentMessages.splice(
+        0,
+        this.state.debug.recentMessages.length - this.logLimit
+      );
+    }
+  }
 }
+
+const formatNetworkMessage = (message: NetworkMessage): string => {
+  switch (message.type) {
+    case "match_init": {
+      const snapshot = message.payload.snapshot;
+      return `match_init turn=${snapshot.turnIndex} size=${snapshot.width}x${snapshot.height} wind=${snapshot.wind.toFixed(
+        1
+      )}`;
+    }
+    case "player_hello": {
+      return `player_hello role=${message.payload.role} name=${message.payload.name ?? "null"}`;
+    }
+    case "match_restart_request": {
+      return "match_restart_request";
+    }
+    case "turn_command": {
+      const { turnIndex, teamId, command } = message.payload;
+      if (command.type === "set-weapon") {
+        return `turn_command#${turnIndex} ${teamId} set-weapon ${command.weapon}`;
+      }
+      if (command.type === "aim") {
+        return `turn_command#${turnIndex} ${teamId} aim a=${command.aim.angle.toFixed(
+          2
+        )} x=${command.aim.targetX.toFixed(1)} y=${command.aim.targetY.toFixed(1)}`;
+      }
+      if (command.type === "move") {
+        return `turn_command#${turnIndex} ${teamId} move=${command.move} jump=${command.jump} dt=${command.dtMs}`;
+      }
+      if (command.type === "start-charge") {
+        return `turn_command#${turnIndex} ${teamId} start-charge`;
+      }
+      if (command.type === "cancel-charge") {
+        return `turn_command#${turnIndex} ${teamId} cancel-charge`;
+      }
+      return `turn_command#${turnIndex} ${teamId} fire ${command.weapon} p=${command.power.toFixed(
+        2
+      )} ids=[${command.projectileIds.join(",")}]`;
+    }
+    case "turn_resolution": {
+      const r = message.payload;
+      return `turn_resolution#${r.turnIndex} ${r.actingTeamId} -> turn=${
+        r.result.turnIndex
+      } wind=${r.windAtStart.toFixed(1)}→${r.windAfter.toFixed(1)} cmds=${
+        r.commands.length
+      } events=${r.projectileEvents.length} terrain=${r.terrainOperations.length} health=${
+        r.wormHealth.length
+      }`;
+    }
+    default:
+      return "unknown";
+  }
+};
