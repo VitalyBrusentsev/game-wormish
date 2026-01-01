@@ -45,11 +45,41 @@ export type RenderHudOptions = {
   state: GameState;
   now: number;
   activeTeamId: TeamId;
+  activeTeamLabel?: string;
+  teamLabels?: Partial<Record<TeamId, string>>;
   getTeamHealth: (id: TeamId) => number;
   wind: number;
   message: string | null;
   turnDurationMs: number;
 };
+
+const HUD_FONT_STACK =
+  "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+
+function truncateHudText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  sizePx: number
+) {
+  if (maxWidth <= 0) return "";
+  ctx.font = `bold ${sizePx}px ${HUD_FONT_STACK}`;
+  if (ctx.measureText(text).width <= maxWidth) return text;
+
+  const ellipsis = "…";
+  if (ctx.measureText(ellipsis).width > maxWidth) return "";
+
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const candidate = `${text.slice(0, mid)}${ellipsis}`;
+    if (ctx.measureText(candidate).width <= maxWidth) lo = mid + 1;
+    else hi = mid;
+  }
+  const keep = Math.max(0, lo - 1);
+  return `${text.slice(0, keep)}${ellipsis}`;
+}
 
 export function renderHUD({
   ctx,
@@ -58,6 +88,8 @@ export function renderHUD({
   state,
   now,
   activeTeamId,
+  activeTeamLabel,
+  teamLabels,
   getTeamHealth,
   wind,
   message,
@@ -83,7 +115,13 @@ export function renderHUD({
   const rightX = width - padding - 12 - hbW / 2;
   const topY = padding + 10;
 
-  drawText(ctx, "RED", padding + 12, topY, COLORS.white, 14);
+  const redLabel = truncateHudText(
+    ctx,
+    teamLabels?.Red ?? "RED",
+    hbW,
+    14
+  );
+  drawText(ctx, redLabel, padding + 12, topY, COLORS.white, 14);
   drawHealthBar(
     ctx,
     leftX,
@@ -95,7 +133,21 @@ export function renderHUD({
     COLORS.healthRed
   );
 
-  drawText(ctx, "BLUE", width - padding - 12, topY, COLORS.white, 14, "right");
+  const blueLabel = truncateHudText(
+    ctx,
+    teamLabels?.Blue ?? "BLUE",
+    hbW,
+    14
+  );
+  drawText(
+    ctx,
+    blueLabel,
+    width - padding - 12,
+    topY,
+    COLORS.white,
+    14,
+    "right"
+  );
   drawHealthBar(
     ctx,
     rightX,
@@ -113,7 +165,7 @@ export function renderHUD({
   const timeLeft = Math.max(0, Math.ceil(timeLeftMs / 1000));
   const centerX = width / 2;
 
-  const teamStr = `${activeTeamId} Team`;
+  const teamStr = activeTeamLabel ?? `${activeTeamId} Team`;
   const weaponStr = `Weapon: ${state.weapon}`;
   const clockStr = `Time: ${timeLeft}s`;
 

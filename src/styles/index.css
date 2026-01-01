@@ -342,38 +342,34 @@ Network match dialog
   opacity: 0.5;
 }
 
-.network-validation {
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: linear-gradient(120deg, rgba(88, 138, 255, 0.14), rgba(255, 255, 255, 0.04));
-  border: 1px solid rgba(120, 180, 255, 0.2);
-  min-height: 24px;
-}
-
-.network-validation-message {
-  color: rgba(230, 236, 255, 0.9);
-  font-size: 14px;
-  line-height: 1.4;
-}
-
-.network-validation-message + .network-validation-message {
-  margin-top: 6px;
-}
-
-.network-info {
+.network-status {
   padding: 14px 16px;
   border-radius: 10px;
   background: linear-gradient(140deg, rgba(17, 26, 48, 0.7), rgba(24, 36, 76, 0.7));
   border: 1px solid rgba(120, 180, 255, 0.25);
 }
 
-.network-info-title {
+.network-status-title {
   font-size: 13px;
   font-weight: 600;
   color: rgba(180, 200, 255, 0.8);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 10px;
+}
+
+.network-status-message {
+  color: rgba(230, 236, 255, 0.9);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.network-status-message--error {
+  color: rgba(255, 170, 170, 0.95);
+}
+
+.network-status-details {
+  margin-top: 10px;
 }
 
 .network-info-item {

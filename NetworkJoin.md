@@ -23,8 +23,9 @@ We keep the existing start menu as-is, but when the player clicks “Play With F
     1. Step 1: prompt only for the room code with a **Find** action and Cancel (which resets to landing).
     2. Step 2: once `/rooms/:code/public` returns the host, show a prominent “Found: Host <name>” callout plus the join-code input and a **Join** button.
     3. After a successful join, only the Cancel control remains while connection progress is displayed.
-- Validation panel at the bottom shows errors or connection progress (text lines). Progress should be readable across all states (creating room, lookup, join, connecting, connected).
-- Keep a detail list on the right showing the current room code, join code, expiration, and remote player name for quick confirmation whenever a network flow is active.
+- Use a single combined status/info block directly above the Cancel control:
+  - Shows the current progress/error message (one concise line).
+  - Shows key room details (room code, join code for host, host/guest names) without additional separate panels.
 
 ### 2.2 Dialog → Game wiring
 

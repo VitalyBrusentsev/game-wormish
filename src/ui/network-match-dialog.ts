@@ -22,7 +22,15 @@ export type GuestPhase =
 
 export type DialogState =
   | { kind: "landing"; roomCode: string; joinCode: string; hostName: string }
-  | { kind: "hosting"; phase: HostPhase; roomCode: string; joinCode: string | null; hostName: string; expiresAt: number | null }
+  | {
+      kind: "hosting";
+      phase: HostPhase;
+      roomCode: string;
+      joinCode: string | null;
+      hostName: string;
+      guestName: string;
+      expiresAt: number | null;
+    }
   | {
       kind: "joining";
       phase: GuestPhase;
@@ -50,6 +58,7 @@ export const deriveDialogStateFromSnapshot = (
   const roomCode = snapshot.registry.code || current.roomCode || "";
   const joinCode = snapshot.registry.joinCode ?? current.joinCode ?? "";
   const hostName = snapshot.registry.hostUserName || current.hostName || "";
+  const guestName = snapshot.registry.guestUserName || (current.kind === "hosting" ? current.guestName : "") || "";
   const expiresAt = snapshot.registry.expiresAt || null;
 
   if (snapshot.mode === "network-host") {
@@ -69,6 +78,7 @@ export const deriveDialogStateFromSnapshot = (
       roomCode,
       joinCode: joinCode || null,
       hostName,
+      guestName,
       expiresAt,
     };
   }
@@ -100,7 +110,7 @@ export class NetworkMatchDialog {
   private readonly callbacks: NetworkMatchCallbacks;
   private playerName = "";
   private state: DialogState = createLandingState();
-  private validationMessages: string[] = [];
+  private statusMessages: string[] = [];
   private isProcessing = false;
   private contentContainer: HTMLElement | null = null;
 
@@ -111,7 +121,7 @@ export class NetworkMatchDialog {
   }
 
   show(initialRole: NetworkRole = "host") {
-    this.validationMessages = [];
+    this.statusMessages = [];
     this.isProcessing = false;
     if (!this.playerName) {
       this.playerName = this.readStoredPlayerName();
@@ -148,7 +158,7 @@ export class NetworkMatchDialog {
     const snapshot = networkState.getSnapshot();
 
     this.state = deriveDialogStateFromSnapshot(this.state, snapshot);
-    this.validationMessages = this.collectValidationMessages(snapshot);
+    this.statusMessages = this.collectStatusMessages(snapshot, this.state);
 
     this.refreshContent();
   }
@@ -160,20 +170,6 @@ export class NetworkMatchDialog {
 
     container.appendChild(this.buildNameField());
     container.appendChild(this.buildBody());
-
-    const validationPanel = document.createElement("div");
-    validationPanel.className = "network-validation";
-    validationPanel.id = "network-validation-panel";
-    this.renderValidationPanel(validationPanel);
-    container.appendChild(validationPanel);
-
-    if (this.state.kind !== "landing") {
-      const infoPanel = document.createElement("div");
-      infoPanel.className = "network-info";
-      infoPanel.id = "network-info-panel";
-      this.renderInfoPanel(infoPanel);
-      container.appendChild(infoPanel);
-    }
 
     return container;
   }
@@ -245,34 +241,23 @@ export class NetworkMatchDialog {
     buttonGroup.appendChild(guestButton);
 
     section.appendChild(buttonGroup);
+    const statusBlock = this.buildStatusBlock();
+    if (statusBlock) {
+      section.appendChild(statusBlock);
+    }
     section.appendChild(this.buildCancelRow());
 
     return section;
   }
 
   private buildHostContent(): HTMLElement {
-    const hostState = this.getHostState();
     const section = document.createElement("div");
     section.className = "network-section";
 
-    const title = document.createElement("div");
-    title.className = "network-info-title";
-    title.textContent = "Hosting";
-    section.appendChild(title);
-
-    const description = document.createElement("p");
-    description.textContent = hostState.phase === "creating"
-      ? "Creating your room..."
-      : "Share the room code and join code with your friend.";
-    section.appendChild(description);
-
-    if (hostState.phase === "connected" || hostState.phase === "connecting") {
-      const progress = document.createElement("div");
-      progress.className = "network-validation-message";
-      progress.textContent = hostState.phase === "connected" ? "Connected. Starting match..." : "Waiting for guest to join...";
-      section.appendChild(progress);
+    const statusBlock = this.buildStatusBlock(true);
+    if (statusBlock) {
+      section.appendChild(statusBlock);
     }
-
     section.appendChild(this.buildCancelRow(false));
 
     return section;
@@ -283,42 +268,30 @@ export class NetworkMatchDialog {
     const section = document.createElement("div");
     section.className = "network-section";
 
-    const title = document.createElement("div");
-    title.className = "network-info-title";
-    title.textContent = "Join a friend";
-    section.appendChild(title);
-
     if (guestState.phase === "enter-room") {
       section.appendChild(this.buildRoomCodeControls(guestState));
       section.appendChild(this.buildFindActions());
     } else if (guestState.phase === "found-room") {
-      section.appendChild(this.buildFoundHostCallout(guestState.hostName));
       section.appendChild(this.buildJoinCodeControls(guestState));
       section.appendChild(this.buildJoinActions());
     } else {
       if (guestState.phase === "joining-room" || guestState.phase === "connecting") {
-        section.appendChild(this.buildFoundHostCallout(guestState.hostName));
         section.appendChild(this.buildJoinCodeControls(guestState, true));
       }
-      if (guestState.phase === "connected") {
-        const status = document.createElement("div");
-        status.className = "network-validation-message";
-        status.textContent = "Connected. Starting match...";
-        section.appendChild(status);
+      const statusBlock = this.buildStatusBlock(true);
+      if (statusBlock) {
+        section.appendChild(statusBlock);
       }
       section.appendChild(this.buildCancelRow(false));
       return section;
     }
 
+    const statusBlock = this.buildStatusBlock();
+    if (statusBlock) {
+      section.appendChild(statusBlock);
+    }
     section.appendChild(this.buildCancelRow(false));
     return section;
-  }
-
-  private buildFoundHostCallout(hostName: string): HTMLElement {
-    const callout = document.createElement("div");
-    callout.className = "network-info-title";
-    callout.textContent = `Found: Host ${hostName}`;
-    return callout;
   }
 
   private buildRoomCodeControls(guestState: Extract<DialogState, { kind: "joining" }>): HTMLElement {
@@ -415,82 +388,160 @@ export class NetworkMatchDialog {
     return row;
   }
 
-  private renderValidationPanel(panel: HTMLElement) {
-    panel.innerHTML = "";
-    if (this.validationMessages.length === 0) return;
+  private buildStatusBlock(forceShow = false): HTMLElement | null {
+    const message = this.deriveStatusMessage();
+    const details = this.collectStatusDetails();
 
-    for (const msg of this.validationMessages) {
-      const line = document.createElement("div");
-      line.className = "network-validation-message";
-      line.textContent = msg;
-      panel.appendChild(line);
+    if (!forceShow && !message && details.length === 0) {
+      return null;
     }
-  }
 
-  private renderInfoPanel(panel: HTMLElement) {
-    panel.innerHTML = "";
+    const panel = document.createElement("div");
+    panel.className = "network-status";
+
     const title = document.createElement("div");
-    title.className = "network-info-title";
-    title.textContent = this.state.kind === "hosting" ? "Room Information" : "Connection Details";
+    title.className = "network-status-title";
+    title.textContent = this.state.kind === "hosting" ? "Hosting" : this.state.kind === "joining" ? "Joining" : "Status";
     panel.appendChild(title);
 
+    if (message) {
+      const line = document.createElement("div");
+      const tone = this.isStatusError(message) ? " network-status-message--error" : "";
+      line.className = `network-status-message${tone}`;
+      line.textContent = message;
+      panel.appendChild(line);
+    }
+
+    if (details.length > 0) {
+      const list = document.createElement("div");
+      list.className = "network-status-details";
+
+      for (const item of details) {
+        const row = document.createElement("div");
+        row.className = "network-info-item";
+
+        const label = document.createElement("span");
+        label.textContent = `${item.label}:`;
+
+        const value = document.createElement("strong");
+        value.textContent = item.value;
+
+        row.appendChild(label);
+        row.appendChild(value);
+        list.appendChild(row);
+      }
+
+      panel.appendChild(list);
+    }
+
+    return panel;
+  }
+
+  private isStatusError(message: string) {
+    return (
+      message.startsWith("Error:") ||
+      message.startsWith("Failed") ||
+      message.startsWith("Please ")
+    );
+  }
+
+  private deriveStatusMessage(): string | null {
+    if (this.statusMessages.length > 0) {
+      return this.statusMessages[0] ?? null;
+    }
+
+    if (this.isProcessing) {
+      if (this.state.kind === "hosting") return "Creating room...";
+      if (this.state.kind === "joining") {
+        if (this.state.phase === "enter-room") return "Finding room...";
+        if (this.state.phase === "found-room") return "Joining room...";
+      }
+    }
+
+    if (this.state.kind === "hosting") {
+      if (this.state.phase === "creating") return "Creating room...";
+      if (this.state.phase === "room-ready") return "Waiting for the guest to join...";
+      if (this.state.phase === "connecting") {
+        return this.state.guestName
+          ? "Guest joined. Establishing connection..."
+          : "Waiting for the guest to join...";
+      }
+      if (this.state.phase === "connected") return "Connected. Starting match...";
+    }
+
+    if (this.state.kind === "joining") {
+      if (this.state.phase === "found-room") {
+        return this.state.hostName
+          ? `Found host ${this.state.hostName}. Enter the join code to connect.`
+          : "Room found. Enter the join code to connect.";
+      }
+      if (this.state.phase === "joining-room") return "Joining room...";
+      if (this.state.phase === "connecting") return "Establishing connection...";
+      if (this.state.phase === "connected") return "Connected. Starting match...";
+    }
+
+    return null;
+  }
+
+  private collectStatusDetails(): Array<{ label: string; value: string }> {
+    const details: Array<{ label: string; value: string }> = [];
+
     if (this.state.roomCode) {
-      const codeItem = document.createElement("div");
-      codeItem.className = "network-info-item";
-      codeItem.innerHTML = `<span>Room Code:</span> <strong>${this.state.roomCode}</strong>`;
-      panel.appendChild(codeItem);
+      details.push({ label: "Room Code", value: this.state.roomCode });
     }
 
-    if (this.state.kind === "hosting" && this.state.joinCode) {
-      const joinItem = document.createElement("div");
-      joinItem.className = "network-info-item";
-      joinItem.innerHTML = `<span>Join Code:</span> <strong>${this.state.joinCode}</strong>`;
-      panel.appendChild(joinItem);
+    if (this.state.kind === "hosting") {
+      if (this.state.joinCode) {
+        details.push({ label: "Join Code", value: this.state.joinCode });
+      }
+      if (this.state.guestName) {
+        details.push({ label: "Guest", value: this.state.guestName });
+      }
+      return details;
     }
 
-    if (this.state.hostName) {
-      const hostItem = document.createElement("div");
-      hostItem.className = "network-info-item";
-      hostItem.innerHTML = `<span>Host:</span> <strong>${this.state.hostName}</strong>`;
-      panel.appendChild(hostItem);
+    if (this.state.kind === "joining" && this.state.hostName) {
+      details.push({ label: "Host", value: this.state.hostName });
     }
+
+    return details;
   }
 
-  private collectValidationMessages(snapshot: NetworkSessionStateSnapshot): string[] {
-    const messages: string[] = [];
-
+  private collectStatusMessages(snapshot: NetworkSessionStateSnapshot, state: DialogState): string[] {
     if (snapshot.connection.lastError) {
-      messages.push(`Error: ${snapshot.connection.lastError}`);
+      return [`Error: ${snapshot.connection.lastError}`];
     }
 
-    const lifecycle = snapshot.connection.lifecycle;
-    if (lifecycle === ConnectionState.CREATING) {
-      messages.push("Creating room...");
-    } else if (lifecycle === ConnectionState.CREATED) {
-      messages.push("Room created. Waiting for your friend...");
-    } else if (lifecycle === ConnectionState.JOINING) {
-      messages.push("Joining room...");
-    } else if (lifecycle === ConnectionState.JOINED) {
-      messages.push("Joined room. Preparing connection...");
-    } else if (lifecycle === ConnectionState.CONNECTING) {
-      messages.push("Establishing connection...");
-    } else if (lifecycle === ConnectionState.CONNECTED) {
-      messages.push("Connected! Starting match...");
+    if (state.kind === "hosting") {
+      const lifecycle = snapshot.connection.lifecycle;
+      if (lifecycle === ConnectionState.CREATING || state.phase === "creating") return ["Creating room..."];
+      if (lifecycle === ConnectionState.CONNECTING) {
+        const guestPresent = snapshot.registry.status === "joined" || snapshot.registry.status === "paired" || !!snapshot.registry.guestUserName;
+        return [guestPresent ? "Guest joined. Establishing connection..." : "Waiting for the guest to join..."];
+      }
+      if (lifecycle === ConnectionState.CONNECTED) return ["Connected. Starting match..."];
+      if (lifecycle === ConnectionState.CREATED || state.phase === "room-ready") {
+        return ["Waiting for the guest to join..."];
+      }
     }
 
-    if (snapshot.registry.status === "joined" && snapshot.player.role === "host") {
-      messages.push("Guest detected. Connecting...");
+    if (state.kind === "joining") {
+      const lifecycle = snapshot.connection.lifecycle;
+      if (lifecycle === ConnectionState.JOINING || state.phase === "joining-room") return ["Joining room..."];
+      if (lifecycle === ConnectionState.JOINED || lifecycle === ConnectionState.CONNECTING || state.phase === "connecting") {
+        return ["Establishing connection..."];
+      }
+      if (lifecycle === ConnectionState.CONNECTED || state.phase === "connected") return ["Connected. Starting match..."];
+      if (state.phase === "found-room") {
+        return [
+          state.hostName
+            ? `Found host ${state.hostName}. Enter the join code to connect.`
+            : "Room found. Enter the join code to connect.",
+        ];
+      }
     }
 
-    return messages;
-  }
-
-  private getHostState(): Extract<DialogState, { kind: "hosting" }> {
-    if (this.state.kind !== "hosting") {
-      throw new Error("Host state requested outside hosting flow");
-    }
-
-    return this.state;
+    return [];
   }
 
   private getGuestState(): Extract<DialogState, { kind: "joining" }> {
@@ -503,7 +554,7 @@ export class NetworkMatchDialog {
 
   private moveToGuestEntry() {
     this.state = { kind: "joining", phase: "enter-room", roomCode: "", joinCode: "", hostName: "", expiresAt: null };
-    this.validationMessages = [];
+    this.statusMessages = [];
     this.refreshContent();
   }
 
@@ -522,19 +573,20 @@ export class NetworkMatchDialog {
   private async handleStartHosting() {
     if (this.isProcessing) return;
     if (!this.playerName.trim()) {
-      this.validationMessages = ["Please enter your name"];
+      this.statusMessages = ["Please enter your name"];
       this.refreshContent();
       return;
     }
 
-    this.state = { kind: "hosting", phase: "creating", roomCode: "", joinCode: null, hostName: this.playerName.trim(), expiresAt: null };
+    this.state = { kind: "hosting", phase: "creating", roomCode: "", joinCode: null, hostName: this.playerName.trim(), guestName: "", expiresAt: null };
+    this.statusMessages = ["Creating room..."];
     this.isProcessing = true;
     this.refreshContent();
 
     try {
       await this.callbacks.onCreateRoom(this.playerName.trim());
     } catch (error) {
-      this.validationMessages = [`Failed to create room: ${error instanceof Error ? error.message : String(error)}`];
+      this.statusMessages = [`Failed to create room: ${error instanceof Error ? error.message : String(error)}`];
       this.state = createLandingState();
     } finally {
       this.isProcessing = false;
@@ -546,25 +598,27 @@ export class NetworkMatchDialog {
     if (this.isProcessing) return;
 
     if (!this.playerName.trim()) {
-      this.validationMessages = ["Please enter your name"];
+      this.statusMessages = ["Please enter your name"];
       this.refreshContent();
       return;
     }
 
     if (!this.state.roomCode.trim()) {
-      this.validationMessages = ["Please enter the room code"];
+      this.statusMessages = ["Please enter the room code"];
       this.refreshContent();
       return;
     }
 
     this.isProcessing = true;
+    this.statusMessages = ["Finding room..."];
     this.refreshContent();
 
     try {
       await this.callbacks.onLookupRoom(this.state.roomCode.trim());
       this.state = { ...this.state, phase: "found-room" } as DialogState;
+      this.statusMessages = [];
     } catch (error) {
-      this.validationMessages = [`Failed to find room: ${error instanceof Error ? error.message : String(error)}`];
+      this.statusMessages = [`Failed to find room: ${error instanceof Error ? error.message : String(error)}`];
     } finally {
       this.isProcessing = false;
       this.refreshContent();
@@ -575,25 +629,27 @@ export class NetworkMatchDialog {
     if (this.isProcessing || this.state.kind !== "joining") return;
 
     if (!this.playerName.trim()) {
-      this.validationMessages = ["Please enter your name"];
+      this.statusMessages = ["Please enter your name"];
       this.refreshContent();
       return;
     }
 
     if (!this.state.joinCode.trim()) {
-      this.validationMessages = ["Please enter the join code"];
+      this.statusMessages = ["Please enter the join code"];
       this.refreshContent();
       return;
     }
 
     this.isProcessing = true;
+    this.statusMessages = ["Joining room..."];
     this.refreshContent();
 
     try {
       await this.callbacks.onJoinRoom(this.state.roomCode.trim(), this.state.joinCode.trim(), this.playerName.trim());
       this.state = { ...this.state, phase: "joining-room" } as DialogState;
+      this.statusMessages = [];
     } catch (error) {
-      this.validationMessages = [`Failed to join room: ${error instanceof Error ? error.message : String(error)}`];
+      this.statusMessages = [`Failed to join room: ${error instanceof Error ? error.message : String(error)}`];
     } finally {
       this.isProcessing = false;
       this.refreshContent();
@@ -612,7 +668,7 @@ export class NetworkMatchDialog {
 
   private resetState() {
     this.state = createLandingState();
-    this.validationMessages = [];
+    this.statusMessages = [];
     this.isProcessing = false;
     this.refreshContent();
   }

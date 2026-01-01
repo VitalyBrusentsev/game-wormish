@@ -135,7 +135,7 @@ describe("deriveDialogStateFromSnapshot", () => {
     const snapshot = buildSnapshot({ mode: "local" });
 
     const result = deriveDialogStateFromSnapshot(
-      { kind: "hosting", phase: "connecting", roomCode: "ABCD12", joinCode: "999999", hostName: "Alice", expiresAt: null },
+      { kind: "hosting", phase: "connecting", roomCode: "ABCD12", joinCode: "999999", hostName: "Alice", guestName: "", expiresAt: null },
       snapshot
     );
 

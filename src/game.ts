@@ -25,7 +25,7 @@ import {
   RemoteTurnController,
   type TurnDriver,
 } from "./game/turn-driver";
-import { NetworkSessionState } from "./network/session-state";
+import { NetworkSessionState, type NetworkSessionStateSnapshot } from "./network/session-state";
 import type { TurnCommand } from "./game/network/turn-payload";
 import type {
   MatchInitMessage,
@@ -43,6 +43,53 @@ import { RegistryClient } from "./webrtc/registry-client";
 import { HttpClient } from "./webrtc/http-client";
 
 let initialMenuDismissed = false;
+
+const cleanPlayerName = (name: string | null) => {
+  const cleaned = name?.trim();
+  return cleaned ? cleaned : null;
+};
+
+const getNetworkTeamNames = (snapshot: NetworkSessionStateSnapshot) => {
+  if (snapshot.mode === "local") return null;
+
+  const localTeamId = snapshot.player.localTeamId;
+  const remoteTeamId = snapshot.player.remoteTeamId;
+  const localName = cleanPlayerName(snapshot.player.localName);
+  const remoteName = cleanPlayerName(snapshot.player.remoteName);
+
+  const names: Partial<Record<TeamId, string>> = {};
+  if (localTeamId && localName) names[localTeamId] = localName;
+  if (remoteTeamId && remoteName) names[remoteTeamId] = remoteName;
+  return names;
+};
+
+const getNetworkTeamName = (snapshot: NetworkSessionStateSnapshot, teamId: TeamId) => {
+  if (snapshot.mode === "local") return null;
+  const localName = cleanPlayerName(snapshot.player.localName);
+  const remoteName = cleanPlayerName(snapshot.player.remoteName);
+  if (snapshot.player.localTeamId === teamId) return localName;
+  if (snapshot.player.remoteTeamId === teamId) return remoteName;
+  return null;
+};
+
+const replaceWinnerInMessage = (
+  message: string | null,
+  snapshot: NetworkSessionStateSnapshot
+) => {
+  if (!message) return null;
+  if (snapshot.mode === "local") return message;
+
+  const match = /^(Red|Blue) wins!/.exec(message);
+  if (!match) return message;
+
+  const teamId = match[1] as TeamId;
+  const teamName = getNetworkTeamName(snapshot, teamId);
+  if (!teamName) return message;
+
+  const winnerToken = match[1];
+  if (!winnerToken) return message;
+  return message.replace(winnerToken, teamName);
+};
 
 export class Game {
   canvas: HTMLCanvasElement;
@@ -1081,6 +1128,7 @@ export class Game {
   render() {
     const now = nowMs();
     const turnElapsedMs = Math.max(0, now - this.session.state.turnStartMs);
+    const networkSnapshot = this.networkState.getSnapshot();
     const ctx = this.ctx;
     ctx.save();
     ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
@@ -1121,24 +1169,32 @@ export class Game {
 
     ctx.save();
     ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
-    renderHUD({
-      ctx,
-      width: this.width,
-      height: this.height,
-      state: this.session.state,
-      now,
-      activeTeamId: this.activeTeam.id,
-      getTeamHealth: (teamId) => this.getTeamHealth(teamId),
-      wind: this.session.wind,
-      message: this.session.message,
-      turnDurationMs: GAMEPLAY.turnTimeMs,
-    });
+    const teamLabels = getNetworkTeamNames(networkSnapshot) ?? undefined;
+    const activeTeamLabel =
+      getNetworkTeamName(networkSnapshot, this.activeTeam.id) ?? undefined;
+    const displayMessage = replaceWinnerInMessage(this.session.message, networkSnapshot);
+    renderHUD(
+      {
+        ctx,
+        width: this.width,
+        height: this.height,
+        state: this.session.state,
+        now,
+        activeTeamId: this.activeTeam.id,
+        getTeamHealth: (teamId) => this.getTeamHealth(teamId),
+        wind: this.session.wind,
+        message: displayMessage,
+        turnDurationMs: GAMEPLAY.turnTimeMs,
+        ...(teamLabels ? { teamLabels } : {}),
+        ...(activeTeamLabel ? { activeTeamLabel } : {}),
+      }
+    );
 
     renderGameOver({
       ctx,
       width: this.width,
       height: this.height,
-      message: this.session.message,
+      message: displayMessage,
       isGameOver: this.session.state.phase === "gameover",
     });
 
