@@ -5,11 +5,10 @@ It allows players to take turns and control squads of whimsical creatures, with 
 
 # Technology stack
 
-HTML/CSS, TypeScript, Vite
+- Front-end: HTML/CSS, TypeScript, Vite, WebRTC for realtime network play
+- Backend: Cloudflare endpoints to support network discovery and WebRTC peer-to-peer session establishment
 
 ## Compiling and testing
-
-You can study `package.json` to determine the useful scripts available to you. The most important ones are: compilation, unit tests and local dev run.
 
 Use the following console command to verify the changes compile successfully:
 ```
@@ -17,7 +16,7 @@ npx tsc -p tsconfig.json --noEmit
 ```
 To validate the tests are still passing after making changes, use `npm run test:run`, which will run the test suite once, using vitest.
 
-If the `npm run dev` script is launched, the changes will be reflected in the web app, available for the Browser tool to test and / or screenshot.
+If the `npm run dev` script is launched, the changes will be reflected in the running web app, available for the Browser tool to test and / or screenshot.
 
 
 # Coding Conventions
@@ -40,6 +39,8 @@ Comments should be kept to a minimum. Prefer code readability and clean structur
 - Rendering helpers in [src/rendering/](src/rendering/) should stay pure with respect to game state: pass everything needed as parameters and keep DOM interactions centralized in `Game`.
 - Input glue and overlays live under [src/ui/](src/ui/); keep UI-specific state there.
 - Camera behavior and constraints are documented in [camera.md](camera.md).
+- Backend "room registry" design and specs are outlined in [Registry API Spec](cloudflare/registry-api-spec.md)
+- WebRTC realtime network design is reflected in [NetworkDesign.md](NetworkDesign.md)
 
 ## Unit tests
 
