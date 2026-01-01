@@ -12,7 +12,6 @@ import {
   renderHUD,
   type AimInfo,
 } from "./rendering/game-rendering";
-import { renderNetworkStatusHUD } from "./ui/network-status-hud";
 import { renderNetworkLogHUD } from "./ui/network-log-hud";
 import type { Team } from "./game/team-manager";
 import {
@@ -70,6 +69,54 @@ const getNetworkTeamName = (snapshot: NetworkSessionStateSnapshot, teamId: TeamI
   if (snapshot.player.localTeamId === teamId) return localName;
   if (snapshot.player.remoteTeamId === teamId) return remoteName;
   return null;
+};
+
+type NetworkMicroStatus = { text: string; color: string; opponentSide: "left" | "right" };
+
+const getNetworkMicroStatus = (snapshot: NetworkSessionStateSnapshot): NetworkMicroStatus | null => {
+  if (snapshot.mode === "local") return null;
+
+  const remoteTeamId = snapshot.player.remoteTeamId;
+  const localTeamId = snapshot.player.localTeamId;
+  const opponentSide: "left" | "right" =
+    remoteTeamId === "Red"
+      ? "left"
+      : remoteTeamId === "Blue"
+        ? "right"
+        : localTeamId === "Blue"
+          ? "left"
+          : "right";
+
+  if (snapshot.bridge.networkReady && snapshot.bridge.waitingForRemoteSnapshot) {
+    return {
+      text: snapshot.mode === "network-guest" ? "Waiting for host sync..." : "Waiting for sync...",
+      color: "#FFFF00",
+      opponentSide,
+    };
+  }
+
+  switch (snapshot.connection.lifecycle) {
+    case "idle":
+      return { text: "Idle", color: "#888888", opponentSide };
+    case "creating":
+    case "joining":
+      return { text: "Setting up...", color: "#FFA500", opponentSide };
+    case "created":
+    case "joined":
+      return { text: "Waiting...", color: "#FFFF00", opponentSide };
+    case "connecting":
+      return { text: "Connecting...", color: "#FFA500", opponentSide };
+    case "connected":
+      return { text: "Connected", color: "#00FF00", opponentSide };
+    case "disconnected":
+      return { text: "Disconnected", color: "#FF6600", opponentSide };
+    case "error": {
+      const details = snapshot.connection.lastError?.trim();
+      return { text: details ? `Error: ${details}` : "Error", color: "#FF0000", opponentSide };
+    }
+  }
+
+  return { text: "Unknown", color: COLORS.white, opponentSide };
 };
 
 const replaceWinnerInMessage = (
@@ -1172,6 +1219,7 @@ export class Game {
     const teamLabels = getNetworkTeamNames(networkSnapshot) ?? undefined;
     const activeTeamLabel =
       getNetworkTeamName(networkSnapshot, this.activeTeam.id) ?? undefined;
+    const networkMicroStatus = getNetworkMicroStatus(networkSnapshot) ?? undefined;
     const displayMessage = replaceWinnerInMessage(this.session.message, networkSnapshot);
     renderHUD(
       {
@@ -1185,6 +1233,7 @@ export class Game {
         wind: this.session.wind,
         message: displayMessage,
         turnDurationMs: GAMEPLAY.turnTimeMs,
+        ...(networkMicroStatus ? { networkMicroStatus } : {}),
         ...(teamLabels ? { teamLabels } : {}),
         ...(activeTeamLabel ? { activeTeamLabel } : {}),
       }
@@ -1198,11 +1247,10 @@ export class Game {
       isGameOver: this.session.state.phase === "gameover",
     });
 
-    renderNetworkStatusHUD(ctx, this.width, this.networkState);
     renderNetworkLogHUD(ctx, this.width, this.height, this.networkState);
 
-    const fpsText = `FPS: ${this.fps.toFixed(1)}`;
-    drawText(ctx, fpsText, this.width - 12, 12, COLORS.white, 14, "right");
+    const fpsText = `FPS: ${Math.round(this.fps)}`;
+    drawText(ctx, fpsText, this.width - 12, this.height - 12, COLORS.white, 12, "right", "bottom");
     ctx.restore();
   }
 

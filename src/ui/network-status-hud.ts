@@ -2,116 +2,130 @@ import type { NetworkSessionState } from "../network/session-state";
 import { drawText } from "../utils";
 import { COLORS } from "../definitions";
 
+const HUD_FONT_STACK =
+  "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+
+function truncateHudText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  sizePx: number
+) {
+  if (maxWidth <= 0) return "";
+  ctx.font = `bold ${sizePx}px ${HUD_FONT_STACK}`;
+  if (ctx.measureText(text).width <= maxWidth) return text;
+
+  const ellipsis = "…";
+  if (ctx.measureText(ellipsis).width > maxWidth) return "";
+
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const candidate = `${text.slice(0, mid)}${ellipsis}`;
+    if (ctx.measureText(candidate).width <= maxWidth) lo = mid + 1;
+    else hi = mid;
+  }
+  const keep = Math.max(0, lo - 1);
+  return `${text.slice(0, keep)}${ellipsis}`;
+}
+
 export function renderNetworkStatusHUD(
   ctx: CanvasRenderingContext2D,
-  _width: number,
+  width: number,
   networkState: NetworkSessionState
 ): void {
   const snapshot = networkState.getSnapshot();
-  
+
   if (snapshot.mode === "local") return;
 
-  const x = 12;
-  const y = 40;
-  const lineHeight = 18;
-  let currentY = y;
-
-  // Connection state badge
   const connectionState = snapshot.connection.lifecycle;
-  let stateColor = COLORS.white;
-  let stateText = "Unknown";
+  let textColor = COLORS.white;
+  let text = "Unknown";
 
-  switch (connectionState) {
-    case "idle":
-      stateColor = "#888888";
-      stateText = "Idle";
-      break;
-    case "creating":
-    case "joining":
-      stateColor = "#FFA500";
-      stateText = "Setting up...";
-      break;
-    case "created":
-    case "joined":
-      stateColor = "#FFFF00";
-      stateText = "Waiting...";
-      break;
-    case "connecting":
-      stateColor = "#FFA500";
-      stateText = "Connecting...";
-      break;
-    case "connected":
-      stateColor = "#00FF00";
-      stateText = "Connected";
-      break;
-    case "disconnected":
-      stateColor = "#FF6600";
-      stateText = "Disconnected";
-      break;
-    case "error":
-      stateColor = "#FF0000";
-      stateText = "Error";
-      break;
+  if (snapshot.bridge.networkReady && snapshot.bridge.waitingForRemoteSnapshot) {
+    textColor = "#FFFF00";
+    text =
+      snapshot.mode === "network-guest"
+        ? "Waiting for host sync..."
+        : "Waiting for remote sync...";
+  } else {
+    const room = snapshot.registry.code ? ` ${snapshot.registry.code}` : "";
+    switch (connectionState) {
+      case "idle":
+        textColor = "#888888";
+        text = "Idle";
+        break;
+      case "creating":
+        textColor = "#FFA500";
+        text = room ? `Creating room${room}...` : "Creating room...";
+        break;
+      case "joining":
+        textColor = "#FFA500";
+        text = room ? `Joining room${room}...` : "Joining room...";
+        break;
+      case "created":
+      case "joined":
+        textColor = "#FFFF00";
+        text = room ? `Waiting for opponent in${room}...` : "Waiting for opponent...";
+        break;
+      case "connecting":
+        textColor = "#FFA500";
+        text = "Connecting...";
+        break;
+      case "connected": {
+        textColor = "#00FF00";
+        const otherPlayerName = snapshot.player.remoteName || "opponent";
+        text = `Connected to ${otherPlayerName}`;
+        break;
+      }
+      case "disconnected":
+        textColor = "#FF6600";
+        text = "Disconnected";
+        break;
+      case "error": {
+        textColor = "#FF0000";
+        const details = snapshot.connection.lastError?.trim();
+        text = details ? `Error: ${details}` : "Error";
+        break;
+      }
+    }
   }
 
-  // Draw state badge
+  const panelX = 12;
+  const panelY = 40;
+  const fontSizePx = 12;
+  const paddingX = 10;
+  const paddingY = 6;
+  const maxPanelWidth = Math.max(0, width - panelX - 12);
+
   ctx.save();
+  const displayText = truncateHudText(
+    ctx,
+    text,
+    Math.max(0, maxPanelWidth - paddingX * 2),
+    fontSizePx
+  );
+  const textWidth = ctx.measureText(displayText).width;
+  const panelWidth = Math.min(maxPanelWidth, Math.ceil(textWidth) + paddingX * 2);
+  const panelHeight = fontSizePx + paddingY * 2;
+
   ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-  ctx.fillRect(x - 4, currentY - 14, 150, 20);
-  ctx.strokeStyle = stateColor;
+  ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
+  ctx.strokeStyle = textColor;
   ctx.lineWidth = 1;
-  ctx.strokeRect(x - 4, currentY - 14, 150, 20);
-  
-  drawText(ctx, `● ${stateText}`, x, currentY, stateColor, 12, "left");
-  currentY += lineHeight;
+  ctx.strokeRect(panelX, panelY, panelWidth, panelHeight);
 
-  // Room info
-  if (snapshot.registry.code) {
-    drawText(
-      ctx,
-      `Room: ${snapshot.registry.code}`,
-      x,
-      currentY,
-      COLORS.white,
-      11,
-      "left"
-    );
-    currentY += lineHeight;
-  }
-
-  // Role and players
-  const role = snapshot.mode === "network-host" ? "Host" : "Guest";
-  const localName = snapshot.player.localName || "You";
-  const remoteName = snapshot.player.remoteName || "Waiting...";
-
-  drawText(ctx, `${role}: ${localName}`, x, currentY, COLORS.white, 11, "left");
-  currentY += lineHeight;
-  
   drawText(
     ctx,
-    `Opponent: ${remoteName}`,
-    x,
-    currentY,
-    snapshot.player.remoteName ? COLORS.white : "#888888",
-    11,
-    "left"
+    displayText,
+    panelX + paddingX,
+    panelY + paddingY,
+    textColor,
+    fontSizePx,
+    "left",
+    "top"
   );
-  currentY += lineHeight;
-
-  // Waiting indicator (when remote turn is active)
-  if (snapshot.bridge.networkReady && snapshot.bridge.waitingForRemoteSnapshot) {
-    const waitText =
-      snapshot.mode === "network-guest" ? "Waiting for host sync..." : "Waiting for remote sync...";
-    drawText(
-      ctx,
-      waitText,
-      x,
-      currentY,
-      "#FFFF00",
-      11,
-      "left"
-    );
-  }
 
   ctx.restore();
 }

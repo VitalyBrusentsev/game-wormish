@@ -47,6 +47,7 @@ export type RenderHudOptions = {
   activeTeamId: TeamId;
   activeTeamLabel?: string;
   teamLabels?: Partial<Record<TeamId, string>>;
+  networkMicroStatus?: { text: string; color: string; opponentSide: "left" | "right" };
   getTeamHealth: (id: TeamId) => number;
   wind: number;
   message: string | null;
@@ -90,6 +91,7 @@ export function renderHUD({
   activeTeamId,
   activeTeamLabel,
   teamLabels,
+  networkMicroStatus,
   getTeamHealth,
   wind,
   message,
@@ -121,6 +123,8 @@ export function renderHUD({
     hbW,
     14
   );
+  ctx.font = `bold 14px ${HUD_FONT_STACK}`;
+  const redLabelWidth = ctx.measureText(redLabel).width;
   drawText(ctx, redLabel, padding + 12, topY, COLORS.white, 14);
   drawHealthBar(
     ctx,
@@ -139,6 +143,8 @@ export function renderHUD({
     hbW,
     14
   );
+  ctx.font = `bold 14px ${HUD_FONT_STACK}`;
+  const blueLabelWidth = ctx.measureText(blueLabel).width;
   drawText(
     ctx,
     blueLabel,
@@ -159,26 +165,118 @@ export function renderHUD({
     COLORS.healthRed
   );
 
-  drawText(ctx, "F1: Help", padding + 12, topY + 30, COLORS.white, 12);
-
   const timeLeftMs = state.timeLeftMs(now, turnDurationMs);
   const timeLeft = Math.max(0, Math.ceil(timeLeftMs / 1000));
   const centerX = width / 2;
 
   const teamStr = activeTeamLabel ?? `${activeTeamId} Team`;
-  const weaponStr = `Weapon: ${state.weapon}`;
+  const weaponLabel = state.weapon === WeaponType.HandGrenade ? "Grenade" : state.weapon;
+  const weaponStr = weaponLabel;
   const clockStr = `Time: ${timeLeft}s`;
 
   drawText(ctx, teamStr, centerX, topY, COLORS.white, 14, "center");
   drawText(ctx, weaponStr, centerX, topY + 16, COLORS.white, 14, "center");
-  drawText(ctx, clockStr, centerX, topY + 30, COLORS.white, 12, "center");
+  drawText(ctx, clockStr, centerX, topY + 50, COLORS.white, 12, "center");
 
-  const windY = padding + barH + 14;
-  const dir = Math.sign(wind);
-  const mag = Math.abs(wind) / WORLD.windMax;
-  const length = 80 * mag;
-  drawArrow(ctx, centerX - (length / 2) * dir, windY, 0, length * dir || 0.0001, COLORS.power, 4);
-  drawText(ctx, "Wind", centerX, windY + 6, COLORS.white, 12, "center", "top", false);
+  const windDir = Math.sign(wind);
+  const windMag01 = Math.min(1, Math.abs(wind) / WORLD.windMax);
+  const desiredWindLen = 80 * windMag01;
+  if (desiredWindLen > 0) {
+    ctx.font = `bold 14px ${HUD_FONT_STACK}`;
+    const teamStrWidth = ctx.measureText(teamStr).width;
+    const gapFromTeam = 18;
+    const arrowY = topY + 8;
+    const labelY = topY + 18;
+
+    if (windDir >= 0) {
+      const startX = centerX + teamStrWidth / 2 + gapFromTeam;
+      const maxLen = width - padding - 12 - startX;
+      const windLen = Math.max(0, Math.min(desiredWindLen, maxLen));
+      if (windLen > 0) {
+        drawArrow(ctx, startX, arrowY, 0, windLen, COLORS.power, 4);
+        drawText(ctx, "Wind", startX + windLen / 2, labelY, COLORS.white, 10, "center", "top", false);
+      }
+    } else {
+      const startX = centerX - teamStrWidth / 2 - gapFromTeam;
+      const maxLen = startX - (padding + 12);
+      const windLen = Math.max(0, Math.min(desiredWindLen, maxLen));
+      if (windLen > 0) {
+        drawArrow(ctx, startX, arrowY, Math.PI, windLen, COLORS.power, 4);
+        drawText(ctx, "Wind", startX - windLen / 2, labelY, COLORS.white, 10, "center", "top", false);
+      }
+    }
+  }
+
+  if (networkMicroStatus) {
+    const dotR = 4;
+    const dotGap = 6;
+    const gapFromLabel = 10;
+    const minGapFromCenter = 16;
+    const textSizePx = 12;
+    const dotAndGap = dotR * 2 + dotGap;
+    const dotY = topY + 8;
+    const textY = topY + 1;
+
+    if (networkMicroStatus.opponentSide === "left") {
+      const startX = padding + 12 + redLabelWidth + gapFromLabel;
+      const maxX = centerX - minGapFromCenter;
+      const availableWidth = maxX - startX;
+      if (availableWidth > dotAndGap + 4) {
+        const statusText = truncateHudText(
+          ctx,
+          networkMicroStatus.text,
+          availableWidth - dotAndGap,
+          textSizePx
+        );
+        ctx.fillStyle = networkMicroStatus.color;
+        ctx.beginPath();
+        ctx.arc(startX + dotR, dotY, dotR, 0, Math.PI * 2);
+        ctx.fill();
+        drawText(
+          ctx,
+          statusText,
+          startX + dotAndGap,
+          textY,
+          COLORS.white,
+          textSizePx,
+          "left",
+          "top",
+          false
+        );
+      }
+    } else {
+      const endX = width - padding - 12 - blueLabelWidth - gapFromLabel;
+      const minX = centerX + minGapFromCenter;
+      const availableWidth = endX - minX;
+      if (availableWidth > dotAndGap + 4) {
+        const statusText = truncateHudText(
+          ctx,
+          networkMicroStatus.text,
+          availableWidth - dotAndGap,
+          textSizePx
+        );
+        ctx.font = `bold ${textSizePx}px ${HUD_FONT_STACK}`;
+        const statusWidth = ctx.measureText(statusText).width;
+        const totalWidth = dotAndGap + statusWidth;
+        const startX = endX - totalWidth;
+        ctx.fillStyle = networkMicroStatus.color;
+        ctx.beginPath();
+        ctx.arc(startX + dotR, dotY, dotR, 0, Math.PI * 2);
+        ctx.fill();
+        drawText(
+          ctx,
+          statusText,
+          startX + dotAndGap,
+          textY,
+          COLORS.white,
+          textSizePx,
+          "left",
+          "top",
+          false
+        );
+      }
+    }
+  }
 
   ctx.restore();
 
