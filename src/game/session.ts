@@ -46,6 +46,12 @@ export interface SessionCallbacks {
   }) => void;
   onRestart?: () => void;
   onTurnCommand?: (command: TurnCommand, meta: { turnIndex: number; teamId: TeamId }) => void;
+  onTurnEffects?: (effects: {
+    turnIndex: number;
+    actingTeamId: TeamId;
+    terrainOperations: TerrainOperation[];
+    wormHealth: WormHealthChange[];
+  }) => void;
 }
 
 export interface WormSnapshot {
@@ -156,6 +162,8 @@ export class GameSession {
   private projectileIds = new Map<Projectile, number>();
   private terminatedProjectiles = new Set<number>();
   private nextProjectileId = 1;
+  private appliedRemoteTerrainOperationKeys = new Set<string>();
+  private appliedRemoteWormHealthKeys = new Set<string>();
   private turnControllers = new Map<TeamId, TurnDriver>();
   private currentTurnDriver: TurnDriver | null = null;
   private currentTurnContext: TurnContext | null = null;
@@ -197,6 +205,36 @@ export class GameSession {
 
   getTurnIndex(): number {
     return this.turnIndex;
+  }
+
+  applyRemoteTurnEffects(effects: {
+    turnIndex: number;
+    actingTeamId: TeamId;
+    terrainOperations: TerrainOperation[];
+    wormHealth: WormHealthChange[];
+  }) {
+    if (effects.turnIndex !== this.turnIndex) return;
+    if (effects.actingTeamId !== this.activeTeam.id) return;
+
+    for (const operation of effects.terrainOperations) {
+      if (operation.type !== "carve-circle") continue;
+      const key = this.terrainOperationKey(operation);
+      if (this.appliedRemoteTerrainOperationKeys.has(key)) continue;
+      this.appliedRemoteTerrainOperationKeys.add(key);
+      this.terrain.carveCircle(operation.x, operation.y, operation.radius);
+    }
+
+    for (const change of effects.wormHealth) {
+      const key = this.wormHealthKey(change);
+      if (this.appliedRemoteWormHealthKeys.has(key)) continue;
+      this.appliedRemoteWormHealthKeys.add(key);
+      const team = this.teams.find((t) => t.id === change.teamId);
+      if (!team) continue;
+      const worm = team.worms[change.wormIndex];
+      if (!worm) continue;
+      worm.health = change.after;
+      worm.alive = change.alive;
+    }
   }
 
   hasPendingTurnResolution(): boolean {
@@ -274,6 +312,8 @@ export class GameSession {
     this.projectileIds.clear();
     this.terminatedProjectiles.clear();
     this.nextProjectileId = 1;
+    this.appliedRemoteTerrainOperationKeys.clear();
+    this.appliedRemoteWormHealthKeys.clear();
     this.beginTurnLog();
     this.configureTurnDriver(initial);
   }
@@ -733,23 +773,25 @@ export class GameSession {
     const previousDriver = this.currentTurnDriver;
     const previousContext = this.currentTurnContext;
 
-    for (const change of resolution.wormHealth) {
-      const team = this.teams.find((t) => t.id === change.teamId);
-      if (!team) {
-        throw new Error(`Unknown team referenced in resolution: ${change.teamId}`);
-      }
-      const worm = team.worms[change.wormIndex];
-      if (!worm) {
-        throw new Error("Unknown worm index referenced in resolution");
-      }
-      if (worm.health !== change.before) {
-        throw new Error("Worm health mismatch before applying resolution change");
-      }
-      if (worm.alive !== change.wasAlive) {
-        throw new Error("Worm alive state mismatch before applying resolution change");
-      }
-      if (Math.abs(change.before + change.delta - change.after) > 1e-3) {
-        throw new Error("Worm health delta mismatch in resolution change");
+    if (this.appliedRemoteWormHealthKeys.size === 0) {
+      for (const change of resolution.wormHealth) {
+        const team = this.teams.find((t) => t.id === change.teamId);
+        if (!team) {
+          throw new Error(`Unknown team referenced in resolution: ${change.teamId}`);
+        }
+        const worm = team.worms[change.wormIndex];
+        if (!worm) {
+          throw new Error("Unknown worm index referenced in resolution");
+        }
+        if (worm.health !== change.before) {
+          throw new Error("Worm health mismatch before applying resolution change");
+        }
+        if (worm.alive !== change.wasAlive) {
+          throw new Error("Worm alive state mismatch before applying resolution change");
+        }
+        if (Math.abs(change.before + change.delta - change.after) > 1e-3) {
+          throw new Error("Worm health delta mismatch in resolution change");
+        }
       }
     }
 
@@ -801,6 +843,8 @@ export class GameSession {
 
     for (const operation of resolution.terrainOperations) {
       if (operation.type !== "carve-circle") continue;
+      const key = this.terrainOperationKey(operation);
+      if (this.appliedRemoteTerrainOperationKeys.has(key)) continue;
       this.terrain.carveCircle(operation.x, operation.y, operation.radius);
     }
 
@@ -817,6 +861,8 @@ export class GameSession {
     this.projectileIds.clear();
     this.terminatedProjectiles.clear();
     this.nextProjectileId = 1;
+    this.appliedRemoteTerrainOperationKeys.clear();
+    this.appliedRemoteWormHealthKeys.clear();
     this.beginTurnLog();
     this.pendingTurnResolution = null;
     this.waitingForRemoteResolution = false;
@@ -1076,12 +1122,19 @@ export class GameSession {
   }
 
   private recordTerrainCarve(x: number, y: number, radius: number) {
-    this.turnLog.terrainOperations.push({
+    const operation: TerrainOperation = {
       type: "carve-circle",
       x,
       y,
       radius,
       atMs: this.turnTimestampMs(),
+    };
+    this.turnLog.terrainOperations.push(operation);
+    this.callbacks.onTurnEffects?.({
+      turnIndex: this.turnIndex,
+      actingTeamId: this.activeTeam.id,
+      terrainOperations: [{ ...operation }],
+      wormHealth: [],
     });
   }
 
@@ -1095,7 +1148,7 @@ export class GameSession {
     if (beforeHealth === worm.health && wasAlive === worm.alive) return;
     const wormIndex = team.worms.indexOf(worm);
     if (wormIndex === -1) return;
-    this.turnLog.wormHealth.push({
+    const change: WormHealthChange = {
       teamId: team.id,
       wormIndex,
       before: beforeHealth,
@@ -1105,7 +1158,27 @@ export class GameSession {
       atMs: this.turnTimestampMs(),
       wasAlive,
       alive: worm.alive,
+    };
+    this.turnLog.wormHealth.push(change);
+    this.callbacks.onTurnEffects?.({
+      turnIndex: this.turnIndex,
+      actingTeamId: this.activeTeam.id,
+      terrainOperations: [],
+      wormHealth: [{ ...change }],
     });
+  }
+
+  private terrainOperationKey(operation: TerrainOperation): string {
+    if (operation.type !== "carve-circle") return "unknown";
+    return `carve-circle|${operation.atMs}|${operation.x.toFixed(3)}|${operation.y.toFixed(
+      3
+    )}|${operation.radius.toFixed(3)}`;
+  }
+
+  private wormHealthKey(change: WormHealthChange): string {
+    return `${change.teamId}|${change.wormIndex}|${change.atMs}|${change.after.toFixed(
+      3
+    )}|${change.alive ? 1 : 0}`;
   }
 
   private buildTurnResolution(

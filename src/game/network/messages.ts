@@ -1,7 +1,6 @@
 import type { MatchInitSnapshot } from "../session";
 import type { TeamId } from "../../definitions";
-import type { TurnCommand } from "./turn-payload";
-import type { TurnResolution } from "./turn-payload";
+import type { TerrainOperation, TurnCommand, TurnResolution, WormHealthChange } from "./turn-payload";
 
 export interface MatchInitMessage {
   type: "match_init";
@@ -28,6 +27,16 @@ export interface TurnResolutionMessage {
   payload: TurnResolution;
 }
 
+export interface TurnEffectsMessage {
+  type: "turn_effects";
+  payload: {
+    turnIndex: number;
+    actingTeamId: TeamId;
+    terrainOperations: TerrainOperation[];
+    wormHealth: WormHealthChange[];
+  };
+}
+
 export interface TurnCommandMessage {
   type: "turn_command";
   payload: {
@@ -42,4 +51,5 @@ export type NetworkMessage =
   | PlayerHelloMessage
   | MatchRestartRequestMessage
   | TurnCommandMessage
+  | TurnEffectsMessage
   | TurnResolutionMessage;

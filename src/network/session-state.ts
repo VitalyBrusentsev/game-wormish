@@ -375,6 +375,12 @@ const formatNetworkMessage = (message: NetworkMessage): string => {
         2
       )} ids=[${command.projectileIds.join(",")}]`;
     }
+    case "turn_effects": {
+      const { turnIndex, actingTeamId, terrainOperations, wormHealth } = message.payload;
+      const terrainCount = terrainOperations.length;
+      const healthCount = wormHealth.length;
+      return `turn_effects#${turnIndex} ${actingTeamId} terrain=${terrainCount} health=${healthCount}`;
+    }
     case "turn_resolution": {
       const r = message.payload;
       const commandCount = r.commandCount;

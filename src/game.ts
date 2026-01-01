@@ -32,6 +32,7 @@ import type {
   NetworkMessage,
   PlayerHelloMessage,
   TurnCommandMessage,
+  TurnEffectsMessage,
   TurnResolutionMessage,
 } from "./game/network/messages";
 import { applyAimThrottle, type AimThrottleState } from "./game/network/aim-throttle";
@@ -94,6 +95,7 @@ export class Game {
     onExplosion: (info) => this.handleSessionExplosion(info),
     onRestart: () => this.resetCameraShake(),
     onTurnCommand: (command, meta) => this.handleLocalTurnCommand(command, meta),
+    onTurnEffects: (effects) => this.handleLocalTurnEffects(effects),
   };
 
   private readonly turnControllers = new Map<TeamId, TurnDriver>();
@@ -377,6 +379,19 @@ export class Game {
     this.sendNetworkMessage(message);
   }
 
+  private handleLocalTurnEffects(effects: TurnEffectsMessage["payload"]) {
+    if (!this.webrtcClient) return;
+    const snapshot = this.networkState.getSnapshot();
+    if (snapshot.mode === "local") return;
+    if (snapshot.connection.lifecycle !== "connected") return;
+
+    const message: TurnEffectsMessage = {
+      type: "turn_effects",
+      payload: effects,
+    };
+    this.sendNetworkMessage(message);
+  }
+
   private flushTurnResolution() {
     if (!this.webrtcClient) return;
     const snapshot = this.networkState.getSnapshot();
@@ -576,6 +591,10 @@ export class Game {
         this.deliverCommandToController(message.payload);
         return;
       }
+      if (message.type === "turn_effects") {
+        this.deliverEffectsToSession(message.payload);
+        return;
+      }
       if (message.type === "turn_resolution") {
         this.networkState.enqueueResolution(message.payload);
         this.deliverResolutionToController();
@@ -712,6 +731,12 @@ export class Game {
     if (controller && controller.type === "remote") {
       (controller as RemoteTurnController).receiveCommand(payload.turnIndex, payload.command);
     }
+  }
+
+  private deliverEffectsToSession(payload: TurnEffectsMessage["payload"]) {
+    if (payload.turnIndex !== this.session.getTurnIndex()) return;
+    if (payload.actingTeamId !== this.session.activeTeam.id) return;
+    this.session.applyRemoteTurnEffects(payload);
   }
 
   get activeTeam(): Team {
