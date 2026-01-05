@@ -5,7 +5,7 @@ type MenuMode = "start" | "pause";
 type MenuItem = {
   id: "help" | "start" | "friends";
   label: string;
-  description: string;
+
   enabled: boolean;
   action: "help" | "start" | "restart" | "network" | null;
 };
@@ -36,10 +36,8 @@ export class StartMenuOverlay {
     this.closeable = closeable;
     this.dialog.show({
       title: "Worm Command Center",
-      subtitle:
-        mode === "start"
-          ? "Select your briefing"
-          : "Plans change mid-mischief? Choose wisely.",
+      subtitle: "Time to wreak havoc and have some fun!",
+      extraClass: "dialog-shell--narrow",
       closeable,
       zIndex: 24,
       onClose: (reason) => this.callbacks.onClose(reason),
@@ -72,13 +70,7 @@ export class StartMenuOverlay {
     const container = document.createElement("div");
     container.className = "menu-dialog";
 
-    const blurb = document.createElement("p");
-    blurb.className = "menu-dialog__blurb";
-    blurb.textContent =
-      this.mode === "start"
-        ? "Tune your gadgets, rally your worms, and leap into the fray."
-        : "Storm clouds ahead! Swap gear, call for help, or reboot the chaos.";
-    container.appendChild(blurb);
+
 
     const list = document.createElement("div");
     list.className = "menu-options";
@@ -89,16 +81,18 @@ export class StartMenuOverlay {
       button.disabled = !item.enabled;
       button.type = "button";
 
+      button.classList.add(`menu-button--${item.id}`);
+
       const label = document.createElement("span");
       label.className = "menu-button__label";
       label.textContent = item.label;
 
-      const desc = document.createElement("span");
-      desc.className = "menu-button__description";
-      desc.textContent = item.description;
+      const icon = document.createElement("div");
+      icon.className = "menu-button__icon";
 
       button.appendChild(label);
-      button.appendChild(desc);
+      button.appendChild(icon);
+
 
       button.addEventListener("click", () => this.triggerAction(item.action));
 
@@ -107,12 +101,7 @@ export class StartMenuOverlay {
 
     container.appendChild(list);
 
-    const footer = document.createElement("p");
-    footer.className = "menu-dialog__footer";
-    footer.textContent = this.closeable
-      ? "Esc also slips you back into the battlefield."
-      : "Press Start to deploy—no backing out of this briefing.";
-    container.appendChild(footer);
+
 
     return container;
   }
@@ -140,30 +129,27 @@ export class StartMenuOverlay {
 
   private getItems(): MenuItem[] {
     const startLabel = this.mode === "start" ? "Start" : "Restart Mission";
-    const startDescription =
-      this.mode === "start"
-        ? "Deploy your crew and make a heroic splash."
-        : "Spin the world back to turn one and try a new gambit.";
+
 
     return [
       {
         id: "help",
         label: "Help",
-        description: "Controls, wind wisdom, and other battle tips.",
+
         enabled: true,
         action: "help",
       },
       {
         id: "start",
         label: startLabel,
-        description: startDescription,
+
         enabled: true,
         action: this.mode === "start" ? "start" : "restart",
       },
       {
         id: "friends",
         label: "Play With Friends",
-        description: "Host or join a network match with a friend.",
+
         enabled: true,
         action: "network",
       },

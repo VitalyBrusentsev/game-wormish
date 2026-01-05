@@ -3,22 +3,27 @@
 :root {
   color-scheme: light dark;
 }
-html, body {
+
+html,
+body {
   margin: 0;
   padding: 0;
   height: 100%;
 }
+
 body {
   background: #0a0f1a;
   overflow: hidden;
   user-select: none;
 }
+
 canvas {
   display: block;
   width: 100vw;
   height: 100vh;
   image-rendering: pixelated;
 }
+
 /* Ensure no focus outline when canvas is focused for keyboard */
 canvas:focus {
   outline: none;
@@ -66,6 +71,10 @@ Dialog overlays
   color: #f4f6ff;
   font-family: "Fredoka", "Trebuchet MS", "Nunito", system-ui, sans-serif;
   pointer-events: auto;
+}
+
+.dialog-shell--narrow {
+  width: min(90vw, 500px);
 }
 
 .dialog-shell::before {
@@ -149,15 +158,7 @@ Start menu dialog
   gap: 14px;
 }
 
-.menu-dialog__blurb {
-  margin: 0;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: linear-gradient(120deg, rgba(88, 138, 255, 0.14), rgba(255, 255, 255, 0.04));
-  border: 1px solid rgba(120, 180, 255, 0.2);
-  color: rgba(230, 236, 255, 0.9);
-  font-size: 15px;
-}
+
 
 .menu-options {
   display: flex;
@@ -178,6 +179,10 @@ Start menu dialog
   text-align: left;
   transition: transform 100ms ease, box-shadow 120ms ease, border-color 120ms ease,
     background 120ms ease;
+
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .menu-button:hover:not(:disabled) {
@@ -207,19 +212,32 @@ Start menu dialog
   font-size: 18px;
 }
 
-.menu-button__description {
-  display: block;
-  margin-top: 4px;
-  color: rgba(227, 235, 255, 0.88);
-  font-size: 14px;
+.menu-button__icon {
+  width: 80px;
+  height: 80px;
+  /* Prevent shrinking in flex container */
+  min-width: 80px;
+
+  background-image: url("../assets/menu_icons.png");
+  /* 300% width locks the horizontal steps. auto height preserves aspect ratio. */
+  background-size: 300% auto;
+  background-repeat: no-repeat;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.4));
 }
 
-.menu-dialog__footer {
-  margin: 6px 0 0;
-  color: rgba(210, 218, 240, 0.82);
-  font-size: 13px;
-  text-align: center;
+.menu-button--help .menu-button__icon {
+  background-position: 0% 50%;
 }
+
+.menu-button--start .menu-button__icon {
+  background-position: 50% 50%;
+}
+
+.menu-button--friends .menu-button__icon {
+  background-position: 100% 50%;
+}
+
+
 
 /*
 =========================

@@ -6,6 +6,7 @@ export type DialogOptions = {
   content: HTMLElement;
   closeable?: boolean;
   zIndex?: number;
+  extraClass?: string;
   onClose?: (reason: CloseReason) => void;
 };
 
@@ -81,6 +82,10 @@ export class CommandDialog {
 
     this.root.style.zIndex = `${options.zIndex ?? 30}`;
 
+    if (options.extraClass) {
+      this.shell.classList.add(options.extraClass);
+    }
+
     this.titleEl.textContent = options.title;
     this.subtitleEl.textContent = options.subtitle ?? "";
     this.subtitleEl.classList.toggle("dialog-subtitle--hidden", !options.subtitle);
@@ -96,6 +101,11 @@ export class CommandDialog {
 
   hide() {
     if (!this.isVisible()) return;
+
+    if (this.currentOptions?.extraClass) {
+      this.shell.classList.remove(this.currentOptions.extraClass);
+    }
+
     this.root.classList.remove("dialog-layer--visible");
     window.removeEventListener("keydown", this.handleKeydown);
     this.currentOptions = null;
