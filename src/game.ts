@@ -162,6 +162,9 @@ export class Game {
   private readonly cameraPadding = 48;
   private cameraOffsetX = 0;
   private cameraOffsetY = 0;
+  private cameraY = 0;
+  private cameraTargetY = 0;
+  private cameraVelocityY = 0;
   private cameraShakeTime = 0;
   private cameraShakeDuration = 0;
   private cameraShakeMagnitude = 0;
@@ -199,7 +202,7 @@ export class Game {
   constructor(width: number, height: number) {
     this.width = width;
     this.height = height;
-    
+
     // Determine registry URL based on environment
     const isDev = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
     this.registryUrl = isDev
@@ -226,6 +229,8 @@ export class Game {
     this.initializeTurnControllers();
     this.cameraX = this.clampCameraX(this.activeWorm.x - this.width / 2);
     this.cameraTargetX = this.cameraX;
+    this.cameraY = this.clampCameraY(this.activeWorm.y - this.height / 2);
+    this.cameraTargetY = this.cameraY;
     this.lastTurnStartMs = this.session.state.turnStartMs;
 
     this.helpOverlay = new HelpOverlay({
@@ -265,7 +270,7 @@ export class Game {
         this.updateCursor();
       }
     });
-    
+
     this.startMenu = new StartMenuOverlay({
       onHelp: () => {
         this.helpOpenedFromMenu = true;
@@ -339,7 +344,10 @@ export class Game {
     this.canvas.height = this.height;
     this.cameraX = this.clampCameraX(centerX - this.width / 2);
     this.cameraTargetX = this.cameraX;
+    this.cameraY = this.clampCameraY(this.activeWorm.y - this.height / 2);
+    this.cameraTargetY = this.cameraY;
     this.cameraVelocityX = 0;
+    this.cameraVelocityY = 0;
   }
 
   start() {
@@ -636,7 +644,7 @@ export class Game {
 
   cancelNetworkSetup(): void {
     if (this.webrtcClient) {
-      this.webrtcClient.closeRoom().catch(() => {});
+      this.webrtcClient.closeRoom().catch(() => { });
       this.webrtcClient = null;
     }
     this.connectionStartRequested = false;
@@ -651,7 +659,7 @@ export class Game {
 
     this.webrtcClient.onStateChange((state: ConnectionState) => {
       this.networkState.updateConnectionLifecycle(state as any, Date.now());
-      
+
       if (state === "connected") {
         this.swapToNetworkControllers();
         this.sendPlayerHello();
@@ -663,7 +671,7 @@ export class Game {
           this.networkState.setWaitingForSnapshot(true);
         }
       }
-      
+
       this.notifyNetworkStateChange();
     });
 
@@ -728,6 +736,9 @@ export class Game {
     this.cameraX = this.clampCameraX(this.activeWorm.x - this.width / 2);
     this.cameraTargetX = this.cameraX;
     this.cameraVelocityX = 0;
+    this.cameraY = this.clampCameraY(this.activeWorm.y - this.height / 2);
+    this.cameraTargetY = this.cameraY;
+    this.cameraVelocityY = 0;
     this.updateCursor();
     this.sendMatchInit();
   }
@@ -743,9 +754,12 @@ export class Game {
   }
 
   private applySnapshot(snapshot: MatchInitSnapshot) {
+    // We no longer resize here, allowing the guest to have a different viewport size than the host's logic.
+    /*
     if (snapshot.height !== this.height) {
       this.resize(this.width, snapshot.height);
     }
+    */
     const nextSession = new GameSession(snapshot.width, this.height, {
       horizontalPadding: snapshot.terrain.horizontalPadding,
       callbacks: this.sessionCallbacks,
@@ -1005,12 +1019,25 @@ export class Game {
     const minVisible = Math.min(groundWidth * 0.5, viewWidth);
     const minX = minVisible - viewWidth;
     const maxX = groundWidth - minVisible;
-    return { minX, maxX };
+
+    const groundHeight = this.session.height;
+    const viewHeight = this.height;
+
+    // Allow scrolling up to the total height difference
+    const maxY = Math.max(0, groundHeight - viewHeight);
+    const minY = Math.min(0, groundHeight - viewHeight);
+
+    return { minX, maxX, minY, maxY };
   }
 
   private clampCameraX(x: number) {
     const { minX, maxX } = this.getCameraBounds();
     return clamp(x, minX, maxX);
+  }
+
+  private clampCameraY(y: number) {
+    const { minY, maxY } = this.getCameraBounds();
+    return clamp(y, minY, maxY);
   }
 
   private getCameraMargin() {
@@ -1038,6 +1065,7 @@ export class Game {
   private updateCamera(dt: number, allowEdgeScroll: boolean) {
     const bounds = this.getCameraBounds();
     let targetX = this.cameraTargetX;
+    let targetY = this.cameraTargetY;
 
     if (allowEdgeScroll) {
       const edgeDelta = this.getEdgeScrollDelta(dt, bounds);
@@ -1049,18 +1077,33 @@ export class Game {
     targetX = clamp(targetX, bounds.minX, bounds.maxX);
     this.cameraTargetX = targetX;
 
+    // Y scroll could also be edge-scrolled if we wanted, but for now X is sufficient or we can add Y edge scrolling logic too.
+    // Let's just clamp Y target.
+    targetY = clamp(targetY, bounds.minY, bounds.maxY);
+    this.cameraTargetY = targetY;
+
     const stiffness = 18;
     const damping = 10;
     const delta = this.cameraTargetX - this.cameraX;
     this.cameraVelocityX += delta * stiffness * dt;
+    const deltaY = this.cameraTargetY - this.cameraY;
+    this.cameraVelocityY += deltaY * stiffness * dt;
     const decay = Math.exp(-damping * dt);
     this.cameraVelocityX *= decay;
     this.cameraX += this.cameraVelocityX * dt;
+    this.cameraVelocityY *= decay;
+    this.cameraY += this.cameraVelocityY * dt;
 
     const clampedX = clamp(this.cameraX, bounds.minX, bounds.maxX);
+    const clampedY = clamp(this.cameraY, bounds.minY, bounds.maxY);
+
     if (clampedX !== this.cameraX) {
       this.cameraX = clampedX;
       this.cameraVelocityX = 0;
+    }
+    if (clampedY !== this.cameraY) {
+      this.cameraY = clampedY;
+      this.cameraVelocityY = 0;
     }
   }
 
@@ -1076,6 +1119,7 @@ export class Game {
     const projectile = this.session.projectiles[this.session.projectiles.length - 1]!;
     const bounds = this.getCameraBounds();
     this.cameraTargetX = clamp(projectile.x - this.width / 2, bounds.minX, bounds.maxX);
+    this.cameraTargetY = clamp(projectile.y - this.height / 2, bounds.minY, bounds.maxY);
     return true;
   }
 
@@ -1083,19 +1127,30 @@ export class Game {
     const margin = this.getCameraMargin();
     const bounds = this.getCameraBounds();
     const wormX = this.activeWorm.x;
+    const wormY = this.activeWorm.y;
     const leftEdge = this.cameraX + margin;
     const rightEdge = this.cameraX + this.width - margin;
+    const topEdge = this.cameraY + margin;
+    const bottomEdge = this.cameraY + this.height - margin;
     let targetX = this.cameraTargetX;
+    let targetY = this.cameraTargetY;
 
     if (wormX < leftEdge) {
       targetX = wormX - margin;
     } else if (wormX > rightEdge) {
       targetX = wormX - (this.width - margin);
     } else {
-      return;
+      // return; // Don't return here because we need to check Y
+    }
+
+    if (wormY < topEdge) {
+      targetY = wormY - margin;
+    } else if (wormY > bottomEdge) {
+      targetY = wormY - (this.height - margin);
     }
 
     this.cameraTargetX = clamp(targetX, bounds.minX, bounds.maxX);
+    this.cameraTargetY = clamp(targetY, bounds.minY, bounds.maxY);
   }
 
   private updateTurnFocus() {
@@ -1179,11 +1234,19 @@ export class Game {
     const ctx = this.ctx;
     ctx.save();
     ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
+    // Background should probably fill the screen regardless of camera Y? 
+    // Or does it scroll? The background function draws a gradient.
+    // If we scroll Y, we might see out of bounds.
+    // Let's keep background fixed or adjust it. 
+    // renderBackground fills rect from 0,0 to width,height. 
+    // If we have vertical camera, we probably want the sky to stay fixed or parallax?
+    // For now, let's just draw it covering the viewport.
     renderBackground(ctx, this.width, this.height, this.cameraPadding);
     ctx.restore();
 
     ctx.save();
-    ctx.translate(-this.cameraX + this.cameraOffsetX, this.cameraOffsetY);
+    // Apply camera transform
+    ctx.translate(-this.cameraX + this.cameraOffsetX, -this.cameraY + this.cameraOffsetY);
     this.session.terrain.render(ctx);
 
     for (const particle of this.session.particles) particle.render(ctx);
@@ -1283,7 +1346,7 @@ export class Game {
     const followingProjectile = this.updatePassiveProjectileFocus();
     this.updateCamera(dt, !overlaysBlocking && !followingProjectile);
     const worldCameraOffsetX = -this.cameraX + this.cameraOffsetX;
-    const worldCameraOffsetY = this.cameraOffsetY;
+    const worldCameraOffsetY = -this.cameraY + this.cameraOffsetY;
     this.session.updateActiveTurnDriver(dt, {
       allowInput: !overlaysBlocking && !waitingForSync,
       input: this.input,
