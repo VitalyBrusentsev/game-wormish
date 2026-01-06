@@ -1016,9 +1016,8 @@ export class Game {
   private getCameraBounds() {
     const groundWidth = this.session.width;
     const viewWidth = this.width;
-    const minVisible = Math.min(groundWidth * 0.5, viewWidth);
-    const minX = minVisible - viewWidth;
-    const maxX = groundWidth - minVisible;
+    const minX = 0;
+    const maxX = Math.max(0, groundWidth - viewWidth);
 
     const groundHeight = this.session.height;
     const viewHeight = this.height;
