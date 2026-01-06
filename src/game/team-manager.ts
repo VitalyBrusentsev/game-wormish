@@ -17,7 +17,7 @@ export class TeamManager {
     private readonly width: number,
     private readonly height: number,
     private readonly random: () => number = Math.random
-  ) {}
+  ) { }
 
   initialize(terrain: Terrain) {
     this.teams = [
@@ -128,23 +128,27 @@ export class TeamManager {
   }
 
   private spawnTeams(terrain: Terrain) {
-    const totalWorms = this.teams.length * GAMEPLAY.teamSize;
-    if (totalWorms === 0) return;
+    if (this.teams.length === 0) return;
 
     const margin = Math.min(this.width * 0.4, Math.max(80, this.width * 0.05));
     const usableWidth = Math.max(1, this.width - margin * 2);
-    const positions: number[] = [];
-    for (let i = 0; i < totalWorms; i++) {
-      const t = (i + 0.5) / totalWorms;
-      positions.push(margin + t * usableWidth);
-    }
-    this.shuffleArray(positions);
+    const sectorWidth = usableWidth / this.teams.length;
 
-    let posIndex = 0;
     for (let teamIndex = 0; teamIndex < this.teams.length; teamIndex++) {
       const team = this.teams[teamIndex]!;
-      for (let i = 0; i < GAMEPLAY.teamSize; i++) {
-        const baseX = positions[posIndex++ % positions.length]!;
+      const sectorStart = margin + teamIndex * sectorWidth;
+
+      const positions: number[] = [];
+      const teamSize = GAMEPLAY.teamSize;
+
+      for (let i = 0; i < teamSize; i++) {
+        const t = (i + 0.5) / teamSize;
+        positions.push(sectorStart + t * sectorWidth);
+      }
+      this.shuffleArray(positions);
+
+      for (let i = 0; i < teamSize; i++) {
+        const baseX = positions[i]!;
         const x = baseX + this.randomRange(-30, 30);
         const y = this.findGroundY(terrain, Math.floor(x));
         const worm = new Worm(x, y, team.id, `${team.id[0]}${i + 1}`);
