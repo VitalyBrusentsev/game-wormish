@@ -162,6 +162,7 @@ export class Game {
   private networkStateChangeCallbacks: ((state: NetworkSessionState) => void)[] = [];
   private readonly registryUrl: string;
   private connectionStartRequested = false;
+  private hasReceivedMatchInit = false;
 
   private readonly cameraPadding = 48;
   private cameraOffsetX = 0;
@@ -515,6 +516,7 @@ export class Game {
     this.networkState.setPlayerNames(config.playerName);
     this.networkState.updateRegistryInfo({ baseUrl: config.registryUrl });
     this.connectionStartRequested = false;
+    this.hasReceivedMatchInit = false;
 
     const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
     this.webrtcClient = new WebRTCRegistryClient({
@@ -556,6 +558,7 @@ export class Game {
     this.networkState.setPlayerNames(config.playerName);
     this.networkState.updateRegistryInfo({ baseUrl: config.registryUrl });
     this.connectionStartRequested = false;
+    this.hasReceivedMatchInit = false;
 
     const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
     this.webrtcClient = new WebRTCRegistryClient({
@@ -649,6 +652,7 @@ export class Game {
       this.webrtcClient = null;
     }
     this.connectionStartRequested = false;
+    this.hasReceivedMatchInit = false;
     this.networkState.setMode("local");
     this.networkState.resetNetworkOnlyState();
     this.initializeTurnControllers();
@@ -659,9 +663,10 @@ export class Game {
     if (!this.webrtcClient) return;
 
     this.webrtcClient.onStateChange((state: ConnectionState) => {
+      const previousLifecycle = this.networkState.getSnapshot().connection.lifecycle;
       this.networkState.updateConnectionLifecycle(state as any, Date.now());
 
-      if (state === "connected") {
+      if (state === "connected" && previousLifecycle !== "connected") {
         this.swapToNetworkControllers();
         this.sendPlayerHello();
         const snapshot = this.networkState.getSnapshot();
@@ -669,7 +674,7 @@ export class Game {
           this.networkState.setWaitingForSnapshot(false);
           this.sendMatchInit();
         } else if (snapshot.mode === "network-guest") {
-          this.networkState.setWaitingForSnapshot(true);
+          this.networkState.setWaitingForSnapshot(!this.hasReceivedMatchInit);
         }
       }
 
@@ -747,6 +752,7 @@ export class Game {
   private handleMatchInit(snapshot: MatchInitSnapshot) {
     const state = this.networkState.getSnapshot();
     if (state.mode !== "network-guest") return;
+    this.hasReceivedMatchInit = true;
     this.networkState.storePendingSnapshot(snapshot);
     this.applySnapshot(snapshot);
     this.networkState.storePendingSnapshot(null);
@@ -761,7 +767,7 @@ export class Game {
       this.resize(this.width, snapshot.height);
     }
     */
-    const nextSession = new GameSession(snapshot.width, this.height, {
+    const nextSession = new GameSession(snapshot.width, snapshot.height, {
       horizontalPadding: snapshot.terrain.horizontalPadding,
     });
     nextSession.loadMatchInitSnapshot(snapshot);
@@ -774,6 +780,9 @@ export class Game {
     this.cameraX = this.clampCameraX(this.activeWorm.x - this.width / 2);
     this.cameraTargetX = this.cameraX;
     this.cameraVelocityX = 0;
+    this.cameraY = this.clampCameraY(this.activeWorm.y - this.height / 2);
+    this.cameraTargetY = this.cameraY;
+    this.cameraVelocityY = 0;
     this.turnControllers.clear();
     const mode = this.networkState.getSnapshot().mode;
     if (mode === "local") {
@@ -947,6 +956,10 @@ export class Game {
 
     if (this.input.pressed("KeyI")) {
       this.networkState.toggleNetworkLog();
+      const showLog = this.networkState.getSnapshot().debug.showLog;
+      if (showLog) {
+        this.copyNetworkLogToClipboard();
+      }
       this.input.consumeKey("KeyI");
     }
 
@@ -1216,6 +1229,47 @@ export class Game {
       return;
     }
     this.canvas.style.cursor = "crosshair";
+  }
+
+  private copyNetworkLogToClipboard() {
+    const snapshot = this.networkState.getSnapshot();
+    const entries = snapshot.debug.recentMessages;
+    const lines = entries.map((entry) => {
+      const dir = entry.direction === "send" ? "->" : "<-";
+      return `${entry.atMs.toFixed(0)} ${dir} ${entry.text}`;
+    });
+    const header =
+      snapshot.mode === "local"
+        ? "Network log (local mode)"
+        : `Network log (${snapshot.mode}, role=${snapshot.player.role})`;
+    const text = [header, ...lines].join("\n");
+
+    const clipboard = navigator.clipboard;
+    if (clipboard?.writeText) {
+      clipboard.writeText(text).catch(() => {
+        this.copyTextFallback(text);
+      });
+      return;
+    }
+    this.copyTextFallback(text);
+  }
+
+  private copyTextFallback(text: string) {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    try {
+      document.execCommand("copy");
+    } catch {
+      // ignore
+    } finally {
+      document.body.removeChild(textarea);
+    }
   }
 
   getTeamHealth(id: TeamId) {
