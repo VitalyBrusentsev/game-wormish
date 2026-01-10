@@ -319,6 +319,14 @@ export class GameSession {
     this.emitTurnStarted({ initial, source: initial ? "system" : "local-sim" });
   }
 
+  pauseFor(pausedMs: number) {
+    if (pausedMs <= 0) return;
+    this.state.pauseFor(pausedMs);
+    if (this.turnLog.startedAtMs) {
+      this.turnLog.startedAtMs += pausedMs;
+    }
+  }
+
   handleInput(
     input: Input,
     dt: number,

@@ -517,6 +517,7 @@ export class Game {
     this.networkState.updateRegistryInfo({ baseUrl: config.registryUrl });
     this.connectionStartRequested = false;
     this.hasReceivedMatchInit = false;
+    this.startNetworkMatchAsHost();
 
     const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
     this.webrtcClient = new WebRTCRegistryClient({
@@ -671,8 +672,21 @@ export class Game {
         this.sendPlayerHello();
         const snapshot = this.networkState.getSnapshot();
         if (snapshot.mode === "network-host") {
+          this.startNetworkMatchAsHost();
           this.networkState.setWaitingForSnapshot(false);
           this.sendMatchInit();
+          this.activeWormArrow.onTurnStarted(
+            {
+              source: "system",
+              turnIndex: this.session.getTurnIndex(),
+              teamId: this.session.activeTeam.id,
+              wormIndex: this.session.activeWormIndex,
+              wind: this.session.wind,
+              weapon: this.session.state.weapon,
+              initial: this.session.getTurnIndex() === 0,
+            },
+            nowMs()
+          );
         } else if (snapshot.mode === "network-guest") {
           this.networkState.setWaitingForSnapshot(!this.hasReceivedMatchInit);
         }
@@ -737,6 +751,13 @@ export class Game {
   }
 
   private restartNetworkMatchAsHost() {
+    this.startNetworkMatchAsHost();
+    this.sendMatchInit();
+  }
+
+  private startNetworkMatchAsHost() {
+    const state = this.networkState.getSnapshot();
+    if (state.mode !== "network-host") return;
     this.session.restart({ startingTeamIndex: 0 });
     this.lastTurnStartMs = this.session.state.turnStartMs;
     this.cameraX = this.clampCameraX(this.activeWorm.x - this.width / 2);
@@ -746,7 +767,6 @@ export class Game {
     this.cameraTargetY = this.cameraY;
     this.cameraVelocityY = 0;
     this.updateCursor();
-    this.sendMatchInit();
   }
 
   private handleMatchInit(snapshot: MatchInitSnapshot) {
@@ -898,7 +918,7 @@ export class Game {
     if (this.startMenuOpenedAtMs !== null) {
       const pausedFor = nowMs() - this.startMenuOpenedAtMs;
       if (pausedFor > 0) {
-        this.session.state.pauseFor(pausedFor);
+        this.session.pauseFor(pausedFor);
       }
     }
     this.startMenuOpenedAtMs = null;
@@ -916,7 +936,7 @@ export class Game {
       return;
     }
     if (pausedFor > 0) {
-      this.session.state.pauseFor(pausedFor);
+      this.session.pauseFor(pausedFor);
     }
     this.canvas.focus();
     this.updateCursor();
@@ -992,9 +1012,15 @@ export class Game {
 
   private subscribeToGameEvents() {
     const signal = this.eventAbort.signal;
-    gameEvents.on("turn.started", (event) => this.activeWormArrow.onTurnStarted(event, nowMs()), {
-      signal,
-    });
+    gameEvents.on(
+      "turn.started",
+      (event) => {
+        const snapshot = this.networkState.getSnapshot();
+        if (snapshot.mode !== "local" && snapshot.connection.lifecycle !== "connected") return;
+        this.activeWormArrow.onTurnStarted(event, nowMs());
+      },
+      { signal }
+    );
     gameEvents.on(
       "worm.health.changed",
       (event) => this.damageFloaters.onWormHealthChanged(event, nowMs()),
@@ -1416,17 +1442,23 @@ export class Game {
     const waitingForSync =
       networkSnapshot.mode !== "local" &&
       networkSnapshot.bridge.waitingForRemoteSnapshot;
+    const networkPaused =
+      networkSnapshot.mode !== "local" &&
+      (networkSnapshot.connection.lifecycle !== "connected" || waitingForSync);
     this.updateTurnFocus();
     const followingProjectile = this.updatePassiveProjectileFocus();
     this.updateCamera(dt, !overlaysBlocking && !followingProjectile);
     const worldCameraOffsetX = -this.cameraX + this.cameraOffsetX;
     const worldCameraOffsetY = -this.cameraY + this.cameraOffsetY;
+    if (networkPaused) {
+      this.session.pauseFor(dt * 1000);
+    }
     this.session.updateActiveTurnDriver(dt, {
       allowInput: !overlaysBlocking && !waitingForSync,
       input: this.input,
       camera: { offsetX: worldCameraOffsetX, offsetY: worldCameraOffsetY },
     });
-    if (!overlaysBlocking) {
+    if (!overlaysBlocking && !networkPaused) {
       this.session.update(dt);
     }
     this.flushTurnResolution();
