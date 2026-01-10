@@ -6,6 +6,7 @@ import { HelpOverlay } from "./ui/help-overlay";
 import { StartMenuOverlay } from "./ui/start-menu-overlay";
 import { NetworkMatchDialog } from "./ui/network-match-dialog";
 import { gameEvents } from "./events/game-events";
+import { DamageFloaters } from "./ui/damage-floaters";
 import {
   renderAimHelpers,
   renderBackground,
@@ -190,6 +191,7 @@ export class Game {
   private readonly touchStartFocusHandler = () => this.canvas.focus();
 
   private readonly eventAbort = new AbortController();
+  private readonly damageFloaters = new DamageFloaters();
 
   private readonly turnControllers = new Map<TeamId, TurnDriver>();
   private aimThrottleState: AimThrottleState | null = null;
@@ -973,6 +975,11 @@ export class Game {
 
   private subscribeToGameEvents() {
     const signal = this.eventAbort.signal;
+    gameEvents.on(
+      "worm.health.changed",
+      (event) => this.damageFloaters.onWormHealthChanged(event, nowMs()),
+      { signal }
+    );
 
     gameEvents.on(
       "combat.explosion",
@@ -1295,6 +1302,8 @@ export class Game {
     }
 
     for (const projectile of this.session.projectiles) projectile.render(ctx);
+
+    this.damageFloaters.render(ctx, this.session, now);
 
     renderAimHelpers({
       ctx,
