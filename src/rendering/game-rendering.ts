@@ -332,7 +332,7 @@ export function renderAimHelpers({
     ctx.restore();
   }
 
-  if (state.weapon === WeaponType.Rifle) {
+  if (state.weapon === WeaponType.Rifle || state.weapon === WeaponType.Uzi) {
     const chSize = 8;
     const crossCol = "#ffd84d";
     drawCrosshair(ctx, aim.targetX, aim.targetY, chSize, crossCol, 2);
@@ -340,7 +340,9 @@ export function renderAimHelpers({
     ctx.save();
     ctx.globalAlpha = 0.15;
     ctx.beginPath();
-    ctx.arc(activeWorm.x, activeWorm.y, GAMEPLAY.rifle.aimRadius, 0, Math.PI * 2);
+    const radius =
+      state.weapon === WeaponType.Rifle ? GAMEPLAY.rifle.aimRadius : GAMEPLAY.uzi.aimRadius;
+    ctx.arc(activeWorm.x, activeWorm.y, radius, 0, Math.PI * 2);
     ctx.fillStyle = "#ffd84d";
     ctx.fill();
     ctx.restore();
@@ -349,6 +351,22 @@ export function renderAimHelpers({
   const muzzleOffset = WORLD.wormRadius + 10;
   const mx = activeWorm.x + Math.cos(aim.angle) * muzzleOffset;
   const my = activeWorm.y + Math.sin(aim.angle) * muzzleOffset;
+  if (state.weapon === WeaponType.Uzi) {
+    const maxLen = 400;
+    const ex = mx + Math.cos(aim.angle) * maxLen;
+    const ey = my + Math.sin(aim.angle) * maxLen;
+    ctx.save();
+    const grad = ctx.createLinearGradient(mx, my, ex, ey);
+    grad.addColorStop(0, "rgba(255,255,255,0.35)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(mx, my);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    ctx.restore();
+  }
   ctx.save();
   ctx.strokeStyle = "rgba(255,255,255,0.6)";
   ctx.lineWidth = 2;

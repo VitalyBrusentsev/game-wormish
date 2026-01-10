@@ -201,6 +201,9 @@ export class Game {
   private readonly turnControllers = new Map<TeamId, TurnDriver>();
   private aimThrottleState: AimThrottleState | null = null;
   private moveThrottleState: MoveThrottleState | null = null;
+  private pendingTurnEffects: TurnEffectsMessage["payload"] | null = null;
+  private pendingTurnEffectsNextFlushAtMs = 0;
+  private readonly turnEffectsFlushIntervalMs = 1000;
 
   constructor(width: number, height: number) {
     this.width = width;
@@ -489,11 +492,66 @@ export class Game {
     if (snapshot.mode === "local") return;
     if (snapshot.connection.lifecycle !== "connected") return;
 
+    const shouldBatch =
+      effects.terrainOperations.every((op) => op.type !== "carve-circle" || op.radius <= 10) &&
+      effects.wormHealth.every((change) => change.cause === WeaponType.Uzi);
+    if (!shouldBatch) {
+      this.flushPendingTurnEffects(true);
+      const message: TurnEffectsMessage = {
+        type: "turn_effects",
+        payload: effects,
+      };
+      this.sendNetworkMessage(message);
+      return;
+    }
+
+    const pending = this.pendingTurnEffects;
+    if (!pending || pending.turnIndex !== effects.turnIndex || pending.actingTeamId !== effects.actingTeamId) {
+      this.flushPendingTurnEffects(true);
+      this.pendingTurnEffects = {
+        turnIndex: effects.turnIndex,
+        actingTeamId: effects.actingTeamId,
+        terrainOperations: [...effects.terrainOperations],
+        wormHealth: [...effects.wormHealth],
+      };
+      if (this.pendingTurnEffectsNextFlushAtMs <= 0) {
+        this.pendingTurnEffectsNextFlushAtMs = nowMs() + this.turnEffectsFlushIntervalMs;
+      }
+      return;
+    }
+
+    pending.terrainOperations.push(...effects.terrainOperations);
+    pending.wormHealth.push(...effects.wormHealth);
+
+    if (pending.terrainOperations.length + pending.wormHealth.length >= 24) {
+      this.flushPendingTurnEffects(true);
+    }
+  }
+
+  private flushPendingTurnEffects(force = false) {
+    if (!this.webrtcClient) return;
+    const snapshot = this.networkState.getSnapshot();
+    if (snapshot.mode === "local") return;
+    if (snapshot.connection.lifecycle !== "connected") return;
+
+    const pending = this.pendingTurnEffects;
+    if (!pending) return;
+    if (pending.terrainOperations.length === 0 && pending.wormHealth.length === 0) {
+      this.pendingTurnEffects = null;
+      this.pendingTurnEffectsNextFlushAtMs = 0;
+      return;
+    }
+
+    const now = nowMs();
+    if (!force && now < this.pendingTurnEffectsNextFlushAtMs) return;
+
     const message: TurnEffectsMessage = {
       type: "turn_effects",
-      payload: effects,
+      payload: pending,
     };
     this.sendNetworkMessage(message);
+    this.pendingTurnEffects = null;
+    this.pendingTurnEffectsNextFlushAtMs = now + this.turnEffectsFlushIntervalMs;
   }
 
   private flushTurnResolution() {
@@ -504,6 +562,7 @@ export class Game {
 
     const resolution = this.session.consumeTurnResolution();
     if (!resolution) return;
+    this.flushPendingTurnEffects(true);
     const message: TurnResolutionMessage = {
       type: "turn_resolution",
       payload: resolution,
@@ -1246,7 +1305,10 @@ export class Game {
       this.canvas.style.cursor = "default";
       return;
     }
-    if (this.session.state.weapon === WeaponType.Rifle) {
+    if (
+      this.session.state.weapon === WeaponType.Rifle ||
+      this.session.state.weapon === WeaponType.Uzi
+    ) {
       this.canvas.style.cursor = "none";
       return;
     }
@@ -1461,6 +1523,7 @@ export class Game {
     if (!overlaysBlocking && !networkPaused) {
       this.session.update(dt);
     }
+    this.flushPendingTurnEffects(false);
     this.flushTurnResolution();
     this.updateCameraShake(dt);
     this.render();

@@ -21,6 +21,7 @@ export class Projectile {
   wind: number;
   exploded: boolean;
   age: number;
+  distanceTraveled: number;
   explosionHandler: ExplosionHandler;
 
   constructor(
@@ -45,6 +46,7 @@ export class Projectile {
     this.wind = wind;
     this.exploded = false;
     this.age = 0;
+    this.distanceTraveled = 0;
     this.explosionHandler = explosionHandler;
   }
 
@@ -56,6 +58,7 @@ export class Projectile {
       explosionRadius: number;
       damage: number;
       maxLifetime?: number;
+      maxDistance?: number;
     }
   ) {
     if (this.exploded) return;
@@ -72,7 +75,7 @@ export class Projectile {
     }
 
     // Physics
-    if (this.type !== WeaponType.Rifle) {
+    if (this.type !== WeaponType.Rifle && this.type !== WeaponType.Uzi) {
       this.vy += specs.gravity * dt;
       // Wind affects horizontally except for rifle
       this.vx += this.wind * dt;
@@ -82,6 +85,7 @@ export class Projectile {
     for (let i = 0; i < steps; i++) {
       const nx = this.x + (this.vx * dt) / steps;
       const ny = this.y + (this.vy * dt) / steps;
+      this.distanceTraveled += Math.hypot(nx - this.x, ny - this.y);
       // Collision with terrain
       if (terrain.circleCollides(nx, ny, this.r)) {
         if (this.type === WeaponType.HandGrenade) {
@@ -124,6 +128,9 @@ export class Projectile {
       this.exploded = true;
     }
     if (this.type === WeaponType.Rifle && specs.maxLifetime && this.age >= specs.maxLifetime) {
+      this.exploded = true;
+    }
+    if (specs.maxDistance && this.distanceTraveled >= specs.maxDistance) {
       this.exploded = true;
     }
   }
@@ -241,16 +248,17 @@ export class Projectile {
       }
       ctx.globalAlpha = 1;
     } else {
-      // Rifle bullet (small tracer)
-      ctx.strokeStyle = "#ffd84d";
-      ctx.lineWidth = 2;
+      // Rifle/Uzi bullet (small tracer)
+      const isUzi = this.type === WeaponType.Uzi;
+      ctx.strokeStyle = isUzi ? "rgba(255, 232, 140, 0.75)" : "#ffd84d";
+      ctx.lineWidth = isUzi ? 1.5 : 2;
       ctx.beginPath();
-      ctx.moveTo(-6, 0);
-      ctx.lineTo(6, 0);
+      ctx.moveTo(isUzi ? -4 : -6, 0);
+      ctx.lineTo(isUzi ? 4 : 6, 0);
       ctx.stroke();
-      ctx.fillStyle = "#fff";
+      ctx.fillStyle = isUzi ? "rgba(255,255,255,0.7)" : "#fff";
       ctx.beginPath();
-      ctx.arc(6, 0, 1.5, 0, Math.PI * 2);
+      ctx.arc(isUzi ? 4 : 6, 0, isUzi ? 1.1 : 1.5, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();

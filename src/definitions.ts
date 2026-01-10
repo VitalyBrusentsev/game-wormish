@@ -4,6 +4,7 @@ export enum WeaponType {
   Bazooka = "Bazooka",
   HandGrenade = "Hand Grenade",
   Rifle = "Rifle",
+  Uzi = "Uzi",
 }
 
 export const COLORS = {
@@ -70,6 +71,21 @@ export const GAMEPLAY = {
     aimRadius: 200,            // aiming crosshair limited to this radius
     projectileRadius: 3,       // small bullet
     maxLifetime: 1.6,          // seconds before despawn
+  },
+  uzi: {
+    speed: 1750,               // px/s
+    directDamage: 4,
+    explosionRadius: 7,        // small carve
+    aimRadius: 200,            // same aiming clamp as Rifle
+    projectileRadius: 2,
+    burstCount: 15,
+    shotsPerSecond: 5,
+    maxDistance: 1500,         // despawn after traveling this far
+    bloom: {
+      startSigmaRad: 0.004,    // ~0.23°
+      endSigmaRad: 0.06,       // ~3.4° (close-range ok, long-range unreliable)
+      exponent: 1.35,          // how fast bloom ramps up per shot
+    },
   },
 };
 

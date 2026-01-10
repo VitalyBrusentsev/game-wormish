@@ -111,7 +111,7 @@ export class HelpOverlay {
       },
       {
         title: "Swap Toys",
-        text: "1 - Bazooka, 2 - Grenade, 3 - Rifle; Choose your chaos.",
+        text: "1 - Bazooka, 2 - Grenade, 3 - Rifle, 4 - Uzi; Choose your chaos.",
       },
       {
         title: "Wind Watch",

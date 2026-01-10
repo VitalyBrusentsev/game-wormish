@@ -116,6 +116,15 @@ type TurnLog = {
   wormHealth: WormHealthChange[];
 };
 
+type UziBurst = {
+  origin: { x: number; y: number };
+  aimAngle: number;
+  seedBase: number;
+  startAtMs: number;
+  nextShotIndex: number;
+  projectileIds: number[];
+};
+
 export class GameSession {
   readonly width: number;
   readonly height: number;
@@ -146,6 +155,7 @@ export class GameSession {
   private currentTurnContext: TurnContext | null = null;
   private waitingForRemoteResolution = false;
   private currentTurnInitial = true;
+  private uziBurst: UziBurst | null = null;
 
   constructor(
     width: number,
@@ -287,6 +297,7 @@ export class GameSession {
     this.wind = this.randomRange(-WORLD.windMax, WORLD.windMax);
     this.state.startTurn(this.now(), WeaponType.Bazooka);
     this.message = initial ? "Welcome! Eliminate the other team!" : null;
+    this.uziBurst = null;
 
     if (initial) this.teamManager.resetActiveWormIndex();
     else this.teamManager.advanceToNextTeam();
@@ -344,6 +355,7 @@ export class GameSession {
     if (input.pressed("Digit1")) this.recordWeaponChange(WeaponType.Bazooka, atMs);
     if (input.pressed("Digit2")) this.recordWeaponChange(WeaponType.HandGrenade, atMs);
     if (input.pressed("Digit3")) this.recordWeaponChange(WeaponType.Rifle, atMs);
+    if (input.pressed("Digit4")) this.recordWeaponChange(WeaponType.Uzi, atMs);
 
     if (input.pressed("KeyR") && this.state.phase === "gameover") {
       this.restart();
@@ -375,6 +387,7 @@ export class GameSession {
 
   update(dt: number) {
     if (this.state.phase === "projectile") {
+      this.updateUziBurst();
       const specBaz = {
         gravity: WORLD.gravity,
         explosionRadius: GAMEPLAY.bazooka.explosionRadius,
@@ -391,15 +404,26 @@ export class GameSession {
         damage: 0,
         maxLifetime: GAMEPLAY.rifle.maxLifetime,
       };
+      const specUzi = {
+        gravity: 0,
+        explosionRadius: GAMEPLAY.uzi.explosionRadius,
+        damage: 0,
+        maxDistance: GAMEPLAY.uzi.maxDistance,
+      };
 
       for (const projectile of this.projectiles) {
         if (projectile.type === WeaponType.HandGrenade)
           projectile.update(dt, this.terrain, specHG);
         else if (projectile.type === WeaponType.Bazooka)
           projectile.update(dt, this.terrain, specBaz);
+        else if (projectile.type === WeaponType.Uzi)
+          projectile.update(dt, this.terrain, specUzi);
         else projectile.update(dt, this.terrain, specRifle);
 
-        if (projectile.type === WeaponType.Rifle && !projectile.exploded) {
+        if (
+          (projectile.type === WeaponType.Rifle || projectile.type === WeaponType.Uzi) &&
+          !projectile.exploded
+        ) {
           for (const team of this.teams) {
             for (const worm of team.worms) {
               if (!worm.alive) continue;
@@ -408,19 +432,24 @@ export class GameSession {
                 if (this.isLocalTurnActive()) {
                   const wasAlive = worm.alive;
                   const beforeHealth = worm.health;
-                  worm.takeDamage(GAMEPLAY.rifle.directDamage);
+                  const dmg =
+                    projectile.type === WeaponType.Rifle
+                      ? GAMEPLAY.rifle.directDamage
+                      : GAMEPLAY.uzi.directDamage;
+                  worm.takeDamage(dmg);
                   this.recordWormHealthChange(
                     worm,
                     team,
                     beforeHealth,
                     wasAlive,
-                    WeaponType.Rifle
+                    projectile.type
                   );
                   const dirx = (worm.x - projectile.x) / (d || 1);
                   const diry = (worm.y - projectile.y) / (d || 1);
-                  worm.applyImpulse(dirx * 120, diry * 120);
+                  const impulse = projectile.type === WeaponType.Rifle ? 120 : 70;
+                  worm.applyImpulse(dirx * impulse, diry * impulse);
                 }
-                projectile.explode(specRifle);
+                projectile.explode(projectile.type === WeaponType.Rifle ? specRifle : specUzi);
                 break;
               }
             }
@@ -442,7 +471,7 @@ export class GameSession {
         }
       }
 
-      if (this.projectiles.length === 0) {
+      if (this.projectiles.length === 0 && !this.uziBurst) {
         this.state.endProjectilePhase();
         if (this.isLocalTurnActive()) {
           setTimeout(() => {
@@ -501,6 +530,7 @@ export class GameSession {
     this.teamManager.initialize(this.terrain);
     this.projectiles = [];
     this.particles = [];
+    this.uziBurst = null;
     if (options?.startingTeamIndex !== undefined) {
       this.teamManager.setCurrentTeamIndex(options.startingTeamIndex);
     } else {
@@ -660,6 +690,7 @@ export class GameSession {
     this.projectiles = [];
     this.particles = [];
     this.aim = this.createDefaultAim();
+    this.uziBurst = null;
   }
 
   loadMatchInitSnapshot(snapshot: MatchInitSnapshot) {
@@ -693,6 +724,7 @@ export class GameSession {
     this.projectiles = [];
     this.particles = [];
     this.aim = this.createDefaultAim();
+    this.uziBurst = null;
   }
 
   loadNetworkTurnSnapshot(snapshot: NetworkTurnSnapshot) {
@@ -704,6 +736,7 @@ export class GameSession {
     this.projectiles = [];
     this.particles = [];
     this.aim = this.createDefaultAim();
+    this.uziBurst = null;
   }
 
   private restoreTeams(teams: TeamSnapshot[]): Team[] {
@@ -1210,6 +1243,12 @@ export class GameSession {
     ) {
       return "lifetime";
     }
+    if (
+      projectile.type === WeaponType.Uzi &&
+      projectile.distanceTraveled >= GAMEPLAY.uzi.maxDistance - 1e-3
+    ) {
+      return "lifetime";
+    }
     return "out-of-bounds";
   }
 
@@ -1340,6 +1379,123 @@ export class GameSession {
     return this.random() * (max - min) + min;
   }
 
+  private reserveProjectileIds(desiredCount: number, forcedProjectileIds: number[]): number[] {
+    const ids: number[] = [];
+    const forced = forcedProjectileIds.length > 0 ? forcedProjectileIds.slice(0, desiredCount) : [];
+    let maxForced = 0;
+    for (const id of forced) {
+      ids.push(id);
+      if (id > maxForced) maxForced = id;
+    }
+    if (maxForced > 0) {
+      this.nextProjectileId = Math.max(this.nextProjectileId, maxForced + 1);
+    }
+    while (ids.length < desiredCount) {
+      ids.push(this.nextProjectileId++);
+    }
+    return ids;
+  }
+
+  private uziBloomOffsetRad(seedBase: number, shotIndex: number): number {
+    const shotCount = Math.max(1, GAMEPLAY.uzi.burstCount - 1);
+    const t = shotIndex / shotCount;
+    const ramp = Math.pow(t, GAMEPLAY.uzi.bloom.exponent);
+    const sigma =
+      GAMEPLAY.uzi.bloom.startSigmaRad +
+      (GAMEPLAY.uzi.bloom.endSigmaRad - GAMEPLAY.uzi.bloom.startSigmaRad) * ramp;
+
+    const u1 = this.uziHash01(seedBase + shotIndex * 101.3);
+    const u2 = this.uziHash01(seedBase + shotIndex * 191.7);
+    const clampedU1 = Math.max(1e-6, Math.min(1 - 1e-6, u1));
+    const r = Math.sqrt(-2 * Math.log(clampedU1));
+    const theta = 2 * Math.PI * u2;
+    return Math.cos(theta) * r * sigma;
+  }
+
+  private uziHash01(v: number): number {
+    const x = Math.sin(v) * 10000;
+    return x - Math.floor(x);
+  }
+
+  private updateUziBurst() {
+    const burst = this.uziBurst;
+    if (!burst) return;
+    const intervalMs = 1000 / GAMEPLAY.uzi.shotsPerSecond;
+    const currentAtMs = this.turnTimestampMs();
+
+    while (burst.nextShotIndex < burst.projectileIds.length) {
+      const shotAtMs = burst.startAtMs + burst.nextShotIndex * intervalMs;
+      if (currentAtMs + 1e-3 < shotAtMs) break;
+      this.spawnUziProjectile({
+        burst,
+        shotIndex: burst.nextShotIndex,
+        projectileId: burst.projectileIds[burst.nextShotIndex]!,
+        atMs: shotAtMs,
+      });
+      burst.nextShotIndex += 1;
+    }
+
+    if (burst.nextShotIndex >= burst.projectileIds.length) {
+      this.uziBurst = null;
+    }
+  }
+
+  private spawnUziProjectile(config: {
+    burst: UziBurst;
+    shotIndex: number;
+    projectileId: number;
+    atMs: number;
+  }) {
+    const muzzleOffset = WORLD.wormRadius + 10;
+    const angle = config.burst.aimAngle + this.uziBloomOffsetRad(config.burst.seedBase, config.shotIndex);
+    const sx = config.burst.origin.x + Math.cos(angle) * muzzleOffset;
+    const sy = config.burst.origin.y + Math.sin(angle) * muzzleOffset;
+    const vx = Math.cos(angle) * GAMEPLAY.uzi.speed;
+    const vy = Math.sin(angle) * GAMEPLAY.uzi.speed;
+
+    const projectile = new Projectile(
+      sx,
+      sy,
+      vx,
+      vy,
+      GAMEPLAY.uzi.projectileRadius,
+      WeaponType.Uzi,
+      0,
+      (x, y, r, dmg, cause) => this.onExplosion(x, y, r, dmg, cause)
+    );
+    this.projectiles.push(projectile);
+
+    const id = config.projectileId;
+    this.projectileIds.set(projectile, id);
+    this.wrapProjectileExplosion(projectile, id);
+
+    const spawnEvent: Extract<TurnEvent, { type: "projectile-spawned" }> = {
+      type: "projectile-spawned",
+      id,
+      weapon: projectile.type,
+      position: { x: projectile.x, y: projectile.y },
+      velocity: { x: projectile.vx, y: projectile.vy },
+      wind: projectile.wind,
+      atMs: config.atMs,
+    };
+    this.turnLog.projectileEvents.push(spawnEvent);
+
+    const source: GameEventSource = this.isLocalTurnActive() ? "local-sim" : "remote-sim";
+    const wormIndex = this.teamManager.activeWormIndex;
+    gameEvents.emit("combat.projectile.spawned", {
+      source,
+      turnIndex: this.turnIndex,
+      teamId: this.activeTeam.id,
+      wormIndex,
+      projectileId: spawnEvent.id,
+      weapon: spawnEvent.weapon,
+      position: { ...spawnEvent.position },
+      velocity: { ...spawnEvent.velocity },
+      wind: spawnEvent.wind,
+      atMs: spawnEvent.atMs,
+    });
+  }
+
   private fireChargedWeapon(
     power01: number,
     aim: AimInfo,
@@ -1347,6 +1503,49 @@ export class GameSession {
     weapon: WeaponType,
     forcedProjectileIds: number[]
   ): Extract<TurnCommand, { type: "fire-charged-weapon" }> {
+    if (weapon === WeaponType.Uzi) {
+      const projectileIds = this.reserveProjectileIds(GAMEPLAY.uzi.burstCount, forcedProjectileIds);
+      const currentAtMs = this.turnTimestampMs();
+      const startAtMs = Math.max(atMs, currentAtMs);
+      const seedBase = this.turnIndex * 100_000 + Math.round(atMs);
+      this.uziBurst = {
+        origin: { x: this.activeWorm.x, y: this.activeWorm.y },
+        aimAngle: aim.angle,
+        seedBase,
+        startAtMs,
+        nextShotIndex: 0,
+        projectileIds,
+      };
+
+      const command = {
+        type: "fire-charged-weapon",
+        weapon,
+        power: power01,
+        aim: { angle: aim.angle, targetX: aim.targetX, targetY: aim.targetY },
+        atMs,
+        projectileIds,
+      } as const;
+
+      const source: GameEventSource = this.isLocalTurnActive() ? "local-sim" : "remote-sim";
+      const wormIndex = this.teamManager.activeWormIndex;
+      gameEvents.emit("combat.shot.fired", {
+        source,
+        turnIndex: this.turnIndex,
+        teamId: this.activeTeam.id,
+        wormIndex,
+        weapon,
+        power01,
+        aim: { angle: aim.angle, targetX: aim.targetX, targetY: aim.targetY },
+        wormPosition: { x: this.activeWorm.x, y: this.activeWorm.y },
+        wind: this.wind,
+        atMs,
+        projectiles: [],
+      });
+
+      this.updateUziBurst();
+      return command;
+    }
+
     const beforeCount = this.projectiles.length;
     fireWeapon({
       weapon,
@@ -1452,18 +1651,24 @@ export class GameSession {
       atMs: this.turnTimestampMs(),
     });
 
-    const particleCount = cause === WeaponType.Rifle ? 12 : 50;
+    const particleCount =
+      cause === WeaponType.Rifle ? 12 : cause === WeaponType.Uzi ? 8 : 50;
     for (let i = 0; i < particleCount; i++) {
       const ang = this.random() * Math.PI * 2;
       const spd =
         cause === WeaponType.Rifle
           ? this.randomRange(60, 180)
+          : cause === WeaponType.Uzi
+            ? this.randomRange(40, 140)
           : this.randomRange(100, 400);
       const vx = Math.cos(ang) * spd;
       const vy =
-        Math.sin(ang) * spd - (cause === WeaponType.Rifle ? 30 : 50);
-      const life = this.randomRange(0.3, cause === WeaponType.Rifle ? 0.6 : 0.9);
-      const r = this.randomRange(1, cause === WeaponType.Rifle ? 3 : 6);
+        Math.sin(ang) * spd - (cause === WeaponType.Rifle ? 30 : cause === WeaponType.Uzi ? 25 : 50);
+      const life = this.randomRange(
+        0.25,
+        cause === WeaponType.Rifle ? 0.6 : cause === WeaponType.Uzi ? 0.45 : 0.9
+      );
+      const r = this.randomRange(1, cause === WeaponType.Rifle ? 3 : cause === WeaponType.Uzi ? 2 : 6);
       const col =
         i % 2 === 0 ? "rgba(120,120,120,0.8)" : "rgba(200,180,120,0.8)";
       this.particles.push(new Particle(x, y, vx, vy, life, r, col));
@@ -1476,7 +1681,7 @@ export class GameSession {
     this.recordTerrainCarve(x, y, radius);
     this.terrain.carveCircle(x, y, radius);
 
-    if (cause !== WeaponType.Rifle) {
+    if (cause !== WeaponType.Rifle && cause !== WeaponType.Uzi) {
       for (const team of this.teams) {
         for (const worm of team.worms) {
           if (!worm.alive) continue;

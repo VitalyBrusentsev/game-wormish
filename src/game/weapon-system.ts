@@ -47,9 +47,10 @@ export function computeAimInfo({
   const pointerY = input.mouseY - (cameraOffsetY ?? 0);
   let dx = pointerX - aimWorm.x;
   let dy = pointerY - aimWorm.y;
-  if (state.weapon === WeaponType.Rifle) {
+  if (state.weapon === WeaponType.Rifle || state.weapon === WeaponType.Uzi) {
     const len = Math.hypot(dx, dy) || 1;
-    const r = GAMEPLAY.rifle.aimRadius;
+    const r =
+      state.weapon === WeaponType.Rifle ? GAMEPLAY.rifle.aimRadius : GAMEPLAY.uzi.aimRadius;
     if (len > r) {
       dx = (dx / len) * r;
       dy = (dy / len) * r;
@@ -144,12 +145,14 @@ export function predictTrajectory({
   const sx = activeWorm.x + Math.cos(aim.angle) * muzzleOffset;
   const sy = activeWorm.y + Math.sin(aim.angle) * muzzleOffset;
 
-  if (weapon === WeaponType.Rifle) {
+  if (weapon === WeaponType.Rifle || weapon === WeaponType.Uzi) {
     const pts: PredictedPoint[] = [];
     const dirx = Math.cos(aim.angle);
     const diry = Math.sin(aim.angle);
     const hit = terrain.raycast(sx, sy, dirx, diry, 2000, 3);
-    const maxDist = hit ? hit.dist : 800;
+    const maxDist =
+      hit?.dist ??
+      (weapon === WeaponType.Rifle ? 800 : Math.min(GAMEPLAY.uzi.maxDistance, 800));
     const step = 16;
     for (let d = 0; d <= maxDist; d += step) {
       const x = sx + dirx * d;
@@ -202,4 +205,3 @@ export function shouldPredictPath(state: GameState): boolean {
 export function resolveCharge01(state: GameState): number {
   return state.getCharge01(nowMs());
 }
-
