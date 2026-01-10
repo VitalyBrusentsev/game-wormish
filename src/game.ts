@@ -7,6 +7,8 @@ import { StartMenuOverlay } from "./ui/start-menu-overlay";
 import { NetworkMatchDialog } from "./ui/network-match-dialog";
 import { gameEvents } from "./events/game-events";
 import { DamageFloaters } from "./ui/damage-floaters";
+import { ActiveWormArrow } from "./ui/active-worm-arrow";
+import { TurnCountdownOverlay } from "./ui/turn-countdown";
 import {
   renderAimHelpers,
   renderBackground,
@@ -192,6 +194,8 @@ export class Game {
 
   private readonly eventAbort = new AbortController();
   private readonly damageFloaters = new DamageFloaters();
+  private readonly activeWormArrow = new ActiveWormArrow();
+  private readonly turnCountdown = new TurnCountdownOverlay();
 
   private readonly turnControllers = new Map<TeamId, TurnDriver>();
   private aimThrottleState: AimThrottleState | null = null;
@@ -975,6 +979,9 @@ export class Game {
 
   private subscribeToGameEvents() {
     const signal = this.eventAbort.signal;
+    gameEvents.on("turn.started", (event) => this.activeWormArrow.onTurnStarted(event, nowMs()), {
+      signal,
+    });
     gameEvents.on(
       "worm.health.changed",
       (event) => this.damageFloaters.onWormHealthChanged(event, nowMs()),
@@ -1223,48 +1230,8 @@ export class Game {
     return this.session.getAimInfo();
   }
 
-  private renderTurnSwitchHighlight(
-    ctx: CanvasRenderingContext2D,
-    worm: Worm,
-    elapsedMs: number
-  ) {
-    const durationMs = 1400;
-    if (elapsedMs > durationMs) return;
-
-    const t = 1 - elapsedMs / durationMs;
-    const pulse = 0.55 + 0.45 * Math.sin((elapsedMs / 120) * Math.PI * 2);
-    const teamColor = worm.team === "Red" ? "255,77,77" : "77,163,255";
-    const innerRadius = worm.radius + 4;
-    const outerRadius = worm.radius + 12 + 12 * t * pulse;
-
-    ctx.save();
-    const gradient = ctx.createRadialGradient(
-      worm.x,
-      worm.y,
-      innerRadius,
-      worm.x,
-      worm.y,
-      outerRadius
-    );
-    gradient.addColorStop(0, `rgba(${teamColor}, ${0.3 * t})`);
-    gradient.addColorStop(1, `rgba(${teamColor}, 0)`);
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(worm.x, worm.y, outerRadius, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = `rgba(${teamColor}, ${0.8 * t})`;
-    ctx.lineWidth = 3;
-    const ringRadius = worm.radius + 6 + 6 * pulse * t;
-    ctx.beginPath();
-    ctx.arc(worm.x, worm.y, ringRadius, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-  }
-
   render() {
     const now = nowMs();
-    const turnElapsedMs = Math.max(0, now - this.session.state.turnStartMs);
     const networkSnapshot = this.networkState.getSnapshot();
     const ctx = this.ctx;
     ctx.save();
@@ -1295,15 +1262,13 @@ export class Game {
           i === this.activeWormIndex &&
           this.session.state.phase !== "gameover";
         worm.render(ctx, isActive);
-        if (isActive) {
-          this.renderTurnSwitchHighlight(ctx, worm, turnElapsedMs);
-        }
       }
     }
 
     for (const projectile of this.session.projectiles) projectile.render(ctx);
 
     this.damageFloaters.render(ctx, this.session, now);
+    this.activeWormArrow.render(ctx, this.session, now);
 
     renderAimHelpers({
       ctx,
@@ -1338,6 +1303,14 @@ export class Game {
         ...(activeTeamLabel ? { activeTeamLabel } : {}),
       }
     );
+
+    const overlaysBlocking =
+      this.helpOverlay.isVisible() ||
+      this.startMenu.isVisible() ||
+      this.networkDialog.isVisible();
+    if (!overlaysBlocking) {
+      this.turnCountdown.render(ctx, this.session, now, this.width, this.height);
+    }
 
     renderMapGadget({
       ctx,
