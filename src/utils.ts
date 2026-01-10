@@ -229,6 +229,121 @@ export function drawArrow(
   ctx.restore();
 }
 
+export function drawWindsock(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  dir: -1 | 1,
+  length: number,
+  intensity01: number,
+  color: string
+) {
+  const clothLen = Math.max(0, length);
+  if (clothLen <= 0) return;
+
+  const stripes = 3;
+  const baseW = Math.min(12, Math.max(4, clothLen * 0.9));
+  const tipW = Math.max(2, baseW * 0.35);
+  const wind01 = Math.max(0, Math.min(1, intensity01));
+  const dirX = dir;
+  const dirY = 0;
+  const perpX = -dirY;
+  const perpY = dirX;
+  const activeStripes = Math.max(1, Math.ceil(wind01 * stripes));
+  const stripeLen = clothLen / stripes;
+
+  ctx.save();
+  ctx.translate(x, y);
+
+  if (clothLen >= 10 && stripeLen > 0) {
+    for (let i = 0; i < stripes; i++) {
+      const segAlpha = i < activeStripes ? 1 : 0.25;
+      const t0 = stripeLen * i;
+      const t1 = stripeLen * (i + 1);
+      const p0 = t0 / Math.max(1, clothLen);
+      const p1 = t1 / Math.max(1, clothLen);
+      const w0 = baseW + (tipW - baseW) * p0;
+      const w1 = baseW + (tipW - baseW) * p1;
+      const c0x = dirX * t0;
+      const c0y = dirY * t0;
+      const c1x = dirX * t1;
+      const c1y = dirY * t1;
+      const p0lx = c0x + perpX * (w0 / 2);
+      const p0ly = c0y + perpY * (w0 / 2);
+      const p0rx = c0x - perpX * (w0 / 2);
+      const p0ry = c0y - perpY * (w0 / 2);
+      const p1lx = c1x + perpX * (w1 / 2);
+      const p1ly = c1y + perpY * (w1 / 2);
+      const p1rx = c1x - perpX * (w1 / 2);
+      const p1ry = c1y - perpY * (w1 / 2);
+
+      ctx.globalAlpha = segAlpha;
+      ctx.fillStyle = i % 2 === 0 ? color : "rgba(255,255,255,0.75)";
+      ctx.beginPath();
+      ctx.moveTo(p0lx, p0ly);
+      ctx.lineTo(p1lx, p1ly);
+      ctx.lineTo(p1rx, p1ry);
+      ctx.lineTo(p0rx, p0ry);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else {
+    const t0 = 0;
+    const t1 = clothLen;
+    const c0x = dirX * t0;
+    const c0y = dirY * t0;
+    const c1x = dirX * t1;
+    const c1y = dirY * t1;
+    const p0lx = c0x + perpX * (baseW / 2);
+    const p0ly = c0y + perpY * (baseW / 2);
+    const p0rx = c0x - perpX * (baseW / 2);
+    const p0ry = c0y - perpY * (baseW / 2);
+    const p1lx = c1x + perpX * (tipW / 2);
+    const p1ly = c1y + perpY * (tipW / 2);
+    const p1rx = c1x - perpX * (tipW / 2);
+    const p1ry = c1y - perpY * (tipW / 2);
+
+    ctx.globalAlpha = 0.25 + 0.75 * wind01;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(p0lx, p0ly);
+    ctx.lineTo(p1lx, p1ly);
+    ctx.lineTo(p1rx, p1ry);
+    ctx.lineTo(p0rx, p0ry);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = "rgba(0,0,0,0.55)";
+  ctx.lineWidth = 1;
+  const tBase = 0;
+  const tTip = clothLen;
+  const wBase = baseW;
+  const wTip = tipW;
+  const baseCx = dirX * tBase;
+  const baseCy = dirY * tBase;
+  const tipCx = dirX * tTip;
+  const tipCy = dirY * tTip;
+  const baseLx = baseCx + perpX * (wBase / 2);
+  const baseLy = baseCy + perpY * (wBase / 2);
+  const baseRx = baseCx - perpX * (wBase / 2);
+  const baseRy = baseCy - perpY * (wBase / 2);
+  const tipLx = tipCx + perpX * (wTip / 2);
+  const tipLy = tipCy + perpY * (wTip / 2);
+  const tipRx = tipCx - perpX * (wTip / 2);
+  const tipRy = tipCy - perpY * (wTip / 2);
+  ctx.beginPath();
+  ctx.moveTo(baseLx, baseLy);
+  ctx.lineTo(tipLx, tipLy);
+  ctx.lineTo(tipRx, tipRy);
+  ctx.lineTo(baseRx, baseRy);
+  ctx.closePath();
+  ctx.stroke();
+
+  ctx.restore();
+}
+
 
 
 export function drawAimDots(

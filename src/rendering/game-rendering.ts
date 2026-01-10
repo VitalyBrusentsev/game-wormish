@@ -4,11 +4,11 @@ import type { GameState } from "../game-state";
 import type { Worm } from "../entities";
 import {
   drawAimDots,
-  drawArrow,
   drawCrosshair,
   drawHealthBar,
   drawRoundedRect,
   drawText,
+  drawWindsock,
 } from "../utils";
 
 export type AimInfo = {
@@ -193,7 +193,7 @@ export function renderHUD({
       const maxLen = width - padding - 12 - startX;
       const windLen = Math.max(0, Math.min(desiredWindLen, maxLen));
       if (windLen > 0) {
-        drawArrow(ctx, startX, arrowY, 0, windLen, COLORS.power, 4);
+        drawWindsock(ctx, startX, arrowY, 1, windLen, windMag01, COLORS.power);
         drawText(ctx, "Wind", startX + windLen / 2, labelY, COLORS.white, 10, "center", "top", false);
       }
     } else {
@@ -201,7 +201,7 @@ export function renderHUD({
       const maxLen = startX - (padding + 12);
       const windLen = Math.max(0, Math.min(desiredWindLen, maxLen));
       if (windLen > 0) {
-        drawArrow(ctx, startX, arrowY, Math.PI, windLen, COLORS.power, 4);
+        drawWindsock(ctx, startX, arrowY, -1, windLen, windMag01, COLORS.power);
         drawText(ctx, "Wind", startX - windLen / 2, labelY, COLORS.white, 10, "center", "top", false);
       }
     }
