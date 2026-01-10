@@ -12,7 +12,7 @@ It allows players to take turns and control squads of whimsical creatures, with 
 
 Use the following console command to verify the changes compile successfully:
 ```
-npx tsc -p tsconfig.json --noEmit
+npm run typecheck
 ```
 To validate the tests are still passing after making changes, use `npm run test:run`, which will run the test suite once, using vitest.
 
