@@ -35,6 +35,8 @@ Comments should be kept to a minimum. Prefer code readability and clean structur
 
 - The frame loop lives in [src/game.ts](src/game.ts); it owns input handling, physics updates, and rendering.
 - Turn state, charge timing, and weapon selection are encapsulated by [src/game-state.ts](src/game-state.ts). Extend it rather than scattering turn bookkeeping.
+- Cross-cutting reactions (UI/SFX/etc) should use the global event bus in [src/events/game-events.ts](src/events/game-events.ts) instead of adding new direct dependencies; prefer emitting from the simulation core and subscribing at module/UI boundaries.
+- Avoid event-subscription leaks: keep `unsubscribe()` handles or use an `AbortSignal` (e.g. `AbortController` tied to `dispose()`).
 - Entities under [src/entities/](src/entities/) are mutable classes updated each frame. Prefer methods on those classes over sprawling helper functions.
 - Rendering helpers in [src/rendering/](src/rendering/) should stay pure with respect to game state: pass everything needed as parameters and keep DOM interactions centralized in `Game`.
 - Input glue and overlays live under [src/ui/](src/ui/); keep UI-specific state there.

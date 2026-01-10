@@ -18,6 +18,7 @@ import {
   predictTrajectory,
   shouldPredictPath,
 } from "./weapon-system";
+import { gameEvents, type GameEventSource } from "../events/game-events";
 import type {
   TerrainOperation,
   TurnCommand,
@@ -30,29 +31,6 @@ import type {
   TurnDriverUpdateOptions,
   TurnContext,
 } from "./turn-driver";
-
-/**
- * Hooks that allow the host environment (e.g. the DOM-oriented `Game` wrapper)
- * to react to important simulation events coming from the DOM-free session
- * core.
- */
-export interface SessionCallbacks {
-  onExplosion?: (info: {
-    x: number;
-    y: number;
-    radius: number;
-    damage: number;
-    cause: WeaponType;
-  }) => void;
-  onRestart?: () => void;
-  onTurnCommand?: (command: TurnCommand, meta: { turnIndex: number; teamId: TeamId }) => void;
-  onTurnEffects?: (effects: {
-    turnIndex: number;
-    actingTeamId: TeamId;
-    terrainOperations: TerrainOperation[];
-    wormHealth: WormHealthChange[];
-  }) => void;
-}
 
 export interface WormSnapshot {
   name: string;
@@ -146,7 +124,6 @@ export class GameSession {
   private aim: AimInfo;
 
   private readonly teamManager: TeamManager;
-  private readonly callbacks: SessionCallbacks;
   private readonly horizontalPadding: number;
   private readonly random: () => number;
   private readonly now: () => number;
@@ -175,7 +152,6 @@ export class GameSession {
     height: number,
     options?: {
       horizontalPadding?: number;
-      callbacks?: SessionCallbacks;
       random?: () => number;
       now?: () => number;
     }
@@ -183,7 +159,6 @@ export class GameSession {
     this.width = width;
     this.height = height;
     this.horizontalPadding = Math.max(0, options?.horizontalPadding ?? 0);
-    this.callbacks = options?.callbacks ?? {};
     this.random = options?.random ?? Math.random;
     this.now = options?.now ?? nowMs;
 
@@ -215,6 +190,7 @@ export class GameSession {
   }) {
     if (effects.turnIndex !== this.turnIndex) return;
     if (effects.actingTeamId !== this.activeTeam.id) return;
+    const source: GameEventSource = "remote-effects";
 
     for (const operation of effects.terrainOperations) {
       if (operation.type !== "carve-circle") continue;
@@ -222,6 +198,14 @@ export class GameSession {
       if (this.appliedRemoteTerrainOperationKeys.has(key)) continue;
       this.appliedRemoteTerrainOperationKeys.add(key);
       this.terrain.carveCircle(operation.x, operation.y, operation.radius);
+      gameEvents.emit("world.terrain.carved", {
+        source,
+        turnIndex: this.turnIndex,
+        teamId: effects.actingTeamId,
+        position: { x: operation.x, y: operation.y },
+        radius: operation.radius,
+        atMs: operation.atMs,
+      });
     }
 
     for (const change of effects.wormHealth) {
@@ -232,8 +216,24 @@ export class GameSession {
       if (!team) continue;
       const worm = team.worms[change.wormIndex];
       if (!worm) continue;
+      const beforeHealth = worm.health;
+      const wasAlive = worm.alive;
       worm.health = change.after;
       worm.alive = change.alive;
+      this.emitWormHealthEvents({
+        source,
+        turnIndex: this.turnIndex,
+        teamId: change.teamId,
+        wormIndex: change.wormIndex,
+        position: { x: worm.x, y: worm.y },
+        before: beforeHealth,
+        after: worm.health,
+        delta: worm.health - beforeHealth,
+        cause: change.cause,
+        atMs: change.atMs,
+        wasAlive,
+        alive: worm.alive,
+      });
     }
   }
 
@@ -316,6 +316,7 @@ export class GameSession {
     this.appliedRemoteWormHealthKeys.clear();
     this.beginTurnLog();
     this.configureTurnDriver(initial);
+    this.emitTurnStarted({ initial, source: initial ? "system" : "local-sim" });
   }
 
   handleInput(
@@ -502,7 +503,7 @@ export class GameSession {
     this.terminatedProjectiles.clear();
     this.nextProjectileId = 1;
     this.nextTurn(true);
-    this.callbacks.onRestart?.();
+    gameEvents.emit("match.restarted", { source: "system" });
   }
 
   toSnapshot(): GameSnapshot {
@@ -770,6 +771,10 @@ export class GameSession {
       throw new Error("Incoming resolution snapshot turn index mismatch");
     }
 
+    const phaseBefore = this.state.phase;
+    const startedNewTurn =
+      resolution.result.turnIndex === resolution.turnIndex + 1 &&
+      resolution.result.state.phase === "aim";
     const previousDriver = this.currentTurnDriver;
     const previousContext = this.currentTurnContext;
 
@@ -845,7 +850,25 @@ export class GameSession {
       if (operation.type !== "carve-circle") continue;
       const key = this.terrainOperationKey(operation);
       if (this.appliedRemoteTerrainOperationKeys.has(key)) continue;
+      this.appliedRemoteTerrainOperationKeys.add(key);
       this.terrain.carveCircle(operation.x, operation.y, operation.radius);
+      gameEvents.emit("world.terrain.carved", {
+        source: "remote-resolution",
+        turnIndex: this.turnIndex,
+        teamId: resolution.actingTeamId,
+        position: { x: operation.x, y: operation.y },
+        radius: operation.radius,
+        atMs: operation.atMs,
+      });
+    }
+
+    const healthEventsToEmit: WormHealthChange[] = [];
+    for (const change of resolution.wormHealth) {
+      const key = this.wormHealthKey(change);
+      if (!this.appliedRemoteWormHealthKeys.has(key)) {
+        healthEventsToEmit.push(change);
+      }
+      this.appliedRemoteWormHealthKeys.add(key);
     }
 
     this.loadNetworkTurnSnapshot(resolution.result);
@@ -855,6 +878,40 @@ export class GameSession {
       if (this.state.charging) {
         this.state.chargeStartMs = localStart;
       }
+    }
+
+    for (const change of healthEventsToEmit) {
+      const team = this.teams.find((t) => t.id === change.teamId);
+      if (!team) continue;
+      const worm = team.worms[change.wormIndex];
+      if (!worm) continue;
+      this.emitWormHealthEvents({
+        source: "remote-resolution",
+        turnIndex: resolution.turnIndex,
+        teamId: change.teamId,
+        wormIndex: change.wormIndex,
+        position: { x: worm.x, y: worm.y },
+        before: change.before,
+        after: change.after,
+        delta: change.delta,
+        cause: change.cause,
+        atMs: change.atMs,
+        wasAlive: change.wasAlive,
+        alive: change.alive,
+      });
+    }
+
+    if (phaseBefore !== "gameover" && this.state.phase === "gameover") {
+      const winner = this.message?.startsWith("Red wins!")
+        ? ("Red" as const)
+        : this.message?.startsWith("Blue wins!")
+          ? ("Blue" as const)
+          : ("Nobody" as const);
+      gameEvents.emit("match.gameover", {
+        source: "remote-resolution",
+        winner,
+        turnIndex: resolution.result.turnIndex,
+      });
     }
 
     this.turnLog = this.createEmptyTurnLog();
@@ -870,6 +927,9 @@ export class GameSession {
       previousDriver.endTurn(previousContext, resolution);
     }
     this.configureTurnDriver(false);
+    if (startedNewTurn) {
+      this.emitTurnStarted({ initial: false, source: "remote-resolution" });
+    }
   }
 
   private createEmptyTurnLog(): TurnLog {
@@ -958,9 +1018,11 @@ export class GameSession {
     const finalized = this.applyCommand(command);
     if (!finalized) return;
     this.turnLog.commands.push(finalized);
-    this.callbacks.onTurnCommand?.(this.cloneTurnCommand(finalized), {
+    gameEvents.emit("turn.command.recorded", {
+      source: "local-sim",
       turnIndex: this.turnIndex,
       teamId: this.activeTeam.id,
+      command: this.cloneTurnCommand(finalized),
     });
   }
 
@@ -1092,6 +1154,18 @@ export class GameSession {
         cause,
         atMs: this.turnTimestampMs(),
       });
+      gameEvents.emit("combat.projectile.exploded", {
+        source: this.isLocalTurnActive() ? "local-sim" : "remote-sim",
+        turnIndex: this.turnIndex,
+        teamId: this.activeTeam.id,
+        projectileId: id,
+        weapon: projectile.type,
+        position: { x, y },
+        radius,
+        damage,
+        cause,
+        atMs: this.turnTimestampMs(),
+      });
       this.terminatedProjectiles.add(id);
       originalHandler(x, y, radius, damage, cause);
     };
@@ -1102,6 +1176,16 @@ export class GameSession {
     this.turnLog.projectileEvents.push({
       type: "projectile-expired",
       id,
+      weapon: projectile.type,
+      position: { x: projectile.x, y: projectile.y },
+      reason: this.detectProjectileExpiryReason(projectile),
+      atMs: this.turnTimestampMs(),
+    });
+    gameEvents.emit("combat.projectile.expired", {
+      source: this.isLocalTurnActive() ? "local-sim" : "remote-sim",
+      turnIndex: this.turnIndex,
+      teamId: this.activeTeam.id,
+      projectileId: id,
       weapon: projectile.type,
       position: { x: projectile.x, y: projectile.y },
       reason: this.detectProjectileExpiryReason(projectile),
@@ -1130,11 +1214,20 @@ export class GameSession {
       atMs: this.turnTimestampMs(),
     };
     this.turnLog.terrainOperations.push(operation);
-    this.callbacks.onTurnEffects?.({
+    gameEvents.emit("turn.effects.emitted", {
+      source: "local-sim",
       turnIndex: this.turnIndex,
       actingTeamId: this.activeTeam.id,
       terrainOperations: [{ ...operation }],
       wormHealth: [],
+    });
+    gameEvents.emit("world.terrain.carved", {
+      source: "local-sim",
+      turnIndex: this.turnIndex,
+      teamId: this.activeTeam.id,
+      position: { x, y },
+      radius,
+      atMs: operation.atMs,
     });
   }
 
@@ -1160,11 +1253,26 @@ export class GameSession {
       alive: worm.alive,
     };
     this.turnLog.wormHealth.push(change);
-    this.callbacks.onTurnEffects?.({
+    gameEvents.emit("turn.effects.emitted", {
+      source: "local-sim",
       turnIndex: this.turnIndex,
       actingTeamId: this.activeTeam.id,
       terrainOperations: [],
       wormHealth: [{ ...change }],
+    });
+    this.emitWormHealthEvents({
+      source: "local-sim",
+      turnIndex: this.turnIndex,
+      teamId: change.teamId,
+      wormIndex: change.wormIndex,
+      position: { x: worm.x, y: worm.y },
+      before: change.before,
+      after: change.after,
+      delta: change.delta,
+      cause: change.cause,
+      atMs: change.atMs,
+      wasAlive: change.wasAlive,
+      alive: change.alive,
     });
   }
 
@@ -1244,7 +1352,7 @@ export class GameSession {
 
     const newProjectiles = this.projectiles.slice(beforeCount);
     const projectileIds: number[] = [];
-    const spawnEvents: TurnEvent[] = [];
+    const spawnEvents: Array<Extract<TurnEvent, { type: "projectile-spawned" }>> = [];
     const forcedIds = forcedProjectileIds.length > 0 ? [...forcedProjectileIds] : null;
     for (const projectile of newProjectiles) {
       const forcedId = forcedIds?.shift();
@@ -1276,6 +1384,44 @@ export class GameSession {
     } as const;
 
     this.turnLog.projectileEvents.push(...spawnEvents);
+
+    const source: GameEventSource = this.isLocalTurnActive() ? "local-sim" : "remote-sim";
+    const wormIndex = this.teamManager.activeWormIndex;
+    gameEvents.emit("combat.shot.fired", {
+      source,
+      turnIndex: this.turnIndex,
+      teamId: this.activeTeam.id,
+      wormIndex,
+      weapon,
+      power01,
+      aim: { angle: aim.angle, targetX: aim.targetX, targetY: aim.targetY },
+      wormPosition: { x: this.activeWorm.x, y: this.activeWorm.y },
+      wind: this.wind,
+      atMs,
+      projectiles: spawnEvents.map((event) => ({
+        projectileId: event.id,
+        weapon: event.weapon,
+        position: { ...event.position },
+        velocity: { ...event.velocity },
+        wind: event.wind,
+      })),
+    });
+
+    for (const event of spawnEvents) {
+      gameEvents.emit("combat.projectile.spawned", {
+        source,
+        turnIndex: this.turnIndex,
+        teamId: this.activeTeam.id,
+        wormIndex,
+        projectileId: event.id,
+        weapon: event.weapon,
+        position: { ...event.position },
+        velocity: { ...event.velocity },
+        wind: event.wind,
+        atMs: event.atMs,
+      });
+    }
+
     return command;
   }
 
@@ -1286,6 +1432,18 @@ export class GameSession {
     damage: number,
     cause: WeaponType
   ) {
+    const source: GameEventSource = this.isLocalTurnActive() ? "local-sim" : "remote-sim";
+    gameEvents.emit("combat.explosion", {
+      source,
+      turnIndex: this.turnIndex,
+      teamId: this.activeTeam.id,
+      position: { x, y },
+      radius,
+      damage,
+      cause,
+      atMs: this.turnTimestampMs(),
+    });
+
     const particleCount = cause === WeaponType.Rifle ? 12 : 50;
     for (let i = 0; i < particleCount; i++) {
       const ang = this.random() * Math.PI * 2;
@@ -1304,7 +1462,6 @@ export class GameSession {
     }
 
     if (!this.isLocalTurnActive()) {
-      this.callbacks.onExplosion?.({ x, y, radius, damage, cause });
       return;
     }
 
@@ -1355,7 +1512,60 @@ export class GameSession {
       }
     }
 
-    this.callbacks.onExplosion?.({ x, y, radius, damage, cause });
+  }
+
+  private emitTurnStarted(config: { initial: boolean; source: GameEventSource }) {
+    gameEvents.emit("turn.started", {
+      source: config.source,
+      turnIndex: this.turnIndex,
+      teamId: this.activeTeam.id,
+      wormIndex: this.teamManager.activeWormIndex,
+      wind: this.wind,
+      weapon: this.state.weapon,
+      initial: config.initial,
+    });
+  }
+
+  private emitWormHealthEvents(event: {
+    source: GameEventSource;
+    turnIndex: number;
+    teamId: TeamId;
+    wormIndex: number;
+    position: { x: number; y: number };
+    before: number;
+    after: number;
+    delta: number;
+    cause: WeaponType;
+    atMs: number;
+    wasAlive: boolean;
+    alive: boolean;
+  }) {
+    gameEvents.emit("worm.health.changed", event);
+    const damage = Math.max(0, event.before - event.after);
+    if (damage > 0) {
+      gameEvents.emit("worm.hit", {
+        source: event.source,
+        turnIndex: event.turnIndex,
+        teamId: event.teamId,
+        wormIndex: event.wormIndex,
+        position: event.position,
+        damage,
+        cause: event.cause,
+        atMs: event.atMs,
+        healthAfter: event.after,
+      });
+    }
+    if (event.wasAlive && !event.alive) {
+      gameEvents.emit("worm.killed", {
+        source: event.source,
+        turnIndex: event.turnIndex,
+        teamId: event.teamId,
+        wormIndex: event.wormIndex,
+        position: event.position,
+        cause: event.cause,
+        atMs: event.atMs,
+      });
+    }
   }
 
   private endAimPhaseWithoutShot() {
@@ -1372,12 +1582,18 @@ export class GameSession {
   }
 
   private checkVictory() {
+    if (this.state.phase === "gameover") return;
     const redAlive = this.teamManager.isTeamAlive("Red");
     const blueAlive = this.teamManager.isTeamAlive("Blue");
     if (!redAlive || !blueAlive) {
       this.state.phase = "gameover";
-      const winner = redAlive ? "Red" : blueAlive ? "Blue" : "Nobody";
+      const winner: TeamId | "Nobody" = redAlive ? "Red" : blueAlive ? "Blue" : "Nobody";
       this.message = `${winner} wins! Press R to restart.`;
+      gameEvents.emit("match.gameover", {
+        source: "local-sim",
+        winner,
+        turnIndex: this.turnIndex,
+      });
       if (this.isLocalTurnActive() && !this.pendingTurnResolution) {
         const resolution = this.buildTurnResolution(
           this.turnLog,

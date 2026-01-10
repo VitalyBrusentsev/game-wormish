@@ -5,6 +5,7 @@ import type { Worm } from "./entities";
 import { HelpOverlay } from "./ui/help-overlay";
 import { StartMenuOverlay } from "./ui/start-menu-overlay";
 import { NetworkMatchDialog } from "./ui/network-match-dialog";
+import { gameEvents } from "./events/game-events";
 import {
   renderAimHelpers,
   renderBackground,
@@ -17,7 +18,6 @@ import { renderMapGadget } from "./ui/map-gadget";
 import type { Team } from "./game/team-manager";
 import {
   GameSession,
-  type SessionCallbacks,
   type MatchInitSnapshot,
 } from "./game/session";
 import {
@@ -189,12 +189,7 @@ export class Game {
   private readonly mouseDownFocusHandler = () => this.canvas.focus();
   private readonly touchStartFocusHandler = () => this.canvas.focus();
 
-  private readonly sessionCallbacks: SessionCallbacks = {
-    onExplosion: (info) => this.handleSessionExplosion(info),
-    onRestart: () => this.resetCameraShake(),
-    onTurnCommand: (command, meta) => this.handleLocalTurnCommand(command, meta),
-    onTurnEffects: (effects) => this.handleLocalTurnEffects(effects),
-  };
+  private readonly eventAbort = new AbortController();
 
   private readonly turnControllers = new Map<TeamId, TurnDriver>();
   private aimThrottleState: AimThrottleState | null = null;
@@ -222,10 +217,8 @@ export class Game {
     this.networkState = new NetworkSessionState();
 
     const groundWidth = WORLD.groundWidth;
-    this.session = new GameSession(groundWidth, height, {
-      horizontalPadding: 0,
-      callbacks: this.sessionCallbacks,
-    });
+    this.subscribeToGameEvents();
+    this.session = new GameSession(groundWidth, height, { horizontalPadding: 0 });
 
     this.initializeTurnControllers();
     this.cameraX = this.clampCameraX(this.activeWorm.x - this.width / 2);
@@ -367,6 +360,7 @@ export class Game {
       this.frameHandle = null;
     }
     this.running = false;
+    this.eventAbort.abort();
     this.cancelNetworkSetup();
     this.startMenu.dispose();
     this.networkDialog.dispose();
@@ -763,7 +757,6 @@ export class Game {
     */
     const nextSession = new GameSession(snapshot.width, this.height, {
       horizontalPadding: snapshot.terrain.horizontalPadding,
-      callbacks: this.sessionCallbacks,
     });
     nextSession.loadMatchInitSnapshot(snapshot);
     nextSession.state.turnStartMs = nowMs();
@@ -976,6 +969,41 @@ export class Game {
     if (info.cause === WeaponType.HandGrenade) {
       this.triggerCameraShake(info.radius * 0.7);
     }
+  }
+
+  private subscribeToGameEvents() {
+    const signal = this.eventAbort.signal;
+
+    gameEvents.on(
+      "combat.explosion",
+      (event) => this.handleSessionExplosion({ cause: event.cause, radius: event.radius }),
+      { signal }
+    );
+
+    gameEvents.on("match.restarted", () => this.resetCameraShake(), { signal });
+
+    gameEvents.on(
+      "turn.command.recorded",
+      (event) => {
+        if (event.source !== "local-sim") return;
+        this.handleLocalTurnCommand(event.command, { turnIndex: event.turnIndex, teamId: event.teamId });
+      },
+      { signal }
+    );
+
+    gameEvents.on(
+      "turn.effects.emitted",
+      (event) => {
+        if (event.source !== "local-sim") return;
+        this.handleLocalTurnEffects({
+          turnIndex: event.turnIndex,
+          actingTeamId: event.actingTeamId,
+          terrainOperations: event.terrainOperations,
+          wormHealth: event.wormHealth,
+        });
+      },
+      { signal }
+    );
   }
 
   private resetCameraShake() {

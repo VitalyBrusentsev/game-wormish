@@ -12,6 +12,7 @@ The game is orchestrated by an imperative loop with lightweight classes for doma
 - The main entry point constructs a [Game](src/game.ts) instance that owns the canvas and runs the frame loop.
 - Turn/weapon flow is encapsulated by [GameState](src/game-state.ts), keeping timing and charge logic together.
 - Gameplay objects live under [src/entities/](src/entities/), covering terrain, worms, projectiles, and particles.
+- Cross-cutting reactions (HUD/SFX/network glue) should subscribe to the global typed event bus in [src/events/game-events.ts](src/events/game-events.ts) rather than wiring new dependencies through unrelated classes.
 - Rendering helpers in [src/rendering/](src/rendering/) take a canvas context and draw HUD, terrain, and UI overlays.
 - User input is handled by [Input](src/utils.ts) and UI overlays under [src/ui/](src/ui/).
 
@@ -22,7 +23,7 @@ Common tasks (Windows PowerShell syntax):
 
 - Install deps: `npm install`
 - Run dev server: `npm run dev`
-- Type-check without emitting: `tsc -p tsconfig.json --noEmit`
+- Type-check without emitting: `npm run typecheck`
 - Run tests in watch mode: `npm run test`
 - Run tests once (CI): `npm run test:run`
 
