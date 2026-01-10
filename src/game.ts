@@ -13,6 +13,7 @@ import {
   type AimInfo,
 } from "./rendering/game-rendering";
 import { renderNetworkLogHUD } from "./ui/network-log-hud";
+import { renderMapGadget } from "./ui/map-gadget";
 import type { Team } from "./game/team-manager";
 import {
   GameSession,
@@ -1300,6 +1301,16 @@ export class Game {
         ...(activeTeamLabel ? { activeTeamLabel } : {}),
       }
     );
+
+    renderMapGadget({
+      ctx,
+      viewportWidth: this.width,
+      viewportHeight: this.height,
+      now,
+      terrain: this.session.terrain,
+      teams: this.teams,
+      projectiles: this.session.projectiles,
+    });
 
     renderGameOver({
       ctx,
