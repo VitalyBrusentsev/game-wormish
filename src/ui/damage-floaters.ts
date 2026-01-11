@@ -15,6 +15,8 @@ type DamageFloater = {
   seedPosition: { x: number; y: number };
 };
 
+export type DamageFloaterDebugSnapshot = Readonly<Pick<DamageFloater, "teamId" | "wormIndex" | "amount" | "createdAtMs">>;
+
 const DAMAGE_FLOATER_TTL_MS = 3000;
 
 function easeOutQuad(t: number): number {
@@ -26,9 +28,33 @@ export class DamageFloaters {
   private nextId = 1;
   private floaters: DamageFloater[] = [];
 
+  getDebugSnapshot(nowMs: number): DamageFloaterDebugSnapshot[] {
+    return this.floaters
+      .filter((floater) => nowMs - floater.createdAtMs < DAMAGE_FLOATER_TTL_MS)
+      .map(({ teamId, wormIndex, amount, createdAtMs }) => ({
+        teamId,
+        wormIndex,
+        amount,
+        createdAtMs,
+      }));
+  }
+
   onWormHealthChanged(event: GameEventMap["worm.health.changed"], nowMs: number) {
     const damage = Math.max(0, -Math.round(event.delta));
     if (damage <= 0) return;
+
+    this.prune(nowMs);
+
+    for (let i = this.floaters.length - 1; i >= 0; i--) {
+      const floater = this.floaters[i];
+      if (!floater) continue;
+      if (floater.teamId !== event.teamId || floater.wormIndex !== event.wormIndex) continue;
+
+      floater.createdAtMs = nowMs;
+      floater.amount += damage;
+      floater.seedPosition = { ...event.position };
+      return;
+    }
 
     const jitter = (Math.random() - 0.5) * 14;
     const heightJitter = (Math.random() - 0.5) * 8;
@@ -87,4 +113,3 @@ export class DamageFloaters {
     }
   }
 }
-
