@@ -10,11 +10,12 @@ type ArrowState = {
   turnIndex: number;
 };
 
-const ARROW_DURATION_MS = 3000;
+const ARROW_DURATION_MS = 4000;
+const ARROW_FADE_START_MS = 2500;
 
-function easeOutCubic(t: number): number {
+function easeInCubic(t: number): number {
   const clamped = Math.max(0, Math.min(1, t));
-  return 1 - Math.pow(1 - clamped, 3);
+  return clamped * clamped * clamped;
 }
 
 export class ActiveWormArrow {
@@ -47,10 +48,11 @@ export class ActiveWormArrow {
     if (session.activeTeam.id !== state.teamId) return;
     if (session.activeWormIndex !== state.wormIndex) return;
 
-    const eased = easeOutCubic(progress);
-    const alpha = Math.max(0, 1 - eased);
+    const fadeStart = Math.min(1, Math.max(0, ARROW_FADE_START_MS / ARROW_DURATION_MS));
+    const fadeT = progress <= fadeStart ? 0 : (progress - fadeStart) / (1 - fadeStart);
+    const alpha = Math.max(0, 1 - easeInCubic(fadeT));
     const bounceT = ageMs / 330;
-    const bouncePx = (Math.sin(bounceT * Math.PI * 2) * 6 + 6) * (1 - eased);
+    const bouncePx = (Math.sin(bounceT * Math.PI * 2) * 6 + 6) * alpha;
 
     const baseY = worm.y - worm.radius - 58;
     const x = worm.x;
