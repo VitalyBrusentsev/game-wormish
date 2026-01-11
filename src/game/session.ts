@@ -208,6 +208,7 @@ export class GameSession {
       if (this.appliedRemoteTerrainOperationKeys.has(key)) continue;
       this.appliedRemoteTerrainOperationKeys.add(key);
       this.terrain.carveCircle(operation.x, operation.y, operation.radius);
+      this.dislodgeTombstonesFromCarve(operation.x, operation.y, operation.radius);
       gameEvents.emit("world.terrain.carved", {
         source,
         turnIndex: this.turnIndex,
@@ -486,12 +487,10 @@ export class GameSession {
     }
     this.particles = this.particles.filter((p) => p.life > 0);
 
-    if (this.state.phase !== "aim") {
-      for (const team of this.teams) {
-        for (const worm of team.worms) {
-          if (!worm.alive) continue;
-          worm.update(dt, this.terrain, 0, false);
-        }
+    for (const team of this.teams) {
+      for (const worm of team.worms) {
+        if (worm.alive && this.state.phase === "aim") continue;
+        worm.update(dt, this.terrain, 0, false);
       }
     }
 
@@ -1278,6 +1277,22 @@ export class GameSession {
     });
   }
 
+  private dislodgeTombstonesFromCarve(x: number, y: number, radius: number) {
+    const pad = 10;
+    const maxDistance = radius + WORLD.wormRadius + pad;
+    for (const team of this.teams) {
+      for (const worm of team.worms) {
+        if (worm.alive) continue;
+        const dx = worm.x - x;
+        const dy = worm.y - y;
+        const d = Math.hypot(dx, dy);
+        if (d > maxDistance) continue;
+        worm.onGround = false;
+        if (worm.vy === 0) worm.vy = 30;
+      }
+    }
+  }
+
   private recordWormHealthChange(
     worm: Worm,
     team: Team,
@@ -1680,6 +1695,7 @@ export class GameSession {
 
     this.recordTerrainCarve(x, y, radius);
     this.terrain.carveCircle(x, y, radius);
+    this.dislodgeTombstonesFromCarve(x, y, radius);
 
     if (cause !== WeaponType.Rifle && cause !== WeaponType.Uzi) {
       for (const team of this.teams) {

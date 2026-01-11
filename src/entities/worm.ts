@@ -43,21 +43,30 @@ export class Worm {
   }
 
   update(dt: number, terrain: Terrain, moveX: number, jump: boolean) {
-    if (!this.alive) return;
-    this.age += dt;
-    // Horizontal input
-    const targetVx = moveX * WORLD.walkSpeed;
-    const accel = 800;
-    if (Math.abs(targetVx - this.vx) < 5) {
-      this.vx = targetVx;
-    } else {
-      this.vx += Math.sign(targetVx - this.vx) * accel * dt;
-      // Clamp
-      if ((targetVx >= 0 && this.vx > targetVx) || (targetVx < 0 && this.vx < targetVx)) {
+    const alive = this.alive;
+    if (alive) {
+      this.age += dt;
+      // Horizontal input
+      const targetVx = moveX * WORLD.walkSpeed;
+      const accel = 800;
+      if (Math.abs(targetVx - this.vx) < 5) {
         this.vx = targetVx;
+      } else {
+        this.vx += Math.sign(targetVx - this.vx) * accel * dt;
+        // Clamp
+        if ((targetVx >= 0 && this.vx > targetVx) || (targetVx < 0 && this.vx < targetVx)) {
+          this.vx = targetVx;
+        }
       }
+      if (moveX !== 0) this.facing = Math.sign(moveX);
+    } else {
+      const drag = 7.5;
+      const damping = Math.exp(-drag * dt);
+      this.vx *= damping;
+      if (Math.abs(this.vx) < 0.25) this.vx = 0;
+      jump = false;
+      moveX = 0;
     }
-    if (moveX !== 0) this.facing = Math.sign(moveX);
 
     // Snapshot previous on-ground state for this frame and use a sticky latch
     const prevOnGround = this.onGround;
@@ -65,7 +74,7 @@ export class Worm {
     let latchPrev = prevOnGround;     // preserved previous-frame support unless an explicit jump occurs
 
     // Jump
-    if (prevOnGround && jump) {
+    if (alive && prevOnGround && jump) {
       this.vy = -WORLD.jumpSpeed;
       grounded = false;
       latchPrev = false; // jumping clears the previous support latch for this frame
@@ -187,9 +196,119 @@ export class Worm {
   }
 
   render(ctx: CanvasRenderingContext2D, highlight = false) {
-    // Always render: alive worms or a tombstone for fallen ones
     ctx.save();
     ctx.translate(this.x, this.y);
+
+    if (!this.alive) {
+      const baseY = this.radius + 1;
+
+      // Shadow
+      ctx.globalAlpha = 0.22;
+      ctx.fillStyle = "#000";
+      ctx.beginPath();
+      ctx.ellipse(2.5, baseY + 1, 15, 5.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      const w = 22;
+      const h = 28;
+      const shoulderY = baseY - h + 8;
+      const topY = baseY - h - 4;
+      const depthX = 4;
+      const depthY = -3;
+
+      // Side face (depth)
+      ctx.fillStyle = "#a39d97";
+      ctx.lineWidth = 2;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(w / 2, baseY);
+      ctx.lineTo(w / 2 + depthX, baseY + depthY);
+      ctx.lineTo(w / 2 + depthX, shoulderY + depthY);
+      ctx.lineTo(w / 2, shoulderY);
+      ctx.closePath();
+      ctx.fill();
+
+      // Top face (hint of bevel)
+      ctx.fillStyle = "#d7d2cd";
+      ctx.beginPath();
+      ctx.moveTo(-w / 2, shoulderY);
+      ctx.lineTo(-w / 2 + depthX, shoulderY + depthY);
+      ctx.quadraticCurveTo(depthX, topY + depthY, w / 2 + depthX, shoulderY + depthY);
+      ctx.lineTo(w / 2, shoulderY);
+      ctx.quadraticCurveTo(0, topY, -w / 2, shoulderY);
+      ctx.closePath();
+      ctx.fill();
+
+      // Front face
+      ctx.fillStyle = "#c9c4bf";
+      ctx.strokeStyle = "rgba(0,0,0,0.22)";
+      ctx.beginPath();
+      ctx.moveTo(-w / 2, baseY);
+      ctx.lineTo(-w / 2, shoulderY);
+      ctx.quadraticCurveTo(0, topY, w / 2, shoulderY);
+      ctx.lineTo(w / 2, baseY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Depth edges
+      ctx.strokeStyle = "rgba(0,0,0,0.16)";
+      ctx.beginPath();
+      ctx.moveTo(w / 2, baseY);
+      ctx.lineTo(w / 2 + depthX, baseY + depthY);
+      ctx.lineTo(w / 2 + depthX, shoulderY + depthY);
+      ctx.stroke();
+
+      // Front bevel highlight
+      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 + 2, baseY - 1);
+      ctx.lineTo(-w / 2 + 2, shoulderY + 2);
+      ctx.stroke();
+
+      // Base slab
+      ctx.fillStyle = "#b6b0aa";
+      ctx.strokeStyle = "rgba(0,0,0,0.22)";
+      ctx.lineWidth = 2;
+      const slabX = -w / 2 - 3;
+      const slabY = baseY - 4;
+      const slabW = w + 10;
+      const slabH = 8;
+      const slabR = 3;
+      ctx.beginPath();
+      ctx.moveTo(slabX + slabR, slabY);
+      ctx.lineTo(slabX + slabW - slabR, slabY);
+      ctx.quadraticCurveTo(slabX + slabW, slabY, slabX + slabW, slabY + slabR);
+      ctx.lineTo(slabX + slabW, slabY + slabH - slabR);
+      ctx.quadraticCurveTo(
+        slabX + slabW,
+        slabY + slabH,
+        slabX + slabW - slabR,
+        slabY + slabH
+      );
+      ctx.lineTo(slabX + slabR, slabY + slabH);
+      ctx.quadraticCurveTo(slabX, slabY + slabH, slabX, slabY + slabH - slabR);
+      ctx.lineTo(slabX, slabY + slabR);
+      ctx.quadraticCurveTo(slabX, slabY, slabX + slabR, slabY);
+      ctx.fill();
+      ctx.stroke();
+
+      // Engraving (cross + a little crack)
+      ctx.strokeStyle = "#7a7570";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-4, baseY - 15);
+      ctx.lineTo(4, baseY - 15);
+      ctx.moveTo(0, baseY - 20);
+      ctx.lineTo(0, baseY - 10);
+      ctx.stroke();
+
+      ctx.restore();
+      return;
+    }
 
     // Shadow
     ctx.globalAlpha = 0.25;
@@ -198,34 +317,6 @@ export class Worm {
     ctx.ellipse(0, this.radius - 4, this.radius * 0.9, this.radius * 0.4, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
-
-    if (!this.alive) {
-      // Cute little tombstone
-      ctx.fillStyle = "#c9c4bf";
-      ctx.strokeStyle = "rgba(0,0,0,0.25)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(-10, 0);
-      ctx.lineTo(-10, -12);
-      ctx.quadraticCurveTo(0, -20, 10, -12);
-      ctx.lineTo(10, 0);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-
-      // Engraving (simple cross)
-      ctx.strokeStyle = "#7a7570";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(-3, -10);
-      ctx.lineTo(3, -10);
-      ctx.moveTo(0, -14);
-      ctx.lineTo(0, -6);
-      ctx.stroke();
-
-      ctx.restore();
-      return;
-    }
 
     // Alive: draw worm body
     const bodyColor = this.team === "Red" ? "#ff9aa9" : "#9ad0ff";
