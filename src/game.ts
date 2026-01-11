@@ -284,6 +284,7 @@ export class Game {
       onStart: () => {
         this.hideStartMenu();
         initialMenuDismissed = true;
+        this.showTurnStartArrowForCurrentTurn(this.session.getTurnIndex() === 0);
         this.canvas.focus();
         this.updateCursor();
       },
@@ -734,18 +735,6 @@ export class Game {
           this.startNetworkMatchAsHost();
           this.networkState.setWaitingForSnapshot(false);
           this.sendMatchInit();
-          this.activeWormArrow.onTurnStarted(
-            {
-              source: "system",
-              turnIndex: this.session.getTurnIndex(),
-              teamId: this.session.activeTeam.id,
-              wormIndex: this.session.activeWormIndex,
-              wind: this.session.wind,
-              weapon: this.session.state.weapon,
-              initial: this.session.getTurnIndex() === 0,
-            },
-            nowMs()
-          );
         } else if (snapshot.mode === "network-guest") {
           this.networkState.setWaitingForSnapshot(!this.hasReceivedMatchInit);
         }
@@ -951,6 +940,21 @@ export class Game {
     return this.session.teams;
   }
 
+  private showTurnStartArrowForCurrentTurn(initial: boolean) {
+    this.activeWormArrow.onTurnStarted(
+      {
+        source: "system",
+        turnIndex: this.session.getTurnIndex(),
+        teamId: this.session.activeTeam.id,
+        wormIndex: this.session.activeWormIndex,
+        wind: this.session.wind,
+        weapon: this.session.state.weapon,
+        initial,
+      },
+      nowMs()
+    );
+  }
+
   private showHelp() {
     const opened = this.helpOverlay.show(nowMs());
     if (opened && this.session.state.charging) {
@@ -1075,7 +1079,11 @@ export class Game {
       "turn.started",
       (event) => {
         const snapshot = this.networkState.getSnapshot();
-        if (snapshot.mode !== "local" && snapshot.connection.lifecycle !== "connected") return;
+        if (snapshot.mode === "local") {
+          if (!initialMenuDismissed) return;
+        } else if (snapshot.connection.lifecycle !== "connected") {
+          return;
+        }
         this.activeWormArrow.onTurnStarted(event, nowMs());
       },
       { signal }
