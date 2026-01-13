@@ -149,17 +149,24 @@ export class Projectile {
     ctx.rotate(ang);
     // Body
     if (this.type === WeaponType.Bazooka) {
+      const lengthFactor = 0.8;
+      const slimFactor = 0.7;
+      const bodyWidth = 20 * lengthFactor;
+      const bodyHeight = 8 * slimFactor;
+      const cornerRadius = 3 * slimFactor;
+      const tipRadius = 3 * slimFactor;
+
       ctx.fillStyle = "#666";
       ctx.strokeStyle = "#222";
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2 * slimFactor;
       ctx.beginPath();
       // @ts-ignore roundRect is widely supported on Canvas2D
-      ctx.roundRect(-10, -4, 20, 8, 3);
+      ctx.roundRect(-bodyWidth / 2, -bodyHeight / 2, bodyWidth, bodyHeight, cornerRadius);
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = "#ff5533";
       ctx.beginPath();
-      ctx.arc(10, 0, 3, 0, Math.PI * 2);
+      ctx.arc(bodyWidth / 2, 0, tipRadius, 0, Math.PI * 2);
       ctx.fill();
     } else if (this.type === WeaponType.HandGrenade) {
       const radius = this.r;
