@@ -250,15 +250,46 @@ export class Projectile {
     } else {
       // Rifle/Uzi bullet (small tracer)
       const isUzi = this.type === WeaponType.Uzi;
-      ctx.strokeStyle = isUzi ? "rgba(255, 232, 140, 0.75)" : "#ffd84d";
-      ctx.lineWidth = isUzi ? 1.5 : 2;
+      const headX = isUzi ? 4 : 6;
+      const trailLength = 40;
+      const trailStartX = headX - trailLength;
+
+      ctx.lineCap = "round";
+
+      ctx.shadowColor = "rgba(0, 0, 0, 0.35)";
+      ctx.shadowBlur = isUzi ? 4 : 5;
+      ctx.shadowOffsetY = 1;
+      const outerTrail = ctx.createLinearGradient(trailStartX, 0, headX, 0);
+      outerTrail.addColorStop(0, "rgba(255, 216, 77, 0)");
+      outerTrail.addColorStop(0.5, isUzi ? "rgba(255, 216, 77, 0.12)" : "rgba(255, 216, 77, 0.18)");
+      outerTrail.addColorStop(1, isUzi ? "rgba(255, 232, 140, 0.45)" : "rgba(255, 232, 140, 0.65)");
+      ctx.strokeStyle = outerTrail;
+      ctx.lineWidth = isUzi ? 3 : 4;
       ctx.beginPath();
-      ctx.moveTo(isUzi ? -4 : -6, 0);
-      ctx.lineTo(isUzi ? 4 : 6, 0);
+      ctx.moveTo(trailStartX, 0);
+      ctx.lineTo(headX, 0);
       ctx.stroke();
-      ctx.fillStyle = isUzi ? "rgba(255,255,255,0.7)" : "#fff";
+
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+      const innerTrail = ctx.createLinearGradient(trailStartX, 0, headX, 0);
+      innerTrail.addColorStop(0, "rgba(255, 255, 255, 0)");
+      innerTrail.addColorStop(0.6, isUzi ? "rgba(255, 255, 255, 0.22)" : "rgba(255, 255, 255, 0.28)");
+      innerTrail.addColorStop(1, isUzi ? "rgba(255, 255, 255, 0.75)" : "rgba(255, 255, 255, 0.9)");
+      ctx.strokeStyle = innerTrail;
+      ctx.lineWidth = isUzi ? 1.4 : 1.8;
       ctx.beginPath();
-      ctx.arc(isUzi ? 4 : 6, 0, isUzi ? 1.1 : 1.5, 0, Math.PI * 2);
+      ctx.moveTo(trailStartX, 0);
+      ctx.lineTo(headX, 0);
+      ctx.stroke();
+
+      const headGradient = ctx.createRadialGradient(headX, 0, 0, headX, 0, isUzi ? 2.2 : 2.8);
+      headGradient.addColorStop(0, "rgba(255, 255, 255, 1)");
+      headGradient.addColorStop(0.6, isUzi ? "rgba(255, 255, 255, 0.85)" : "rgba(255, 255, 255, 0.95)");
+      headGradient.addColorStop(1, "rgba(255, 216, 77, 0)");
+      ctx.fillStyle = headGradient;
+      ctx.beginPath();
+      ctx.arc(headX, 0, isUzi ? 2.2 : 2.8, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
