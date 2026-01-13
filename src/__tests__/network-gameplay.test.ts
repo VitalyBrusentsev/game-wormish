@@ -186,4 +186,23 @@ describe("Network gameplay turn sync", () => {
     expect(guest.activeTeam.id).toBe("Blue");
     expect(guest.isWaitingForRemoteResolution()).toBe(false);
   });
+
+  it("replays throttled movement batches without drifting", () => {
+    const fine = new GameSession(320, 240, { random: createRng(123), now: () => 1000 });
+    const coarse = new GameSession(320, 240, { random: createRng(123), now: () => 1000 });
+
+    expect(coarse.activeWorm.x).toBeCloseTo(fine.activeWorm.x, 6);
+    expect(coarse.activeWorm.y).toBeCloseTo(fine.activeWorm.y, 6);
+
+    for (let i = 0; i < 8; i++) {
+      fine.applyRemoteTurnCommand({ type: "move", move: 1, jump: false, dtMs: 8, atMs: (i + 1) * 8 });
+    }
+    coarse.applyRemoteTurnCommand({ type: "move", move: 1, jump: false, dtMs: 64, atMs: 64 });
+
+    expect(coarse.activeWorm.x).toBeCloseTo(fine.activeWorm.x, 6);
+    expect(coarse.activeWorm.y).toBeCloseTo(fine.activeWorm.y, 6);
+    expect(coarse.activeWorm.vx).toBeCloseTo(fine.activeWorm.vx, 6);
+    expect(coarse.activeWorm.vy).toBeCloseTo(fine.activeWorm.vy, 6);
+    expect(coarse.activeWorm.onGround).toBe(fine.activeWorm.onGround);
+  });
 });

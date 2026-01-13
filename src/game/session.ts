@@ -1051,6 +1051,22 @@ export class GameSession {
     this.recordCommand({ type: "move", move, jump, dtMs, atMs });
   }
 
+  private applyActiveWormMovement(params: {
+    move: -1 | 0 | 1;
+    jump: boolean;
+    dtMs: number;
+  }) {
+    const maxStepMs = 8;
+    let remainingMs = Math.max(0, Math.floor(params.dtMs));
+    let first = true;
+    while (remainingMs > 0) {
+      const stepMs = Math.min(maxStepMs, remainingMs);
+      this.activeWorm.update(stepMs / 1000, this.terrain, params.move, params.jump && first);
+      remainingMs -= stepMs;
+      first = false;
+    }
+  }
+
   private recordStartCharge(atMs: number) {
     if (this.state.charging || this.state.phase !== "aim") return;
     this.recordCommand({ type: "start-charge", atMs });
@@ -1118,8 +1134,11 @@ export class GameSession {
       }
       case "move": {
         if (this.state.phase !== "aim") return null;
-        const dt = command.dtMs / 1000;
-        this.activeWorm.update(dt, this.terrain, command.move, command.jump);
+        this.applyActiveWormMovement({
+          move: command.move,
+          jump: command.jump,
+          dtMs: command.dtMs,
+        });
         return command;
       }
       case "start-charge": {
