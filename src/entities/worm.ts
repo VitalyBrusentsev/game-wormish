@@ -1,6 +1,6 @@
-import { COLORS, CRITTER, WORLD, WeaponType } from "../definitions";
+import { COLORS, CRITTER, WORLD, WeaponType, nowMs, clamp } from "../definitions";
 import type { TeamId } from "../definitions";
-import { computeCritterRig } from "../critter/critter-geometry";
+import { computeCritterRig, type BaseCritterPose } from "../critter/critter-geometry";
 import { drawHealthBar, drawRoundedRect } from "../utils";
 import type { Terrain } from "./terrain";
 
@@ -17,6 +17,9 @@ export class Worm {
   onGround: boolean;
   name: string;
   age: number;
+  private saluteStartMs: number | null = null;
+  private saluteUntilMs = 0;
+  private static readonly saluteTimeScale = 1;
 
   constructor(x: number, y: number, team: TeamId, name: string) {
     this.x = x;
@@ -41,6 +44,18 @@ export class Worm {
   takeDamage(amount: number) {
     this.health = Math.max(0, this.health - Math.floor(amount));
     if (this.health <= 0) this.alive = false;
+  }
+
+  startSalute(startedAtMs: number) {
+    if (!this.alive) return;
+    const durationMs = 1100 * Worm.saluteTimeScale;
+    const untilMs = startedAtMs + durationMs;
+    if (this.saluteStartMs === null || startedAtMs >= this.saluteUntilMs) {
+      this.saluteStartMs = startedAtMs;
+      this.saluteUntilMs = untilMs;
+    } else {
+      this.saluteUntilMs = Math.max(this.saluteUntilMs, untilMs);
+    }
   }
 
   update(dt: number, terrain: Terrain, moveX: number, jump: boolean) {
@@ -308,7 +323,54 @@ export class Worm {
     }
 
     const facing = (this.facing < 0 ? -1 : 1) as -1 | 1;
-    const pose = aimPose ? { kind: "aim" as const, weapon: aimPose.weapon, aimAngle: aimPose.angle } : { kind: "idle" as const };
+    const basePose: BaseCritterPose = aimPose
+      ? { kind: "aim", weapon: aimPose.weapon, aimAngle: aimPose.angle }
+      : { kind: "idle" };
+    const now = nowMs();
+    const saluteActive = this.saluteStartMs !== null && now < this.saluteUntilMs;
+    if (this.saluteStartMs !== null && now >= this.saluteUntilMs) {
+      this.saluteStartMs = null;
+    }
+
+    const computeSaluteAmount01 = () => {
+      if (!saluteActive || this.saluteStartMs === null) return 0;
+      const elapsed = now - this.saluteStartMs;
+      const raiseMs = 220 * Worm.saluteTimeScale;
+      const holdMs = 620 * Worm.saluteTimeScale;
+      const lowerMs = 260 * Worm.saluteTimeScale;
+      const total = raiseMs + holdMs + lowerMs;
+      if (elapsed <= 0) return 0;
+      if (elapsed >= total) return 0;
+
+      const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+      const easeInCubic = (t: number) => t * t * t;
+      if (elapsed < raiseMs) return easeOutCubic(clamp(elapsed / raiseMs, 0, 1));
+      if (elapsed < raiseMs + holdMs) return 1;
+      const t = clamp((elapsed - raiseMs - holdMs) / lowerMs, 0, 1);
+      return 1 - easeInCubic(t);
+    };
+
+    const pickSaluteArm = (pose: BaseCritterPose): "left" | "right" => {
+      if (pose.kind !== "aim") return facing > 0 ? "right" : "left";
+      if (pose.weapon === WeaponType.Uzi) return facing > 0 ? "left" : "right";
+      if (pose.weapon === WeaponType.Rifle || pose.weapon === WeaponType.Bazooka) {
+        return facing > 0 ? "right" : "left";
+      }
+      if (pose.weapon === WeaponType.HandGrenade) return facing > 0 ? "left" : "right";
+      return facing > 0 ? "left" : "right";
+    };
+
+    const saluteAmount01 = computeSaluteAmount01();
+    const saluting = saluteAmount01 > 0;
+    const saluteArm = saluting ? pickSaluteArm(basePose) : null;
+    const pose = saluting
+      ? {
+          kind: "salute" as const,
+          base: basePose,
+          arm: saluteArm!,
+          amount01: saluteAmount01,
+        }
+      : basePose;
     const rig = computeCritterRig({ x: 0, y: 0, r: this.radius, facing, pose });
 
     const bodyColor = this.team === "Red" ? "#ff9aa9" : "#9ad0ff";
@@ -386,10 +448,12 @@ export class Worm {
     }
 
     // Arms are drawn last (foreground)
-    const farArm = facing > 0 ? rig.arms.left : rig.arms.right;
-    const nearArm = facing > 0 ? rig.arms.right : rig.arms.left;
-    strokeArm(farArm, 0.6);
-    strokeArm(nearArm, 1);
+    const farArmKey = (facing > 0 ? "left" : "right") as "left" | "right";
+    const nearArmKey = (facing > 0 ? "right" : "left") as "left" | "right";
+    const farArmAlpha = saluteArm === farArmKey ? 0.95 : 0.6;
+    const nearArmAlpha = 1;
+    strokeArm(rig.arms[farArmKey], farArmAlpha);
+    strokeArm(rig.arms[nearArmKey], nearArmAlpha);
 
     const handR = Math.max(2, armThickness * 0.55);
     if (rig.grenade) {

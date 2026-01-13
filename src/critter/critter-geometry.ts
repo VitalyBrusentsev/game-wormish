@@ -2,9 +2,19 @@ import { CRITTER, WeaponType, clamp } from "../definitions";
 
 export type Vec2 = { x: number; y: number };
 
-export type CritterPose =
+export type BaseCritterPose =
   | { kind: "idle" }
   | { kind: "aim"; weapon: WeaponType; aimAngle: number };
+
+export type CritterPose =
+  | BaseCritterPose
+  | {
+      kind: "salute";
+      base: BaseCritterPose;
+      arm: "left" | "right";
+      amount01: number;
+      offset?: Vec2;
+    };
 
 export type WeaponRig = {
   angle: number;
@@ -113,6 +123,9 @@ export function computeCritterRig(config: {
   facing: -1 | 1;
   pose: CritterPose;
 }): CritterRig {
+  const basePose: BaseCritterPose = config.pose.kind === "salute" ? config.pose.base : config.pose;
+  const salute = config.pose.kind === "salute" ? config.pose : null;
+
   const center = { x: config.x, y: config.y };
   const bodyW = config.r * CRITTER.bodyWidthFactor;
   const bodyH = bodyW * CRITTER.bodyHeightFactor;
@@ -120,8 +133,8 @@ export function computeCritterRig(config: {
   const cornerR = Math.max(2, bodyH * 0.25);
 
   const longWeaponPose =
-    config.pose.kind === "aim" &&
-    (config.pose.weapon === WeaponType.Rifle || config.pose.weapon === WeaponType.Bazooka);
+    basePose.kind === "aim" &&
+    (basePose.weapon === WeaponType.Rifle || basePose.weapon === WeaponType.Bazooka);
 
   const body = { center, w: bodyW, h: bodyH, cornerR };
   const head = {
@@ -153,10 +166,10 @@ export function computeCritterRig(config: {
   let rightTarget: Vec2;
   let supportSide: "left" | "right" | null = null;
 
-  if (config.pose.kind === "aim") {
+  if (basePose.kind === "aim") {
     const nearIsRight = config.facing > 0;
-    if (config.pose.weapon === WeaponType.HandGrenade) {
-      const up01 = clamp(-Math.sin(config.pose.aimAngle), 0, 1);
+    if (basePose.weapon === WeaponType.HandGrenade) {
+      const up01 = clamp(-Math.sin(basePose.aimAngle), 0, 1);
       const throwX = center.x - config.facing * (bodyW * (0.9 + 0.12 * up01));
       const throwY = shoulderY - config.r * (0.25 + 0.28 * up01);
       const supportX = center.x + config.facing * (bodyW * 0.38);
@@ -173,10 +186,10 @@ export function computeCritterRig(config: {
       weapon = computeWeaponRig({
         center,
         r: config.r,
-        weapon: config.pose.weapon,
-        aimAngle: config.pose.aimAngle,
+        weapon: basePose.weapon,
+        aimAngle: basePose.aimAngle,
       });
-      if (config.pose.weapon === WeaponType.Uzi) {
+      if (basePose.weapon === WeaponType.Uzi) {
         if (nearIsRight) {
           rightTarget = weapon.grip1;
           leftTarget = { x: leftShoulder.x - baseUpperLen * 0.1, y: leftShoulder.y + baseUpperLen * 0.9 };
@@ -215,9 +228,27 @@ export function computeCritterRig(config: {
     rightTarget = { x: rightShoulder.x + baseUpperLen * 0.15 + forward, y: rightShoulder.y + baseUpperLen * 0.95 };
   }
 
+  if (salute) {
+    const amount01 = clamp(salute.amount01, 0, 1);
+    const armSign = salute.arm === "left" ? -1 : 1;
+    const offset = salute.offset ?? { x: 0, y: 0 };
+    const saluteTarget = {
+      x: head.center.x + armSign * headR * 0.86 + offset.x,
+      y: head.center.y - headR * 0.48 + offset.y,
+    };
+    const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+    const lerpVec = (a: Vec2, b: Vec2, t: number): Vec2 => ({
+      x: lerp(a.x, b.x, t),
+      y: lerp(a.y, b.y, t),
+    });
+
+    if (salute.arm === "left") leftTarget = lerpVec(leftTarget, saluteTarget, amount01);
+    else rightTarget = lerpVec(rightTarget, saluteTarget, amount01);
+  }
+
   const allowStretch =
-    config.pose.kind === "aim" &&
-    (config.pose.weapon === WeaponType.Rifle || config.pose.weapon === WeaponType.Bazooka);
+    basePose.kind === "aim" &&
+    (basePose.weapon === WeaponType.Rifle || basePose.weapon === WeaponType.Bazooka);
   const maxReach = baseUpperLen + baseLowerLen;
   const resolveArmLengths = (shoulder: Vec2, target: Vec2, stretchMax: number) => {
     if (!allowStretch) return { upperLen: baseUpperLen, lowerLen: baseLowerLen };
@@ -244,7 +275,7 @@ export function computeCritterRig(config: {
     preferElbow: { x: 1, y: 1.3 },
   });
 
-  if (config.pose.kind === "aim" && config.pose.weapon === WeaponType.HandGrenade) {
+  if (basePose.kind === "aim" && basePose.weapon === WeaponType.HandGrenade) {
     const throwHand = config.facing > 0 ? rightSolve.hand : leftSolve.hand;
     grenade = { center: throwHand, r: Math.max(2, config.r * 0.3) };
   }

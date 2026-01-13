@@ -1093,6 +1093,18 @@ export class Game {
       (event) => this.damageFloaters.onWormHealthChanged(event, nowMs()),
       { signal }
     );
+    gameEvents.on(
+      "worm.killed",
+      (event) => {
+        const team = this.session.teams.find((t) => t.id === event.teamId);
+        if (!team) return;
+        const startedAtMs = nowMs();
+        for (const worm of team.worms) {
+          if (worm.alive) worm.startSalute(startedAtMs);
+        }
+      },
+      { signal }
+    );
 
     gameEvents.on(
       "combat.explosion",
