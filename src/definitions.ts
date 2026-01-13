@@ -89,8 +89,8 @@ export const GAMEPLAY = {
     explosionRadius: 7,        // small carve
     aimRadius: 200,            // same aiming clamp as Rifle
     projectileRadius: 2,
-    burstCount: 15,
-    shotsPerSecond: 5,
+    burstCount: 18,
+    shotsPerSecond: 6,
     maxDistance: 1500,         // despawn after traveling this far
     bloom: {
       startSigmaRad: 0.004,    // ~0.23°
