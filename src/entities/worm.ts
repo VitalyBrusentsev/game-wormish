@@ -1,6 +1,7 @@
-import { WORLD, COLORS } from "../definitions";
+import { COLORS, CRITTER, WORLD, WeaponType } from "../definitions";
 import type { TeamId } from "../definitions";
-import { drawHealthBar } from "../utils";
+import { computeCritterRig } from "../critter/critter-geometry";
+import { drawHealthBar, drawRoundedRect } from "../utils";
 import type { Terrain } from "./terrain";
 
 export class Worm {
@@ -195,20 +196,16 @@ export class Worm {
     this.onGround = wasSupported || onGround;
   }
 
-  render(ctx: CanvasRenderingContext2D, highlight = false) {
+  render(
+    ctx: CanvasRenderingContext2D,
+    highlight = false,
+    aimPose?: { weapon: WeaponType; angle: number } | null
+  ) {
     ctx.save();
     ctx.translate(this.x, this.y);
 
     if (!this.alive) {
       const baseY = this.radius + 1;
-
-      // Shadow
-      ctx.globalAlpha = 0.22;
-      ctx.fillStyle = "#000";
-      ctx.beginPath();
-      ctx.ellipse(2.5, baseY + 1, 15, 5.5, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
 
       const w = 22;
       const h = 28;
@@ -310,44 +307,135 @@ export class Worm {
       return;
     }
 
-    // Shadow
-    ctx.globalAlpha = 0.25;
-    ctx.fillStyle = "#000";
-    ctx.beginPath();
-    ctx.ellipse(0, this.radius - 4, this.radius * 0.9, this.radius * 0.4, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
+    const facing = (this.facing < 0 ? -1 : 1) as -1 | 1;
+    const pose = aimPose ? { kind: "aim" as const, weapon: aimPose.weapon, aimAngle: aimPose.angle } : { kind: "idle" as const };
+    const rig = computeCritterRig({ x: 0, y: 0, r: this.radius, facing, pose });
 
-    // Alive: draw worm body
     const bodyColor = this.team === "Red" ? "#ff9aa9" : "#9ad0ff";
+    const teamColor = this.team === "Red" ? COLORS.red : COLORS.blue;
+    const outline = "rgba(0,0,0,0.25)";
+    const armColor = this.team === "Red" ? "#ff8b9c" : "#84c6ff";
+
+    const armThickness = Math.max(2, this.radius * CRITTER.armThicknessFactor);
+    const farArm = facing > 0 ? rig.arms.left : rig.arms.right;
+    const nearArm = facing > 0 ? rig.arms.right : rig.arms.left;
+
+    const strokeArm = (arm: typeof farArm, alpha: number) => {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = armColor;
+      ctx.lineWidth = armThickness;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(arm.upper.a.x, arm.upper.a.y);
+      ctx.lineTo(arm.upper.b.x, arm.upper.b.y);
+      ctx.moveTo(arm.lower.a.x, arm.lower.a.y);
+      ctx.lineTo(arm.lower.b.x, arm.lower.b.y);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(0,0,0,0.22)";
+      ctx.lineWidth = Math.max(1, armThickness * 0.28);
+      ctx.stroke();
+      ctx.restore();
+    };
+
+    // Tail segments (worm-ish "j" curve)
     ctx.fillStyle = bodyColor;
-    ctx.strokeStyle = "rgba(0,0,0,0.25)";
+    ctx.strokeStyle = outline;
     ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+    for (const seg of rig.tail) {
+      ctx.beginPath();
+      ctx.arc(seg.center.x, seg.center.y, seg.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    strokeArm(farArm, 0.6);
+
+    // Body
+    ctx.fillStyle = bodyColor;
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2;
+    drawRoundedRect(
+      ctx,
+      rig.body.center.x - rig.body.w / 2,
+      rig.body.center.y - rig.body.h / 2,
+      rig.body.w,
+      rig.body.h,
+      rig.body.cornerR
+    );
     ctx.fill();
     ctx.stroke();
 
-    // Eyes
+    // Head
+    ctx.fillStyle = bodyColor;
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(rig.head.center.x, rig.head.center.y, rig.head.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Weapon line (temporary; sprites later)
+    if (rig.weapon) {
+      ctx.save();
+      ctx.strokeStyle = "#3a3a3a";
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(rig.weapon.root.x, rig.weapon.root.y);
+      ctx.lineTo(rig.weapon.muzzle.x, rig.weapon.muzzle.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if (rig.grenade) {
+      ctx.save();
+      ctx.fillStyle = "#1d1d1d";
+      ctx.strokeStyle = "#0a0a0a";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(rig.grenade.center.x, rig.grenade.center.y, rig.grenade.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    strokeArm(nearArm, 1);
+
+    // Eyes + mouth
     ctx.save();
-    ctx.translate(this.facing * 3, -3);
+    ctx.translate(rig.head.center.x + facing * (rig.head.r * 0.18), rig.head.center.y - rig.head.r * 0.12);
+    const eyeR = Math.max(2.2, rig.head.r * 0.26);
+    const eyeDx = rig.head.r * 0.42;
     ctx.fillStyle = "#fff";
     ctx.beginPath();
-    ctx.arc(-4, 0, 3, 0, Math.PI * 2);
-    ctx.arc(4, 0, 3, 0, Math.PI * 2);
+    ctx.arc(-eyeDx, 0, eyeR, 0, Math.PI * 2);
+    ctx.arc(eyeDx, 0, eyeR, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "#000";
     ctx.beginPath();
-    ctx.arc(-4 + this.facing * 1.2, 0.5, 1.5, 0, Math.PI * 2);
-    ctx.arc(4 + this.facing * 1.2, 0.5, 1.5, 0, Math.PI * 2);
+    ctx.arc(-eyeDx + facing * (eyeR * 0.35), eyeR * 0.1, eyeR * 0.5, 0, Math.PI * 2);
+    ctx.arc(eyeDx + facing * (eyeR * 0.35), eyeR * 0.1, eyeR * 0.5, 0, Math.PI * 2);
     ctx.fill();
+
+    const mouthY = rig.head.r * 0.55;
+    const mouthW = rig.head.r * 0.55;
+    const mouthSmile = 0.35 + 0.25 * Math.sin(this.age * 2.0);
+    ctx.strokeStyle = "rgba(0,0,0,0.45)";
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-mouthW, mouthY);
+    ctx.quadraticCurveTo(0, mouthY + rig.head.r * mouthSmile, mouthW, mouthY);
+    ctx.stroke();
     ctx.restore();
 
     // Team band
-    ctx.strokeStyle = this.team === "Red" ? COLORS.red : COLORS.blue;
+    ctx.strokeStyle = teamColor;
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(0, 0, this.radius - 2, Math.PI * 0.25, Math.PI * 0.75);
+    ctx.arc(rig.head.center.x, rig.head.center.y, rig.head.r - 1.5, Math.PI * 0.2, Math.PI * 0.8);
     ctx.stroke();
 
     // Highlight ring for active
@@ -368,8 +456,8 @@ export class Worm {
     const hbH = 6;
     drawHealthBar(
       ctx,
-      0, // centered at worm
-      -this.radius - 18,
+      0,
+      rig.head.center.y - rig.head.r - 18,
       hbW,
       hbH,
       this.health / 100,

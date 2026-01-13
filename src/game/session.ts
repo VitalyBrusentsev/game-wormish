@@ -19,6 +19,7 @@ import {
   shouldPredictPath,
 } from "./weapon-system";
 import { gameEvents, type GameEventSource } from "../events/game-events";
+import { computeWeaponRig } from "../critter/critter-geometry";
 import type {
   TerrainOperation,
   TurnCommand,
@@ -31,6 +32,7 @@ import type {
   TurnDriverUpdateOptions,
   TurnContext,
 } from "./turn-driver";
+import { critterHitTestCircle } from "./critter-hit-test";
 
 export interface WormSnapshot {
   name: string;
@@ -434,8 +436,7 @@ export class GameSession {
           for (const team of this.teams) {
             for (const worm of team.worms) {
               if (!worm.alive) continue;
-              const d = distance(projectile.x, projectile.y, worm.x, worm.y);
-              if (d <= worm.radius) {
+              if (critterHitTestCircle(worm, projectile.x, projectile.y, projectile.r)) {
                 if (this.isLocalTurnActive()) {
                   const wasAlive = worm.alive;
                   const beforeHealth = worm.health;
@@ -451,6 +452,7 @@ export class GameSession {
                     wasAlive,
                     projectile.type
                   );
+                  const d = distance(projectile.x, projectile.y, worm.x, worm.y);
                   const dirx = (worm.x - projectile.x) / (d || 1);
                   const diry = (worm.y - projectile.y) / (d || 1);
                   const impulse = projectile.type === WeaponType.Rifle ? 120 : 70;
@@ -1467,10 +1469,15 @@ export class GameSession {
     projectileId: number;
     atMs: number;
   }) {
-    const muzzleOffset = WORLD.wormRadius + 10;
     const angle = config.burst.aimAngle + this.uziBloomOffsetRad(config.burst.seedBase, config.shotIndex);
-    const sx = config.burst.origin.x + Math.cos(angle) * muzzleOffset;
-    const sy = config.burst.origin.y + Math.sin(angle) * muzzleOffset;
+    const muzzle = computeWeaponRig({
+      center: { x: config.burst.origin.x, y: config.burst.origin.y },
+      r: this.activeWorm.radius,
+      weapon: WeaponType.Uzi,
+      aimAngle: angle,
+    }).muzzle;
+    const sx = muzzle.x;
+    const sy = muzzle.y;
     const vx = Math.cos(angle) * GAMEPLAY.uzi.speed;
     const vy = Math.sin(angle) * GAMEPLAY.uzi.speed;
 

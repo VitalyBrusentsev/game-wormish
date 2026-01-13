@@ -42,6 +42,17 @@ export const WORLD = {
   maxGround: 0.8, // fraction of height for max ground level
 };
 
+export const CRITTER = {
+  bodyWidthFactor: 1.3,
+  bodyHeightFactor: 0.5,
+  headRadiusFactor: 0.65,
+  shoulderYOffsetFactor: -0.15, // relative to body height
+  armUpperFactor: 0.55,
+  armLowerFactor: 0.55,
+  armThicknessFactor: 0.18,
+  weaponRootOffsetFactor: 0.22, // relative to body width
+};
+
 export const GAMEPLAY = {
   turnTimeMs: 30000,
   postShotDelayMs: 1200,

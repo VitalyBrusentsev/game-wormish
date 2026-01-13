@@ -1,5 +1,6 @@
 import type { PredictedPoint } from "../definitions";
 import { GAMEPLAY, WeaponType, WORLD, clamp, nowMs } from "../definitions";
+import { computeCritterRig, computeWeaponRig } from "../critter/critter-geometry";
 import type { AimInfo } from "../rendering/game-rendering";
 import type { Terrain, Worm } from "../entities";
 import { Projectile } from "../entities";
@@ -71,9 +72,9 @@ export function fireWeapon({
   projectiles,
   onExplosion,
 }: FireContext) {
-  const muzzleOffset = WORLD.wormRadius + 10;
-  const sx = activeWorm.x + Math.cos(aim.angle) * muzzleOffset;
-  const sy = activeWorm.y + Math.sin(aim.angle) * muzzleOffset;
+  const spawn = computeProjectileSpawnPoint(weapon, activeWorm, aim.angle);
+  const sx = spawn.x;
+  const sy = spawn.y;
 
   if (weapon === WeaponType.Bazooka) {
     const speed =
@@ -141,9 +142,9 @@ export function predictTrajectory({
   width,
   height,
 }: TrajectoryContext): PredictedPoint[] {
-  const muzzleOffset = WORLD.wormRadius + 10;
-  const sx = activeWorm.x + Math.cos(aim.angle) * muzzleOffset;
-  const sy = activeWorm.y + Math.sin(aim.angle) * muzzleOffset;
+  const spawn = computeProjectileSpawnPoint(weapon, activeWorm, aim.angle);
+  const sx = spawn.x;
+  const sy = spawn.y;
 
   if (weapon === WeaponType.Rifle || weapon === WeaponType.Uzi) {
     const pts: PredictedPoint[] = [];
@@ -204,4 +205,33 @@ export function shouldPredictPath(state: GameState): boolean {
 
 export function resolveCharge01(state: GameState): number {
   return state.getCharge01(nowMs());
+}
+
+function computeProjectileSpawnPoint(
+  weapon: WeaponType,
+  worm: Worm,
+  aimAngle: number
+): { x: number; y: number } {
+  if (weapon === WeaponType.HandGrenade) {
+    const facing = (worm.facing < 0 ? -1 : 1) as -1 | 1;
+    const rig = computeCritterRig({
+      x: worm.x,
+      y: worm.y,
+      r: worm.radius,
+      facing,
+      pose: { kind: "aim", weapon, aimAngle },
+    });
+    const hold = rig.grenade?.center ?? { x: worm.x, y: worm.y };
+    const dirx = Math.cos(aimAngle);
+    const diry = Math.sin(aimAngle);
+    const releaseOffset = worm.radius * 0.25;
+    return { x: hold.x + dirx * releaseOffset, y: hold.y + diry * releaseOffset };
+  }
+
+  return computeWeaponRig({
+    center: { x: worm.x, y: worm.y },
+    r: worm.radius,
+    weapon,
+    aimAngle,
+  }).muzzle;
 }

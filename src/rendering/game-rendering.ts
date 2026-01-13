@@ -1,5 +1,6 @@
 import type { PredictedPoint, TeamId } from "../definitions";
 import { COLORS, GAMEPLAY, WORLD, WeaponType } from "../definitions";
+import { computeCritterRig, computeWeaponRig } from "../critter/critter-geometry";
 import type { GameState } from "../game-state";
 import type { Worm } from "../entities";
 import {
@@ -348,33 +349,43 @@ export function renderAimHelpers({
     ctx.restore();
   }
 
-  const muzzleOffset = WORLD.wormRadius + 10;
-  const mx = activeWorm.x + Math.cos(aim.angle) * muzzleOffset;
-  const my = activeWorm.y + Math.sin(aim.angle) * muzzleOffset;
+  const muzzle =
+    state.weapon === WeaponType.HandGrenade
+      ? (() => {
+          const facing = (activeWorm.facing < 0 ? -1 : 1) as -1 | 1;
+          const rig = computeCritterRig({
+            x: activeWorm.x,
+            y: activeWorm.y,
+            r: activeWorm.radius,
+            facing,
+            pose: { kind: "aim", weapon: state.weapon, aimAngle: aim.angle },
+          });
+          const hold = rig.grenade?.center ?? { x: activeWorm.x, y: activeWorm.y };
+          return { x: hold.x, y: hold.y };
+        })()
+      : computeWeaponRig({
+          center: { x: activeWorm.x, y: activeWorm.y },
+          r: activeWorm.radius,
+          weapon: state.weapon,
+          aimAngle: aim.angle,
+        }).muzzle;
+
   if (state.weapon === WeaponType.Uzi) {
     const maxLen = 400;
-    const ex = mx + Math.cos(aim.angle) * maxLen;
-    const ey = my + Math.sin(aim.angle) * maxLen;
+    const ex = muzzle.x + Math.cos(aim.angle) * maxLen;
+    const ey = muzzle.y + Math.sin(aim.angle) * maxLen;
     ctx.save();
-    const grad = ctx.createLinearGradient(mx, my, ex, ey);
+    const grad = ctx.createLinearGradient(muzzle.x, muzzle.y, ex, ey);
     grad.addColorStop(0, "rgba(255,255,255,0.35)");
     grad.addColorStop(1, "rgba(255,255,255,0)");
     ctx.strokeStyle = grad;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(mx, my);
+    ctx.moveTo(muzzle.x, muzzle.y);
     ctx.lineTo(ex, ey);
     ctx.stroke();
     ctx.restore();
   }
-  ctx.save();
-  ctx.strokeStyle = "rgba(255,255,255,0.6)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(activeWorm.x, activeWorm.y);
-  ctx.lineTo(mx, my);
-  ctx.stroke();
-  ctx.restore();
 }
 
 export type RenderGameOverOptions = {

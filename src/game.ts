@@ -1406,6 +1406,8 @@ export class Game {
     const now = nowMs();
     const networkSnapshot = this.networkState.getSnapshot();
     const ctx = this.ctx;
+    const aim = this.getAimInfo();
+    const state = this.session.state;
     ctx.save();
     ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
     // Background should probably fill the screen regardless of camera Y? 
@@ -1433,7 +1435,11 @@ export class Game {
           team.id === this.activeTeam.id &&
           i === this.activeWormIndex &&
           this.session.state.phase !== "gameover";
-        worm.render(ctx, isActive);
+        const aimPose =
+          isActive && (state.phase === "aim" || state.phase === "projectile" || state.phase === "post")
+            ? { weapon: state.weapon, angle: aim.angle }
+            : null;
+        worm.render(ctx, isActive, aimPose);
       }
     }
 
@@ -1444,9 +1450,9 @@ export class Game {
 
     renderAimHelpers({
       ctx,
-      state: this.session.state,
+      state,
       activeWorm: this.activeWorm,
-      aim: this.getAimInfo(),
+      aim,
       predictedPath: this.predictPath(),
     });
     ctx.restore();
