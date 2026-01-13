@@ -317,10 +317,7 @@ export class Worm {
     const armColor = this.team === "Red" ? "#ff8b9c" : "#84c6ff";
 
     const armThickness = Math.max(2, this.radius * CRITTER.armThicknessFactor);
-    const farArm = facing > 0 ? rig.arms.left : rig.arms.right;
-    const nearArm = facing > 0 ? rig.arms.right : rig.arms.left;
-
-    const strokeArm = (arm: typeof farArm, alpha: number) => {
+    const strokeArm = (arm: (typeof rig.arms)["left"], alpha: number) => {
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.strokeStyle = armColor;
@@ -339,18 +336,17 @@ export class Worm {
       ctx.restore();
     };
 
-    // Tail segments (worm-ish "j" curve)
+    // Tail segments (worm-ish "j" curve), small -> large
     ctx.fillStyle = bodyColor;
     ctx.strokeStyle = outline;
     ctx.lineWidth = 2;
-    for (const seg of rig.tail) {
+    const tail = [...rig.tail].sort((a, b) => a.r - b.r);
+    for (const seg of tail) {
       ctx.beginPath();
       ctx.arc(seg.center.x, seg.center.y, seg.r, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
-
-    strokeArm(farArm, 0.6);
 
     // Body
     ctx.fillStyle = bodyColor;
@@ -389,19 +385,76 @@ export class Worm {
       ctx.restore();
     }
 
+    // Arms are drawn last (foreground)
+    const farArm = facing > 0 ? rig.arms.left : rig.arms.right;
+    const nearArm = facing > 0 ? rig.arms.right : rig.arms.left;
+    strokeArm(farArm, 0.6);
+    strokeArm(nearArm, 1);
+
+    const handR = Math.max(2, armThickness * 0.55);
     if (rig.grenade) {
       ctx.save();
-      ctx.fillStyle = "#1d1d1d";
+      ctx.fillStyle = "#2b2b2b";
       ctx.strokeStyle = "#0a0a0a";
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(rig.grenade.center.x, rig.grenade.center.y, rig.grenade.r, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(
+        rig.grenade.center.x - rig.grenade.r * 0.28,
+        rig.grenade.center.y - rig.grenade.r * 0.28,
+        rig.grenade.r * 0.32,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+      ctx.globalAlpha = 1;
       ctx.restore();
     }
 
-    strokeArm(nearArm, 1);
+    if (aimPose?.weapon === WeaponType.HandGrenade) {
+      const hands = [rig.arms.left.lower.b, rig.arms.right.lower.b];
+      ctx.save();
+      ctx.fillStyle = bodyColor;
+      ctx.strokeStyle = "rgba(0,0,0,0.25)";
+      ctx.lineWidth = 2;
+      for (const h of hands) {
+        ctx.beginPath();
+        ctx.arc(h.x, h.y, handR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    if (
+      rig.weapon &&
+      (aimPose?.weapon === WeaponType.Rifle || aimPose?.weapon === WeaponType.Bazooka)
+    ) {
+      const nearHand = facing > 0 ? rig.arms.right.lower.b : rig.arms.left.lower.b;
+      const farHand = facing > 0 ? rig.arms.left.lower.b : rig.arms.right.lower.b;
+      ctx.save();
+      ctx.strokeStyle = "rgba(0,0,0,0.25)";
+      ctx.lineWidth = 2;
+
+      ctx.globalAlpha = 0.7;
+      ctx.fillStyle = bodyColor;
+      ctx.beginPath();
+      ctx.arc(farHand.x, farHand.y, handR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.arc(nearHand.x, nearHand.y, handR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // Eyes + mouth
     ctx.save();

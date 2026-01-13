@@ -35,7 +35,7 @@ export const WORLD = {
   windMax: 180, // px/s^2
   walkSpeed: 120, // px/s
   jumpSpeed: 300, // px/s
-  wormRadius: 12, // px
+  wormRadius: 15, // px
   projectileRadius: 6,
   groundWidth: 2500,
   minGround: 0.5, // fraction of height for min ground level

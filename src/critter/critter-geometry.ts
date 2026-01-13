@@ -40,7 +40,7 @@ export function resolveWeaponVisualSpec(weapon: WeaponType, r: number): WeaponVi
     }
     case WeaponType.Bazooka: {
       const length = r * 1.7;
-      return { length, grip1: length * 0.42, grip2: length * 0.7 };
+      return { length, grip1: length * 0.28, grip2: length * 0.83 };
     }
     case WeaponType.HandGrenade: {
       const length = r * 1.1;
@@ -49,7 +49,7 @@ export function resolveWeaponVisualSpec(weapon: WeaponType, r: number): WeaponVi
     case WeaponType.Rifle:
     default: {
       const length = r * 2.0;
-      return { length, grip1: length * 0.4, grip2: length * 0.65 };
+      return { length, grip1: length * 0.24, grip2: length * 0.87 };
     }
   }
 }
@@ -119,6 +119,10 @@ export function computeCritterRig(config: {
   const headR = config.r * CRITTER.headRadiusFactor;
   const cornerR = Math.max(2, bodyH * 0.25);
 
+  const longWeaponPose =
+    config.pose.kind === "aim" &&
+    (config.pose.weapon === WeaponType.Rifle || config.pose.weapon === WeaponType.Bazooka);
+
   const body = { center, w: bodyW, h: bodyH, cornerR };
   const head = {
     center: { x: center.x, y: center.y - bodyH / 2 - headR * 0.6 },
@@ -140,22 +144,23 @@ export function computeCritterRig(config: {
   const leftShoulder = { x: center.x - bodyW / 2, y: shoulderY };
   const rightShoulder = { x: center.x + bodyW / 2, y: shoulderY };
 
-  const upperLen = config.r * CRITTER.armUpperFactor;
-  const lowerLen = config.r * CRITTER.armLowerFactor;
+  const baseUpperLen = config.r * (longWeaponPose ? 0.95 : CRITTER.armUpperFactor);
+  const baseLowerLen = config.r * (longWeaponPose ? 0.95 : CRITTER.armLowerFactor);
 
   let weapon: WeaponRig | null = null;
   let grenade: { center: Vec2; r: number } | null = null;
   let leftTarget: Vec2;
   let rightTarget: Vec2;
+  let supportSide: "left" | "right" | null = null;
 
   if (config.pose.kind === "aim") {
     const nearIsRight = config.facing > 0;
     if (config.pose.weapon === WeaponType.HandGrenade) {
       const up01 = clamp(-Math.sin(config.pose.aimAngle), 0, 1);
-      const throwX = center.x - config.facing * config.r * (0.85 + 0.15 * up01);
-      const throwY = center.y - config.r * (0.7 + 0.35 * up01);
-      const supportX = center.x + config.facing * config.r * 0.12;
-      const supportY = center.y - config.r * 0.15;
+      const throwX = center.x - config.facing * (bodyW * (0.9 + 0.12 * up01));
+      const throwY = shoulderY - config.r * (0.25 + 0.28 * up01);
+      const supportX = center.x + config.facing * (bodyW * 0.38);
+      const supportY = shoulderY + config.r * 0.1;
 
       if (nearIsRight) {
         rightTarget = { x: throwX, y: throwY };
@@ -174,46 +179,74 @@ export function computeCritterRig(config: {
       if (config.pose.weapon === WeaponType.Uzi) {
         if (nearIsRight) {
           rightTarget = weapon.grip1;
-          leftTarget = { x: leftShoulder.x - upperLen * 0.1, y: leftShoulder.y + upperLen * 0.9 };
+          leftTarget = { x: leftShoulder.x - baseUpperLen * 0.1, y: leftShoulder.y + baseUpperLen * 0.9 };
         } else {
           leftTarget = weapon.grip1;
-          rightTarget = { x: rightShoulder.x + upperLen * 0.1, y: rightShoulder.y + upperLen * 0.9 };
+          rightTarget = { x: rightShoulder.x + baseUpperLen * 0.1, y: rightShoulder.y + baseUpperLen * 0.9 };
         }
       } else {
         const support = weapon.grip2 ?? weapon.grip1;
         if (nearIsRight) {
-          rightTarget = weapon.grip1;
-          leftTarget = support;
+          if (longWeaponPose) {
+            rightTarget = support;
+            leftTarget = weapon.grip1;
+            supportSide = "right";
+          } else {
+            rightTarget = weapon.grip1;
+            leftTarget = support;
+            supportSide = null;
+          }
         } else {
-          leftTarget = weapon.grip1;
-          rightTarget = support;
+          if (longWeaponPose) {
+            leftTarget = support;
+            rightTarget = weapon.grip1;
+            supportSide = "left";
+          } else {
+            leftTarget = weapon.grip1;
+            rightTarget = support;
+            supportSide = null;
+          }
         }
       }
     }
   } else {
-    const forward = config.facing * upperLen * 0.35;
-    leftTarget = { x: leftShoulder.x - upperLen * 0.15 + forward, y: leftShoulder.y + upperLen * 0.95 };
-    rightTarget = { x: rightShoulder.x + upperLen * 0.15 + forward, y: rightShoulder.y + upperLen * 0.95 };
+    const forward = config.facing * baseUpperLen * 0.35;
+    leftTarget = { x: leftShoulder.x - baseUpperLen * 0.15 + forward, y: leftShoulder.y + baseUpperLen * 0.95 };
+    rightTarget = { x: rightShoulder.x + baseUpperLen * 0.15 + forward, y: rightShoulder.y + baseUpperLen * 0.95 };
   }
+
+  const allowStretch =
+    config.pose.kind === "aim" &&
+    (config.pose.weapon === WeaponType.Rifle || config.pose.weapon === WeaponType.Bazooka);
+  const maxReach = baseUpperLen + baseLowerLen;
+  const resolveArmLengths = (shoulder: Vec2, target: Vec2, stretchMax: number) => {
+    if (!allowStretch) return { upperLen: baseUpperLen, lowerLen: baseLowerLen };
+    const dist = Math.hypot(target.x - shoulder.x, target.y - shoulder.y);
+    const scale = clamp(dist / (maxReach || 1), 1, stretchMax);
+    return { upperLen: baseUpperLen * scale, lowerLen: baseLowerLen * scale };
+  };
+
+  const leftLengths = resolveArmLengths(leftShoulder, leftTarget, supportSide === "left" ? 1.55 : 1.25);
+  const rightLengths = resolveArmLengths(rightShoulder, rightTarget, supportSide === "right" ? 1.55 : 1.25);
 
   const leftSolve = solveTwoBoneIk({
     shoulder: leftShoulder,
     target: leftTarget,
-    upperLen,
-    lowerLen,
+    upperLen: leftLengths.upperLen,
+    lowerLen: leftLengths.lowerLen,
     preferElbow: { x: -1, y: 1.3 },
   });
   const rightSolve = solveTwoBoneIk({
     shoulder: rightShoulder,
     target: rightTarget,
-    upperLen,
-    lowerLen,
+    upperLen: rightLengths.upperLen,
+    lowerLen: rightLengths.lowerLen,
     preferElbow: { x: 1, y: 1.3 },
   });
 
   if (config.pose.kind === "aim" && config.pose.weapon === WeaponType.HandGrenade) {
     const throwHand = config.facing > 0 ? rightSolve.hand : leftSolve.hand;
-    grenade = { center: throwHand, r: Math.max(2, config.r * 0.22) };
+    grenade = { center: throwHand, r: Math.max(2, config.r * 0.3) };
   }
 
   return {

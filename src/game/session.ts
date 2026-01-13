@@ -466,6 +466,19 @@ export class GameSession {
           }
         }
 
+        if (projectile.type === WeaponType.Bazooka && !projectile.exploded) {
+          for (const team of this.teams) {
+            for (const worm of team.worms) {
+              if (!worm.alive) continue;
+              if (critterHitTestCircle(worm, projectile.x, projectile.y, projectile.r)) {
+                projectile.explode(specBaz);
+                break;
+              }
+            }
+            if (projectile.exploded) break;
+          }
+        }
+
         const projectileId = this.projectileIds.get(projectile);
         if (projectile.exploded && projectileId !== undefined) {
           this.recordProjectileExpiry(projectile, projectileId);
