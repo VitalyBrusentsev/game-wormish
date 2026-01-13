@@ -384,6 +384,12 @@ export class GameSession {
 
   applyRemoteTurnCommand(command: TurnCommand) {
     this.applyCommand(command);
+    gameEvents.emit("turn.command.recorded", {
+      source: "remote-sim",
+      turnIndex: this.turnIndex,
+      teamId: this.activeTeam.id,
+      command: this.cloneTurnCommand(command),
+    });
   }
 
   update(dt: number) {

@@ -1105,8 +1105,30 @@ export class Game {
     gameEvents.on(
       "turn.command.recorded",
       (event) => {
+        if (
+          event.command.type === "move" &&
+          (event.command.move !== 0 || event.command.jump)
+        ) {
+          this.activeWormArrow.dismissForTurn({
+            turnIndex: event.turnIndex,
+            teamId: event.teamId,
+            wormIndex: this.session.activeWormIndex,
+          });
+        }
         if (event.source !== "local-sim") return;
         this.handleLocalTurnCommand(event.command, { turnIndex: event.turnIndex, teamId: event.teamId });
+      },
+      { signal }
+    );
+
+    gameEvents.on(
+      "combat.shot.fired",
+      (event) => {
+        this.activeWormArrow.dismissForTurn({
+          turnIndex: event.turnIndex,
+          teamId: event.teamId,
+          wormIndex: event.wormIndex,
+        });
       },
       { signal }
     );

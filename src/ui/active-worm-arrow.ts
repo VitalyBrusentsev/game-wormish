@@ -30,6 +30,15 @@ export class ActiveWormArrow {
     };
   }
 
+  dismissForTurn(meta: { turnIndex: number; teamId: TeamId; wormIndex?: number }) {
+    const state = this.state;
+    if (!state) return;
+    if (state.turnIndex !== meta.turnIndex) return;
+    if (state.teamId !== meta.teamId) return;
+    if (meta.wormIndex !== undefined && state.wormIndex !== meta.wormIndex) return;
+    this.state = null;
+  }
+
   render(ctx: CanvasRenderingContext2D, session: GameSession, nowMs: number) {
     const state = this.state;
     if (!state) return;
