@@ -1447,10 +1447,12 @@ export class Game {
           team.id === this.activeTeam.id &&
           i === this.activeWormIndex &&
           this.session.state.phase !== "gameover";
-        const aimPose =
-          isActive && (state.phase === "aim" || state.phase === "projectile" || state.phase === "post")
-            ? { weapon: state.weapon, angle: aim.angle }
-            : null;
+        const showAimPose =
+          isActive &&
+          (state.phase === "aim" ||
+            ((state.phase === "projectile" || state.phase === "post") &&
+              state.weapon !== WeaponType.HandGrenade));
+        const aimPose = showAimPose ? { weapon: state.weapon, angle: aim.angle } : null;
         worm.render(ctx, isActive, aimPose);
       }
     }
