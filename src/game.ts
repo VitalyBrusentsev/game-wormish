@@ -1098,7 +1098,8 @@ export class Game {
       (event) => {
         const team = this.session.teams.find((t) => t.id === event.teamId);
         if (!team) return;
-        const startedAtMs = nowMs();
+        const saluteDelayMs = 500;
+        const startedAtMs = nowMs() + saluteDelayMs;
         for (const worm of team.worms) {
           if (worm.alive) worm.startSalute(startedAtMs);
         }
