@@ -327,6 +327,8 @@ export class Worm {
       ? { kind: "aim", weapon: aimPose.weapon, aimAngle: aimPose.angle }
       : { kind: "idle" };
     const now = nowMs();
+    const activeLineScale = highlight ? 1.5 : 1;
+    const activePulse01 = highlight ? 0.5 + 0.5 * Math.sin(now * 0.008) : 0;
     const saluteActive = this.saluteStartMs !== null && now < this.saluteUntilMs;
     if (this.saluteStartMs !== null && now >= this.saluteUntilMs) {
       this.saluteStartMs = null;
@@ -375,15 +377,17 @@ export class Worm {
 
     const bodyColor = this.team === "Red" ? "#ff9aa9" : "#9ad0ff";
     const teamColor = this.team === "Red" ? COLORS.red : COLORS.blue;
-    const outline = "rgba(0,0,0,0.25)";
+    const outlineAlpha = highlight ? 0.26 + 0.16 * activePulse01 : 0.25;
+    const outline = `rgba(0,0,0,${outlineAlpha.toFixed(3)})`;
     const armColor = this.team === "Red" ? "#ff8b9c" : "#84c6ff";
 
-    const armThickness = Math.max(2, this.radius * CRITTER.armThicknessFactor) * 2;
+    const baseArmThickness = Math.max(2, this.radius * CRITTER.armThicknessFactor) * 2;
+    const armStrokeWidth = baseArmThickness * activeLineScale;
     const strokeArm = (arm: (typeof rig.arms)["left"], alpha: number) => {
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.strokeStyle = armColor;
-      ctx.lineWidth = armThickness;
+      ctx.lineWidth = armStrokeWidth;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       ctx.beginPath();
@@ -392,16 +396,39 @@ export class Worm {
       ctx.moveTo(arm.lower.a.x, arm.lower.a.y);
       ctx.lineTo(arm.lower.b.x, arm.lower.b.y);
       ctx.stroke();
-      ctx.strokeStyle = "rgba(0,0,0,0.22)";
-      ctx.lineWidth = Math.max(1, armThickness * 0.28);
+      ctx.strokeStyle = `rgba(0,0,0,${(highlight ? 0.22 + 0.14 * activePulse01 : 0.22).toFixed(3)})`;
+      ctx.lineWidth = Math.max(1, armStrokeWidth * 0.28);
       ctx.stroke();
       ctx.restore();
     };
 
+    if (highlight) {
+      const breathDy = Math.sin(now * 0.0042) * 2;
+      const visited = new WeakSet<object>();
+      const shiftY = (p: { x: number; y: number }) => {
+        if (visited.has(p)) return;
+        visited.add(p);
+        p.y += breathDy;
+      };
+      shiftY(rig.body.center);
+      shiftY(rig.head.center);
+      if (rig.weapon) {
+        shiftY(rig.weapon.root);
+        shiftY(rig.weapon.muzzle);
+      }
+      if (rig.grenade) shiftY(rig.grenade.center);
+      for (const side of ["left", "right"] as const) {
+        shiftY(rig.arms[side].upper.a);
+        shiftY(rig.arms[side].upper.b);
+        shiftY(rig.arms[side].lower.a);
+        shiftY(rig.arms[side].lower.b);
+      }
+    }
+
     // Tail segments (worm-ish "j" curve), small -> large
     ctx.fillStyle = bodyColor;
     ctx.strokeStyle = outline;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 * activeLineScale;
     const tail = [...rig.tail].sort((a, b) => a.r - b.r);
     for (const seg of tail) {
       ctx.beginPath();
@@ -413,7 +440,7 @@ export class Worm {
     // Body
     ctx.fillStyle = bodyColor;
     ctx.strokeStyle = outline;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 * activeLineScale;
     drawRoundedRect(
       ctx,
       rig.body.center.x - rig.body.w / 2,
@@ -428,7 +455,7 @@ export class Worm {
     // Head
     ctx.fillStyle = bodyColor;
     ctx.strokeStyle = outline;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 * activeLineScale;
     ctx.beginPath();
     ctx.arc(rig.head.center.x, rig.head.center.y, rig.head.r, 0, Math.PI * 2);
     ctx.fill();
@@ -438,7 +465,7 @@ export class Worm {
     if (rig.weapon) {
       ctx.save();
       ctx.strokeStyle = "#3a3a3a";
-      ctx.lineWidth = 3;
+      ctx.lineWidth = 3 * activeLineScale;
       ctx.lineCap = "round";
       ctx.beginPath();
       ctx.moveTo(rig.weapon.root.x, rig.weapon.root.y);
@@ -455,13 +482,13 @@ export class Worm {
     strokeArm(rig.arms[farArmKey], farArmAlpha);
     strokeArm(rig.arms[nearArmKey], nearArmAlpha);
 
-    const handR = Math.max(2, armThickness * 0.55);
-    const handLineWidth = 4;
+    const handR = Math.max(2, baseArmThickness * 0.55);
+    const handLineWidth = 4 * activeLineScale;
     if (rig.grenade) {
       ctx.save();
       ctx.fillStyle = "#2b2b2b";
       ctx.strokeStyle = "#0a0a0a";
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2 * activeLineScale;
       ctx.beginPath();
       ctx.arc(rig.grenade.center.x, rig.grenade.center.y, rig.grenade.r, 0, Math.PI * 2);
       ctx.fill();
@@ -540,8 +567,8 @@ export class Worm {
     const mouthY = rig.head.r * 0.55;
     const mouthW = rig.head.r * 0.55;
     const mouthSmile = 0.35 + 0.25 * Math.sin(this.age * 2.0);
-    ctx.strokeStyle = "rgba(0,0,0,0.45)";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = `rgba(0,0,0,${(highlight ? 0.42 + 0.14 * activePulse01 : 0.45).toFixed(3)})`;
+    ctx.lineWidth = 2 * activeLineScale;
     ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(-mouthW, mouthY);
@@ -551,21 +578,32 @@ export class Worm {
 
     // Team band
     ctx.strokeStyle = teamColor;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3 * activeLineScale;
     ctx.beginPath();
     ctx.arc(rig.head.center.x, rig.head.center.y, rig.head.r - 1.5, Math.PI * 0.2, Math.PI * 0.8);
     ctx.stroke();
 
     // Highlight ring for active
     if (highlight) {
-      ctx.globalAlpha = 0.8;
-      ctx.strokeStyle = "#fff";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([3, 3]);
+      const ringPulse01 = 0.5 + 0.5 * Math.sin(now * 0.006);
+      const ringR = (this.radius + 4) * 1.5;
+
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,255,255,0.125)";
+      ctx.lineWidth = 7 * activeLineScale;
+      ctx.shadowColor = "rgba(255,255,255,0.175)";
+      ctx.shadowBlur = 10;
       ctx.beginPath();
-      ctx.arc(0, 0, this.radius + 4, 0, Math.PI * 2);
+      ctx.arc(0, 0, ringR, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.setLineDash([]);
+      ctx.restore();
+
+      ctx.globalAlpha = 0.36 + 0.09 * ringPulse01;
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 2.5 * activeLineScale;
+      ctx.beginPath();
+      ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+      ctx.stroke();
       ctx.globalAlpha = 1;
     }
 
