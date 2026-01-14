@@ -456,6 +456,7 @@ export class Worm {
     strokeArm(rig.arms[nearArmKey], nearArmAlpha);
 
     const handR = Math.max(2, armThickness * 0.55);
+    const handLineWidth = 4;
     if (rig.grenade) {
       ctx.save();
       ctx.fillStyle = "#2b2b2b";
@@ -486,7 +487,7 @@ export class Worm {
       ctx.save();
       ctx.fillStyle = bodyColor;
       ctx.strokeStyle = "rgba(0,0,0,0.25)";
-      ctx.lineWidth = 2;
+      ctx.lineWidth = handLineWidth;
       for (const h of hands) {
         ctx.beginPath();
         ctx.arc(h.x, h.y, handR, 0, Math.PI * 2);
@@ -503,7 +504,7 @@ export class Worm {
       const farHand = facing > 0 ? rig.arms.left.lower.b : rig.arms.right.lower.b;
       ctx.save();
       ctx.strokeStyle = "rgba(0,0,0,0.25)";
-      ctx.lineWidth = 2;
+      ctx.lineWidth = handLineWidth;
 
       ctx.globalAlpha = 0.7;
       ctx.fillStyle = bodyColor;
