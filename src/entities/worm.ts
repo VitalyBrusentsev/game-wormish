@@ -378,7 +378,7 @@ export class Worm {
     const outline = "rgba(0,0,0,0.25)";
     const armColor = this.team === "Red" ? "#ff8b9c" : "#84c6ff";
 
-    const armThickness = Math.max(2, this.radius * CRITTER.armThicknessFactor);
+    const armThickness = Math.max(2, this.radius * CRITTER.armThicknessFactor) * 2;
     const strokeArm = (arm: (typeof rig.arms)["left"], alpha: number) => {
       ctx.save();
       ctx.globalAlpha = alpha;
