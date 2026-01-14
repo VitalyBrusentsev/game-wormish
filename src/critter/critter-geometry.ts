@@ -233,8 +233,8 @@ export function computeCritterRig(config: {
     const armSign = salute.arm === "left" ? -1 : 1;
     const offset = salute.offset ?? { x: 0, y: 0 };
     const saluteTarget = {
-      x: head.center.x + armSign * headR * 0.86 + offset.x,
-      y: head.center.y - headR * 0.48 + offset.y,
+      x: head.center.x + armSign * headR + offset.x,
+      y: head.center.y + offset.y,
     };
     const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
     const lerpVec = (a: Vec2, b: Vec2, t: number): Vec2 => ({
