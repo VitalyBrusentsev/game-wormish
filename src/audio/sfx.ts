@@ -110,33 +110,75 @@ export const createProjectileLaunchVoice = (config: {
   }
 
   if (config.weapon === WeaponType.Rifle) {
-    const duration = 0.14;
-    const baseGain = 0.55;
+    const duration = 0.18;
+    const baseGain = 0.54;
     return {
       tag,
       polyLimit,
       worldX: config.worldX,
       baseGain,
-      stopAt: t0 + duration + 0.06,
+      stopAt: t0 + duration + 0.12,
       build: (input, nodeList, sourceList) => {
-        const clip = createSoftClipper(config.ctx, 0.95);
+        const clip = createSoftClipper(config.ctx, 0.8);
         const lp = config.ctx.createBiquadFilter();
         lp.type = "lowpass";
-        lp.frequency.setValueAtTime(3600, t0);
+        lp.frequency.setValueAtTime(4800, t0);
         clip.connect(lp);
         lp.connect(input);
 
         const clickOsc = config.ctx.createOscillator();
         clickOsc.type = "square";
-        clickOsc.frequency.setValueAtTime(1300, t0);
+        clickOsc.frequency.setValueAtTime(1700, t0);
         const clickGain = config.ctx.createGain();
         applyLinearEnv(clickGain.gain, t0, [
           [0, 0],
-          [0.0007, 0.65],
-          [0.012, 0],
+          [0.0005, 0.85],
+          [0.009, 0],
         ]);
         clickOsc.connect(clickGain);
         clickGain.connect(clip);
+
+        const crack = config.ctx.createBufferSource();
+        crack.buffer = config.noise;
+        const crackHp = config.ctx.createBiquadFilter();
+        crackHp.type = "highpass";
+        crackHp.frequency.setValueAtTime(2200 + r0 * 700, t0);
+        const crackBp = config.ctx.createBiquadFilter();
+        crackBp.type = "bandpass";
+        crackBp.frequency.setValueAtTime(3600 + r1 * 1200, t0);
+        crackBp.Q.setValueAtTime(1.3, t0);
+        const crackGain = config.ctx.createGain();
+        applyLinearEnv(crackGain.gain, t0, [
+          [0, 0],
+          [0.0004, 1.0],
+          [0.015, 0.32],
+          [0.05, 0],
+        ]);
+        crack.connect(crackHp);
+        crackHp.connect(crackBp);
+        crackBp.connect(crackGain);
+        crackGain.connect(clip);
+
+        const air = config.ctx.createBufferSource();
+        air.buffer = config.noise;
+        const airHp = config.ctx.createBiquadFilter();
+        airHp.type = "highpass";
+        airHp.frequency.setValueAtTime(900, t0);
+        const airBp = config.ctx.createBiquadFilter();
+        airBp.type = "bandpass";
+        airBp.frequency.setValueAtTime(2400 + r2 * 700, t0);
+        airBp.Q.setValueAtTime(0.85, t0);
+        const airGain = config.ctx.createGain();
+        applyLinearEnv(airGain.gain, t0, [
+          [0, 0],
+          [0.002, 0.28],
+          [0.06, 0.14],
+          [0.14, 0],
+        ]);
+        air.connect(airHp);
+        airHp.connect(airBp);
+        airBp.connect(airGain);
+        airGain.connect(clip);
 
         const thump = config.ctx.createOscillator();
         thump.type = "sine";
@@ -145,8 +187,8 @@ export const createProjectileLaunchVoice = (config: {
         const thumpGain = config.ctx.createGain();
         applyLinearEnv(thumpGain.gain, t0, [
           [0, 0],
-          [0.004, 0.32],
-          [0.08, 0.06],
+          [0.004, 0.26],
+          [0.08, 0.05],
           [0.04, 0],
         ]);
         thump.connect(thumpGain);
@@ -156,17 +198,18 @@ export const createProjectileLaunchVoice = (config: {
         blast.buffer = config.noise;
         const hp = config.ctx.createBiquadFilter();
         hp.type = "highpass";
-        hp.frequency.setValueAtTime(480, t0);
+        hp.frequency.setValueAtTime(620, t0);
         const bp = config.ctx.createBiquadFilter();
         bp.type = "bandpass";
-        bp.frequency.setValueAtTime(1200 + r2 * 140, t0);
-        bp.Q.setValueAtTime(0.7, t0);
+        bp.frequency.setValueAtTime(1500 + r2 * 220, t0);
+        bp.Q.setValueAtTime(0.85, t0);
         const blastGain = config.ctx.createGain();
         applyLinearEnv(blastGain.gain, t0, [
           [0, 0],
-          [0.001, 0.95],
-          [0.028, 0.22],
-          [0.055, 0],
+          [0.0008, 0.9],
+          [0.06, 0.22],
+          [0.12, 0.09],
+          [0.12, 0],
         ]);
         blast.connect(hp);
         hp.connect(bp);
@@ -175,13 +218,31 @@ export const createProjectileLaunchVoice = (config: {
 
         clickOsc.start(t0);
         clickOsc.stop(t0 + 0.04);
+        crack.start(t0);
+        crack.stop(t0 + duration);
+        air.start(t0);
+        air.stop(t0 + duration);
         thump.start(t0);
         thump.stop(t0 + duration);
         blast.start(t0);
         blast.stop(t0 + duration);
 
-        nodeList.push(clip, lp, clickGain, thumpGain, hp, bp, blastGain);
-        sourceList.push(clickOsc, thump, blast);
+        nodeList.push(
+          clip,
+          lp,
+          clickGain,
+          crackHp,
+          crackBp,
+          crackGain,
+          airHp,
+          airBp,
+          airGain,
+          thumpGain,
+          hp,
+          bp,
+          blastGain
+        );
+        sourceList.push(clickOsc, crack, air, thump, blast);
       },
     };
   }
