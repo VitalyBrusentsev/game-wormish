@@ -41,6 +41,7 @@ Comments should be kept to a minimum. Prefer code readability and clean structur
 - Rendering helpers in [src/rendering/](src/rendering/) should stay pure with respect to game state: pass everything needed as parameters and keep DOM interactions centralized in `Game`.
 - Input glue and overlays live under [src/ui/](src/ui/); keep UI-specific state there.
 - Camera behavior and constraints are documented in [camera.md](camera.md).
+- Sound/SFX architecture is documented in [sound.md](sound.md).
 - Backend "room registry" design and specs are outlined in [Registry API Spec](cloudflare/registry-api-spec.md)
 - WebRTC realtime network design is reflected in [NetworkDesign.md](NetworkDesign.md)
 
