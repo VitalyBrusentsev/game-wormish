@@ -1,0 +1,21 @@
+# Sound system (Wormish)
+
+## Decisions
+
+- **Web Audio + synthesis-only SFX**: All current sound effects are generated with oscillators and noise (no external samples). Worm voice samples can be added later as additional sources feeding the same mixer buses.
+- **Single `AudioContext`, created on user gesture**: The audio context is only created/resumed via a user gesture (pointer/touch/keydown) to satisfy mobile autoplay policies.
+- **Mixing via buses**: `sfx` and `music` buses feed a shared mix bus with a light compressor/limiter to keep multiple concurrent effects from clipping.
+- **Stereo panning, camera-relative**: Each sound is spatialized in **1D (X only)** using `StereoPannerNode` and distance attenuation based on the camera center, updated every frame while the sound is alive.
+- **No HRTF (for now)**: Web Audio also supports 3D/HRTF spatialization via `PannerNode` (HRTF = Head-Related Transfer Function). For a 2D side-view game, `StereoPannerNode` is simpler and cheaper and still reads well.
+- **Network gameplay**: SFX are driven by simulation events that occur on both peers (turn commands are streamed; both sides execute the turn and emit the same combat events). No dedicated “sound packets” are required.
+
+## Current event → SFX mapping
+
+- `combat.projectile.spawned` → launch/shot sound (Rifle/Uzi/Bazooka/Grenade).
+- `combat.projectile.exploded` → impact (Rifle/Uzi) or explosion (Bazooka/Grenade).
+
+## Extension points
+
+- Add UI later by calling `Game.setSoundEnabled(...)` / `Game.setSoundLevels(...)` and reading `Game.getSoundSnapshot()`.
+- Add voices later by playing `AudioBufferSourceNode` (samples) into the same `music`/`sfx` bus graph.
+

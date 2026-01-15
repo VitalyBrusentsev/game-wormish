@@ -45,6 +45,7 @@ import { WebRTCRegistryClient } from "./webrtc/client";
 import { ConnectionState } from "./webrtc/types";
 import { RegistryClient } from "./webrtc/registry-client";
 import { HttpClient } from "./webrtc/http-client";
+import { SoundSystem, type SoundLevels, type SoundSnapshot } from "./audio/sound-system";
 
 let initialMenuDismissed = false;
 
@@ -232,6 +233,7 @@ export class Game {
   private readonly damageFloaters = new DamageFloaters();
   private readonly activeWormArrow = new ActiveWormArrow();
   private readonly turnCountdown = new TurnCountdownOverlay();
+  private readonly sound = new SoundSystem();
 
   private readonly turnControllers = new Map<TeamId, TurnDriver>();
   private aimThrottleState: AimThrottleState | null = null;
@@ -371,6 +373,7 @@ export class Game {
     this.canvas.addEventListener("pointerdown", this.pointerDownFocusHandler);
     this.canvas.addEventListener("mousedown", this.mouseDownFocusHandler);
     this.canvas.addEventListener("touchstart", this.touchStartFocusHandler);
+    this.sound.attachUnlockGestures(this.canvas, { signal: this.eventAbort.signal });
   }
 
   resize(width: number, height: number) {
@@ -407,6 +410,7 @@ export class Game {
     }
     this.running = false;
     this.eventAbort.abort();
+    this.sound.dispose();
     this.cancelNetworkSetup();
     this.startMenu.dispose();
     this.networkDialog.dispose();
@@ -422,6 +426,18 @@ export class Game {
 
   getNetworkState(): NetworkSessionState {
     return this.networkState;
+  }
+
+  getSoundSnapshot(): SoundSnapshot {
+    return this.sound.getSnapshot();
+  }
+
+  setSoundEnabled(enabled: boolean) {
+    this.sound.setEnabled(enabled);
+  }
+
+  setSoundLevels(levels: Partial<SoundLevels>) {
+    this.sound.setLevels(levels);
   }
 
   onNetworkStateChange(callback: (state: NetworkSessionState) => void) {
@@ -1148,6 +1164,35 @@ export class Game {
       { signal }
     );
 
+    gameEvents.on(
+      "combat.projectile.spawned",
+      (event) => {
+        this.sound.playProjectileLaunch({
+          weapon: event.weapon,
+          worldX: event.position.x,
+          velocity: event.velocity,
+          turnIndex: event.turnIndex,
+          projectileId: event.projectileId,
+        });
+      },
+      { signal }
+    );
+
+    gameEvents.on(
+      "combat.projectile.exploded",
+      (event) => {
+        this.sound.playProjectileExploded({
+          weapon: event.weapon,
+          cause: event.cause,
+          worldX: event.position.x,
+          radius: event.radius,
+          turnIndex: event.turnIndex,
+          projectileId: event.projectileId,
+        });
+      },
+      { signal }
+    );
+
     gameEvents.on("match.restarted", () => this.resetCameraShake(), { signal });
 
     gameEvents.on(
@@ -1618,6 +1663,8 @@ export class Game {
     this.updateTurnFocus();
     const followingProjectile = this.updatePassiveProjectileFocus();
     this.updateCamera(dt, !overlaysBlocking && !followingProjectile);
+    this.sound.setListener({ centerX: this.cameraX + this.width / 2, viewportWidth: this.width });
+    this.sound.update();
     const worldCameraOffsetX = -this.cameraX + this.cameraOffsetX;
     const worldCameraOffsetY = -this.cameraY + this.cameraOffsetY;
     if (networkPaused) {
