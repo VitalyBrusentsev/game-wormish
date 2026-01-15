@@ -19,7 +19,6 @@ export const createProjectileLaunchVoice = (config: {
   turnIndex: number;
   projectileId: number;
 }): VoiceBlueprint => {
-  const speed = Math.hypot(config.velocity.x, config.velocity.y);
   const seed =
     (config.turnIndex * 1_000_003 + config.projectileId * 97 + weaponSeedId(config.weapon) * 911) | 0;
   const r0 = hash01(seed);
@@ -32,7 +31,7 @@ export const createProjectileLaunchVoice = (config: {
 
   if (config.weapon === WeaponType.Uzi) {
     const duration = 0.09;
-    const baseGain = 0.26;
+    const baseGain = 0.28;
     return {
       tag,
       polyLimit,
@@ -40,49 +39,78 @@ export const createProjectileLaunchVoice = (config: {
       baseGain,
       stopAt: t0 + duration + 0.05,
       build: (input, nodeList, sourceList) => {
+        const clip = createSoftClipper(config.ctx, 0.55);
+
         const body = config.ctx.createOscillator();
         body.type = "triangle";
         const bodyGain = config.ctx.createGain();
-        const baseHz = lerp(360, 520, clamp01(speed / 2200));
-        body.frequency.setValueAtTime(baseHz * lerp(0.92, 1.12, r0), t0);
+        const baseHz = 260;
+        body.frequency.setValueAtTime(baseHz, t0);
         applyLinearEnv(bodyGain.gain, t0, [
           [0, 0],
-          [0.002, 0.95],
-          [0.06, 0.02],
-          [0.02, 0],
+          [0.0012, 0.6],
+          [0.028, 0.12],
+          [0.03, 0],
         ]);
         body.connect(bodyGain);
-        bodyGain.connect(input);
+        bodyGain.connect(clip);
 
-        const hiss = config.ctx.createBufferSource();
-        hiss.buffer = config.noise;
+        const crack = config.ctx.createBufferSource();
+        crack.buffer = config.noise;
         const hp = config.ctx.createBiquadFilter();
         hp.type = "highpass";
-        hp.frequency.setValueAtTime(1900 + r1 * 900, t0);
-        const hissGain = config.ctx.createGain();
-        applyLinearEnv(hissGain.gain, t0, [
+        hp.frequency.setValueAtTime(800, t0);
+        const bp = config.ctx.createBiquadFilter();
+        bp.type = "bandpass";
+        bp.frequency.setValueAtTime(2600, t0);
+        bp.Q.setValueAtTime(1.25, t0);
+        const crackGain = config.ctx.createGain();
+        applyLinearEnv(crackGain.gain, t0, [
           [0, 0],
-          [0.0015, 0.22],
-          [0.03, 0.05],
-          [0.025, 0],
+          [0.0007, 0.7],
+          [0.012, 0.22],
+          [0.03, 0],
         ]);
-        hiss.connect(hp);
-        hp.connect(hissGain);
-        hissGain.connect(input);
+        crack.connect(hp);
+        hp.connect(bp);
+        bp.connect(crackGain);
+        crackGain.connect(clip);
+
+        const thump = config.ctx.createOscillator();
+        thump.type = "sine";
+        thump.frequency.setValueAtTime(140, t0);
+        thump.frequency.exponentialRampToValueAtTime(85, t0 + 0.07);
+        const thumpGain = config.ctx.createGain();
+        applyLinearEnv(thumpGain.gain, t0, [
+          [0, 0],
+          [0.0025, 0.25],
+          [0.05, 0.06],
+          [0.03, 0],
+        ]);
+        thump.connect(thumpGain);
+        thumpGain.connect(clip);
+
+        const lp = config.ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.setValueAtTime(5200, t0);
+        clip.connect(lp);
+        lp.connect(input);
 
         body.start(t0);
         body.stop(t0 + duration);
-        hiss.start(t0);
-        hiss.stop(t0 + duration);
+        crack.start(t0);
+        crack.stop(t0 + duration);
+        thump.start(t0);
+        thump.stop(t0 + duration);
 
-        nodeList.push(bodyGain, hp, hissGain);
-        sourceList.push(body, hiss);
+        nodeList.push(clip, bodyGain, hp, bp, crackGain, thumpGain, lp);
+        sourceList.push(body, crack, thump);
       },
     };
   }
 
   if (config.weapon === WeaponType.Rifle) {
-    const duration = 0.12;
+    const duration = 0.14;
     const baseGain = 0.55;
     return {
       tag,
@@ -91,49 +119,69 @@ export const createProjectileLaunchVoice = (config: {
       baseGain,
       stopAt: t0 + duration + 0.06,
       build: (input, nodeList, sourceList) => {
-        const clip = createSoftClipper(config.ctx, 0.7);
+        const clip = createSoftClipper(config.ctx, 0.95);
+        const lp = config.ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.setValueAtTime(3600, t0);
+        clip.connect(lp);
+        lp.connect(input);
+
         const clickOsc = config.ctx.createOscillator();
         clickOsc.type = "square";
-        clickOsc.frequency.setValueAtTime(2200 + r0 * 800, t0);
+        clickOsc.frequency.setValueAtTime(1300, t0);
         const clickGain = config.ctx.createGain();
         applyLinearEnv(clickGain.gain, t0, [
           [0, 0],
-          [0.0006, 0.75],
-          [0.008, 0],
+          [0.0007, 0.65],
+          [0.012, 0],
         ]);
         clickOsc.connect(clickGain);
         clickGain.connect(clip);
+
+        const thump = config.ctx.createOscillator();
+        thump.type = "sine";
+        thump.frequency.setValueAtTime(160, t0);
+        thump.frequency.exponentialRampToValueAtTime(80, t0 + 0.09);
+        const thumpGain = config.ctx.createGain();
+        applyLinearEnv(thumpGain.gain, t0, [
+          [0, 0],
+          [0.004, 0.32],
+          [0.08, 0.06],
+          [0.04, 0],
+        ]);
+        thump.connect(thumpGain);
+        thumpGain.connect(clip);
 
         const blast = config.ctx.createBufferSource();
         blast.buffer = config.noise;
         const hp = config.ctx.createBiquadFilter();
         hp.type = "highpass";
-        hp.frequency.setValueAtTime(700 + r1 * 250, t0);
+        hp.frequency.setValueAtTime(480, t0);
         const bp = config.ctx.createBiquadFilter();
         bp.type = "bandpass";
-        bp.frequency.setValueAtTime(1600 + r2 * 900, t0);
-        bp.Q.setValueAtTime(0.8, t0);
+        bp.frequency.setValueAtTime(1200 + r2 * 140, t0);
+        bp.Q.setValueAtTime(0.7, t0);
         const blastGain = config.ctx.createGain();
         applyLinearEnv(blastGain.gain, t0, [
           [0, 0],
           [0.001, 0.95],
-          [0.02, 0.22],
-          [0.04, 0],
+          [0.028, 0.22],
+          [0.055, 0],
         ]);
         blast.connect(hp);
         hp.connect(bp);
         bp.connect(blastGain);
         blastGain.connect(clip);
 
-        clip.connect(input);
-
         clickOsc.start(t0);
-        clickOsc.stop(t0 + 0.03);
+        clickOsc.stop(t0 + 0.04);
+        thump.start(t0);
+        thump.stop(t0 + duration);
         blast.start(t0);
         blast.stop(t0 + duration);
 
-        nodeList.push(clip, clickGain, hp, bp, blastGain);
-        sourceList.push(clickOsc, blast);
+        nodeList.push(clip, lp, clickGain, thumpGain, hp, bp, blastGain);
+        sourceList.push(clickOsc, thump, blast);
       },
     };
   }
