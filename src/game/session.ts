@@ -127,6 +127,15 @@ type UziBurst = {
   projectileIds: number[];
 };
 
+export type UziBurstSnapshot = {
+  origin: { x: number; y: number };
+  aimAngle: number;
+  seedBase: number;
+  startAtMs: number;
+  nextShotIndex: number;
+  shotCount: number;
+};
+
 export class GameSession {
   readonly width: number;
   readonly height: number;
@@ -365,10 +374,10 @@ export class GameSession {
       return;
     }
 
-    const aim = this.computeAimFromInput(input, camera);
-    this.recordAim(aim, atMs);
-
     if (this.state.phase === "aim") {
+      const aim = this.computeAimFromInput(input, camera);
+      this.recordAim(aim, atMs);
+
       let move = 0;
       if (input.isDown("ArrowLeft") || input.isDown("KeyA")) move -= 1;
       if (input.isDown("ArrowRight") || input.isDown("KeyD")) move += 1;
@@ -523,6 +532,19 @@ export class GameSession {
 
   getAimInfo(): AimInfo {
     return this.aim;
+  }
+
+  getUziBurstSnapshot(): UziBurstSnapshot | null {
+    const burst = this.uziBurst;
+    if (!burst) return null;
+    return {
+      origin: { ...burst.origin },
+      aimAngle: burst.aimAngle,
+      seedBase: burst.seedBase,
+      startAtMs: burst.startAtMs,
+      nextShotIndex: burst.nextShotIndex,
+      shotCount: burst.projectileIds.length,
+    };
   }
 
   predictPath(): PredictedPoint[] {

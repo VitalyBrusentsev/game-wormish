@@ -214,7 +214,7 @@ export class Worm {
   render(
     ctx: CanvasRenderingContext2D,
     highlight = false,
-    aimPose?: { weapon: WeaponType; angle: number } | null
+    aimPose?: { weapon: WeaponType; angle: number; recoil?: { kick01: number } } | null
   ) {
     ctx.save();
     ctx.translate(this.x, this.y);
@@ -401,6 +401,35 @@ export class Worm {
       ctx.stroke();
       ctx.restore();
     };
+
+    const recoilKick01 = clamp(aimPose?.recoil?.kick01 ?? 0, 0, 1);
+    if (recoilKick01 > 0) {
+      const kickPx = this.radius * 0.22 * recoilKick01;
+      const kickDx = -facing * kickPx;
+      const kickDy = -kickPx * 0.25;
+      const shift = (p: { x: number; y: number }, dx: number, dy: number) => {
+        p.x += dx;
+        p.y += dy;
+      };
+
+      for (const seg of rig.tail) shift(seg.center, kickDx, kickDy);
+      shift(rig.body.center, kickDx, kickDy);
+      shift(rig.head.center, kickDx * 1.35, kickDy * 1.35);
+
+      if (rig.weapon) {
+        shift(rig.weapon.root, kickDx, kickDy);
+        shift(rig.weapon.muzzle, kickDx, kickDy);
+        shift(rig.weapon.grip1, kickDx, kickDy);
+        if (rig.weapon.grip2) shift(rig.weapon.grip2, kickDx, kickDy);
+      }
+      if (rig.grenade) shift(rig.grenade.center, kickDx, kickDy);
+      for (const side of ["left", "right"] as const) {
+        shift(rig.arms[side].upper.a, kickDx, kickDy);
+        shift(rig.arms[side].upper.b, kickDx, kickDy);
+        shift(rig.arms[side].lower.a, kickDx, kickDy);
+        shift(rig.arms[side].lower.b, kickDx, kickDy);
+      }
+    }
 
     if (highlight) {
       const breathDy = Math.sin(now * 0.0042) * 2;
