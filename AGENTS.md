@@ -10,6 +10,8 @@ It allows players to take turns and control squads of whimsical creatures, with 
 
 ## Compiling and testing
 
+Always verify your changes using compilation and running unit tests.
+
 Use the following console command to verify the changes compile successfully:
 ```
 npm run typecheck
@@ -17,7 +19,6 @@ npm run typecheck
 To validate the tests are still passing after making changes, use `npm run test:run`, which will run the test suite once, using vitest.
 
 If the `npm run dev` script is launched, the changes will be reflected in the running web app, available for the Browser tool to test and / or screenshot.
-
 
 # Coding Conventions
 
