@@ -1,12 +1,15 @@
 import { WeaponType } from "../definitions";
 import { Terrain } from "./terrain";
 
+export type ProjectileImpact = "terrain" | "worm" | "unknown";
+
 export type ExplosionHandler = (
   x: number,
   y: number,
   radius: number,
   damage: number,
-  cause: WeaponType
+  cause: WeaponType,
+  impact: ProjectileImpact
 ) => void;
 
 export class Projectile {
@@ -69,7 +72,7 @@ export class Projectile {
     if (this.type === WeaponType.HandGrenade) {
       this.fuse -= dt * 1000;
       if (this.fuse <= 0) {
-        this.explode(specs);
+        this.explode(specs, "unknown");
         return;
       }
     }
@@ -110,7 +113,7 @@ export class Projectile {
           this.y = res.y - 1;
         } else {
           // Impact explode (Bazooka, Rifle)
-          this.explode(specs);
+          this.explode(specs, "terrain");
           return;
         }
       } else {
@@ -135,10 +138,10 @@ export class Projectile {
     }
   }
 
-  explode(specs: { explosionRadius: number; damage: number }) {
+  explode(specs: { explosionRadius: number; damage: number }, impact: ProjectileImpact) {
     if (this.exploded) return;
     this.exploded = true;
-    this.explosionHandler(this.x, this.y, specs.explosionRadius, specs.damage, this.type);
+    this.explosionHandler(this.x, this.y, specs.explosionRadius, specs.damage, this.type, impact);
   }
 
   render(ctx: CanvasRenderingContext2D) {

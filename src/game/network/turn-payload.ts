@@ -75,6 +75,7 @@ export interface ProjectileExplosionEvent {
   radius: number;
   damage: number;
   cause: WeaponType;
+  impact: "terrain" | "worm" | "unknown";
   atMs: number;
 }
 

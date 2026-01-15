@@ -159,6 +159,7 @@ export class SoundSystem {
     cause: WeaponType;
     worldX: number;
     radius: number;
+    impact: "terrain" | "worm" | "unknown";
     turnIndex: number;
     projectileId: number;
   }) {

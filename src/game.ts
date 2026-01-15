@@ -1186,6 +1186,7 @@ export class Game {
           cause: event.cause,
           worldX: event.position.x,
           radius: event.radius,
+          impact: event.impact,
           turnIndex: event.turnIndex,
           projectileId: event.projectileId,
         });

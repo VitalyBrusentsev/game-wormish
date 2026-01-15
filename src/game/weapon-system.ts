@@ -91,7 +91,7 @@ export function fireWeapon({
         WORLD.projectileRadius,
         WeaponType.Bazooka,
         wind,
-        (x, y, r, dmg) => onExplosion(x, y, r, dmg, WeaponType.Bazooka)
+        (x, y, r, dmg, cause, _impact) => onExplosion(x, y, r, dmg, cause)
       )
     );
   } else if (weapon === WeaponType.HandGrenade) {
@@ -109,7 +109,7 @@ export function fireWeapon({
         WORLD.projectileRadius,
         WeaponType.HandGrenade,
         wind,
-        (x, y, r, dmg) => onExplosion(x, y, r, dmg, WeaponType.HandGrenade),
+        (x, y, r, dmg, cause, _impact) => onExplosion(x, y, r, dmg, cause),
         { fuse: GAMEPLAY.handGrenade.fuseMs, restitution: GAMEPLAY.handGrenade.restitution }
       )
     );
@@ -126,7 +126,7 @@ export function fireWeapon({
         GAMEPLAY.rifle.projectileRadius,
         WeaponType.Rifle,
         0,
-        (x, y, r, dmg) => onExplosion(x, y, r, dmg, WeaponType.Rifle)
+        (x, y, r, dmg, cause, _impact) => onExplosion(x, y, r, dmg, cause)
       )
     );
   }

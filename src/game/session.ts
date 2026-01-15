@@ -467,7 +467,7 @@ export class GameSession {
                   const impulse = projectile.type === WeaponType.Rifle ? 120 : 70;
                   worm.applyImpulse(dirx * impulse, diry * impulse);
                 }
-                projectile.explode(projectile.type === WeaponType.Rifle ? specRifle : specUzi);
+                projectile.explode(projectile.type === WeaponType.Rifle ? specRifle : specUzi, "worm");
                 break;
               }
             }
@@ -480,7 +480,7 @@ export class GameSession {
             for (const worm of team.worms) {
               if (!worm.alive) continue;
               if (critterHitTestCircle(worm, projectile.x, projectile.y, projectile.r)) {
-                projectile.explode(specBaz);
+                projectile.explode(specBaz, "worm");
                 break;
               }
             }
@@ -1245,7 +1245,7 @@ export class GameSession {
 
   private wrapProjectileExplosion(projectile: Projectile, id: number) {
     const originalHandler = projectile.explosionHandler;
-    projectile.explosionHandler = (x, y, radius, damage, cause) => {
+    projectile.explosionHandler = (x, y, radius, damage, cause, impact) => {
       this.turnLog.projectileEvents.push({
         type: "projectile-exploded",
         id,
@@ -1254,6 +1254,7 @@ export class GameSession {
         radius,
         damage,
         cause,
+        impact,
         atMs: this.turnTimestampMs(),
       });
       gameEvents.emit("combat.projectile.exploded", {
@@ -1266,10 +1267,11 @@ export class GameSession {
         radius,
         damage,
         cause,
+        impact,
         atMs: this.turnTimestampMs(),
       });
       this.terminatedProjectiles.add(id);
-      originalHandler(x, y, radius, damage, cause);
+      originalHandler(x, y, radius, damage, cause, impact);
     };
   }
 
@@ -1543,7 +1545,7 @@ export class GameSession {
       GAMEPLAY.uzi.projectileRadius,
       WeaponType.Uzi,
       0,
-      (x, y, r, dmg, cause) => this.onExplosion(x, y, r, dmg, cause)
+      (x, y, r, dmg, cause, _impact) => this.onExplosion(x, y, r, dmg, cause)
     );
     this.projectiles.push(projectile);
 

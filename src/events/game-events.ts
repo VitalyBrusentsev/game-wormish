@@ -71,6 +71,7 @@ export type GameEventMap = {
     radius: number;
     damage: number;
     cause: WeaponType;
+    impact: "terrain" | "worm" | "unknown";
     atMs: number;
   };
   "combat.projectile.expired": {
@@ -146,4 +147,3 @@ export type GameEventMap = {
 };
 
 export const gameEvents = new EventBus<GameEventMap>();
-
