@@ -4,18 +4,16 @@ export const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 export const normalizeLevel = (v: number) => clamp01(Number.isFinite(v) ? v : 0);
 
-export const weaponSeedId = (weapon: WeaponType) => {
-  switch (weapon) {
-    case WeaponType.Bazooka:
-      return 1;
-    case WeaponType.HandGrenade:
-      return 2;
-    case WeaponType.Rifle:
-      return 3;
-    case WeaponType.Uzi:
-      return 4;
+const hashString32 = (s: string): number => {
+  let h = 0x811c9dc5; // FNV-1a offset basis
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193); // FNV-1a prime
   }
+  return h | 0;
 };
+
+export const weaponSeedId = (weapon: WeaponType) => hashString32(weapon);
 
 const xorshift32 = (x: number) => {
   let v = x | 0;
@@ -70,4 +68,3 @@ export const createSoftClipper = (ctx: AudioContext, drive: number) => {
   shaper.oversample = "2x";
   return shaper;
 };
-
