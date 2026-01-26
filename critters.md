@@ -7,16 +7,17 @@ This document captures the current “critter” (worm) graphics model and the k
 - The critter is rendered from a sprite sheet (`src/assets/critters.png`) composed from a single base size `r` (the worm radius, `WORLD.wormRadius`).
 - Base geometry (arms, weapons, collision shapes) is derived from `r` via `CRITTER` constants in `src/definitions.ts`.
 - The critter is composed of:
-  - **Helmet**: sprite overlay drawn last.
-  - **Torso**: sprite centered on the rig body.
+  - **Torso**: sprite centered on the rig body (with optional belt/collar overlays).
   - **Head**: sprite centered on the rig head.
+  - **Face**: procedural overlay (eyes/pupils + smile) drawn between head and helmet.
+  - **Helmet**: sprite overlay drawn last.
   - **Tail**: two segments forming a worm-like curve opposite the facing direction.
 - Facing is a simple `-1 | 1` flip (left/right) and drives pose mirroring and tail curvature.
 
 Implementation entry points:
 - Geometry is computed via `computeCritterRig()` in `src/critter/critter-geometry.ts`.
 - Rendering is done in `Worm.render()` in `src/entities/worm.ts`, using the rig + sprite composition (arms remain lines for now).
-- Sprite offsets can be tweaked live via `window.spriteOffsets` (object keyed by `"tail2" | "tail1" | "torso" | "head" | "helmet"`).
+- Sprite offsets can be tweaked live via `window.spriteOffsets` (keys: `"tail2" | "tail1" | "torso" | "belt1" | "collar" | "head" | "helmet" | "face"`).
 
 ## Weapon Implementation Model (Temporary Line Weapons)
 
@@ -39,27 +40,28 @@ Implementation entry points:
   - Most weapons use grip points along the weapon line.
   - Uzi uses one hand on the weapon and keeps the off-hand in an “idle” pose.
 - Elbow bend direction is kept consistent (stable silhouette) via a preferred elbow direction vector.
+- Draw order is interleaved with the sprite body for readability: far arm → body up to torso/belt → weapon → near arm → collar/head/helmet.
 
 Implementation entry point:
 - Arm segment positions are produced by `computeCritterRig()` in `src/critter/critter-geometry.ts` and rendered in `src/entities/worm.ts`.
 
-## Hand Grenade “Baseball Lob” Pose
+## Hand Grenade Pose
 
 - Hand grenade uses a distinct pose:
-  - Throw hand moves “back and up” (wind-up) relative to facing and aim angle.
-  - A small grenade circle is rendered at the throw hand.
-- Projectile spawn and trajectory prediction originate from the throw-hand release point (not from the weapon muzzle).
+  - Grenade hold point is fixed relative to facing (a constant “back + up” position).
+  - The grenade is always held/thrown by the near arm.
+- Projectile spawn and trajectory prediction originate from the grenade hold point (not from the weapon muzzle).
 
 Implementation entry points:
 - Grenade pose + hold position is exposed as `rig.grenade` from `computeCritterRig()`.
-- Spawn/prediction uses the grenade hand in `src/game/weapon-system.ts`.
+- Spawn/prediction uses `rig.grenade.center` in `src/game/weapon-system.ts`.
 
 ## Collision Model (Projectile ↔ Critter)
 
 Projectile collision uses a small set of simple shapes derived from the same rig used for rendering:
 
-- **Torso**: 1 axis-aligned rectangle (AABB).
-- **Head + tail**: 4 circles (head circle + 3 tail segment circles).
+- **Torso**: 1 axis-aligned rectangle (AABB), scaled/shifted to better match the sprite silhouette.
+- **Head + tail**: circles (head circle + 2 tail segment circles), with sprite offsets applied.
 - **Arms**: intentionally excluded (negligible for gameplay readability and performance).
 
 Implementation entry point:
