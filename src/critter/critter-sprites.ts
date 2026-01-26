@@ -25,7 +25,7 @@ const DEFAULT_SPRITE_OFFSETS: Record<CritterSpriteKey, CritterSpriteOffset> = {
   belt1: { x: -2, y: 6 },
   collar: { x: 0, y: -4 },
   head: { x: 1, y: -8 },
-  helmet: { x: -2, y: -17 },
+  helmet: { x: 0, y: -17 },
   face: { x: 2, y: -4 },
 };
 const SPRITE_KEYS: readonly CritterSpriteKey[] = [
