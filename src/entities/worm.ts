@@ -3,6 +3,7 @@ import type { TeamId } from "../definitions";
 import { computeCritterRig, type BaseCritterPose } from "../critter/critter-geometry";
 import { renderCritterFace } from "../critter/critter-face";
 import { renderCritterSprites, resolveCritterSpriteOffsets } from "../critter/critter-sprites";
+import { drawWeaponSprite } from "../weapons/weapon-sprites";
 import { drawHealthBar, drawRoundedRect } from "../utils";
 import type { Terrain } from "./terrain";
 
@@ -490,14 +491,13 @@ export class Worm {
         return;
       }
 
-      if (rig.weapon) {
-        ctx.strokeStyle = "#3a3a3a";
-        ctx.lineWidth = 3 * activeLineScale;
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        ctx.moveTo(rig.weapon.root.x, rig.weapon.root.y);
-        ctx.lineTo(rig.weapon.muzzle.x, rig.weapon.muzzle.y);
-        ctx.stroke();
+      if (rig.weapon && aimPose) {
+        drawWeaponSprite({
+          ctx,
+          weapon: aimPose.weapon,
+          rotationPoint: rig.weapon.root,
+          aimAngle: rig.weapon.angle,
+        });
       }
       ctx.restore();
     };
@@ -545,8 +545,7 @@ export class Worm {
 
     const renderFarArm = () => strokeArm(rig.arms[farArmKey], farArmAlpha);
     const renderNearArm = () => strokeArm(rig.arms[nearArmKey], nearArmAlpha);
-    const renderWeaponAndNearArm = () => {
-      renderWeapon();
+    const renderNearArmAndHands = () => {
       renderNearArm();
       renderHandOverlays();
     };
@@ -557,7 +556,7 @@ export class Worm {
       team: this.team,
       facing,
       beforeAll: renderFarArm,
-      afterTorso: renderWeaponAndNearArm,
+      afterTorso: renderNearArmAndHands,
       afterHead: (headCenter) => {
         renderCritterFace({
           ctx,
@@ -570,6 +569,7 @@ export class Worm {
           age: this.age,
         });
       },
+      afterAll: renderWeapon,
     });
 
     if (!renderedSprites) {
@@ -602,7 +602,7 @@ export class Worm {
       ctx.fill();
       ctx.stroke();
 
-      renderWeaponAndNearArm();
+      renderNearArmAndHands();
 
       // Head
       ctx.fillStyle = bodyColor;
@@ -612,6 +612,8 @@ export class Worm {
       ctx.arc(rig.head.center.x, rig.head.center.y, rig.head.r, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+
+      renderWeapon();
     }
 
     if (!renderedSprites) {

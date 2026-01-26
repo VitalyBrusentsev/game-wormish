@@ -8,6 +8,12 @@ declare global {
         { x: number; y: number }
       >
     >;
+    weaponSprites?: Partial<
+      Record<
+        "bazooka" | "rifle" | "uzi",
+        { barrelOffsetX: number; offset: { x: number; y: number }; barrelLength: number }
+      >
+    >;
     debugCritterCollision?: boolean;
   }
 }

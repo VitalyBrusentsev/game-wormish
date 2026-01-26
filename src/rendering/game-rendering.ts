@@ -365,9 +365,9 @@ export function renderAimHelpers({
         })()
       : computeWeaponRig({
           center: { x: activeWorm.x, y: activeWorm.y },
-          r: activeWorm.radius,
           weapon: state.weapon,
           aimAngle: aim.angle,
+          facing: (activeWorm.facing < 0 ? -1 : 1) as -1 | 1,
         }).muzzle;
 
   if (state.weapon === WeaponType.Uzi) {

@@ -152,8 +152,9 @@ export function renderCritterSprites(config: {
   beforeAll?: () => void;
   afterTorso?: () => void;
   afterHead?: (headCenter: Vec2) => void;
+  afterAll?: () => void;
 }): boolean {
-  const { ctx, rig, team, facing, beforeAll, afterTorso, afterHead } = config;
+  const { ctx, rig, team, facing, beforeAll, afterTorso, afterHead, afterAll } = config;
   const img = getCritterSheet();
   if (!img || !isSheetReady(img)) return false;
 
@@ -230,6 +231,8 @@ export function renderCritterSprites(config: {
     offset: offsets.helmet,
     facing,
   });
+
+  afterAll?.();
 
   return true;
 }

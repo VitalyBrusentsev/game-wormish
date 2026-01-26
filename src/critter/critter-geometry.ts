@@ -1,4 +1,5 @@
 import { CRITTER, WeaponType, clamp } from "../definitions";
+import { resolveWeaponSpriteSpecs, weaponSpriteKeyForWeapon } from "../weapons/weapon-sprites";
 
 export type Vec2 = { x: number; y: number };
 
@@ -42,41 +43,43 @@ export type WeaponVisualSpec = {
   grip2: number | null;
 };
 
-export function resolveWeaponVisualSpec(weapon: WeaponType, r: number): WeaponVisualSpec {
+export function resolveWeaponVisualSpec(weapon: WeaponType, barrelLength: number): WeaponVisualSpec {
   switch (weapon) {
     case WeaponType.Uzi: {
-      const length = r * 1.35;
-      return { length, grip1: length * 0.55, grip2: null };
+      return { length: barrelLength, grip1: barrelLength * 0.55, grip2: null };
     }
     case WeaponType.Bazooka: {
-      const length = r * 1.7;
-      return { length, grip1: length * 0.28, grip2: length * 0.83 };
+      return { length: barrelLength, grip1: barrelLength * 0.28, grip2: barrelLength * 0.83 };
     }
     case WeaponType.HandGrenade: {
-      const length = r * 1.1;
-      return { length, grip1: length * 0.55, grip2: null };
+      return { length: barrelLength, grip1: barrelLength * 0.55, grip2: null };
     }
     case WeaponType.Rifle:
     default: {
-      const length = r * 2.0;
-      return { length, grip1: length * 0.24, grip2: length * 0.87 };
+      return { length: barrelLength, grip1: barrelLength * 0.24, grip2: barrelLength * 0.87 };
     }
   }
 }
 
 export function computeWeaponRig(config: {
   center: Vec2;
-  r: number;
   weapon: WeaponType;
   aimAngle: number;
+  facing: -1 | 1;
 }): WeaponRig {
-  const { center, r, weapon, aimAngle } = config;
+  const { center, weapon, aimAngle, facing } = config;
+  const key = weaponSpriteKeyForWeapon(weapon);
+  const spriteSpec = key ? resolveWeaponSpriteSpecs()[key] : null;
+
   const dirx = Math.cos(aimAngle);
   const diry = Math.sin(aimAngle);
-  const bodyW = r * CRITTER.bodyWidthFactor;
-  const rootOffset = bodyW * CRITTER.weaponRootOffsetFactor;
-  const spec = resolveWeaponVisualSpec(weapon, r);
-  const root = { x: center.x + dirx * rootOffset, y: center.y + diry * rootOffset };
+
+  const barrelLength = spriteSpec?.barrelLength ?? 0;
+  const root = spriteSpec
+    ? { x: center.x + facing * spriteSpec.offset.x, y: center.y + spriteSpec.offset.y }
+    : { x: center.x, y: center.y };
+
+  const spec = resolveWeaponVisualSpec(weapon, barrelLength);
   const muzzle = { x: root.x + dirx * spec.length, y: root.y + diry * spec.length };
   const grip1 = { x: root.x + dirx * spec.grip1, y: root.y + diry * spec.grip1 };
   const grip2 =
@@ -198,9 +201,9 @@ export function computeCritterRig(config: {
     } else {
       weapon = computeWeaponRig({
         center,
-        r: config.r,
         weapon: basePose.weapon,
         aimAngle: basePose.aimAngle,
+        facing: config.facing,
       });
       if (basePose.weapon === WeaponType.Uzi) {
         if (nearIsRight) {

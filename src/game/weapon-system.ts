@@ -1,6 +1,7 @@
 import type { PredictedPoint } from "../definitions";
 import { GAMEPLAY, WeaponType, WORLD, clamp, nowMs } from "../definitions";
 import { computeCritterRig, computeWeaponRig } from "../critter/critter-geometry";
+import { computeWeaponRotationPoint } from "../weapons/weapon-sprites";
 import type { AimInfo } from "../rendering/game-rendering";
 import type { Terrain, Worm } from "../entities";
 import { Projectile } from "../entities";
@@ -59,8 +60,55 @@ export function computeAimInfo({
   }
   const targetX = aimWorm.x + dx;
   const targetY = aimWorm.y + dy;
-  const angle = Math.atan2(targetY - aimWorm.y, targetX - aimWorm.x);
+  const angle = computeAimAngleFromTarget({ weapon: state.weapon, worm: aimWorm, targetX, targetY });
   return { targetX, targetY, angle };
+}
+
+export function computeAimAngleFromTarget(config: {
+  weapon: WeaponType;
+  worm: Worm;
+  targetX: number;
+  targetY: number;
+}): number {
+  const facing = (config.targetX < config.worm.x ? -1 : 1) as -1 | 1;
+
+  const rotationPoint =
+    config.weapon === WeaponType.HandGrenade
+      ? (() => {
+          const rig = computeCritterRig({
+            x: config.worm.x,
+            y: config.worm.y,
+            r: config.worm.radius,
+            facing,
+            pose: { kind: "aim", weapon: config.weapon, aimAngle: 0 },
+          });
+          return rig.grenade?.center ?? { x: config.worm.x, y: config.worm.y };
+        })()
+      : computeWeaponRotationPoint({
+          center: { x: config.worm.x, y: config.worm.y },
+          weapon: config.weapon,
+          facing,
+        }) ?? { x: config.worm.x, y: config.worm.y };
+
+  if (config.weapon === WeaponType.HandGrenade) {
+    return Math.atan2(config.targetY - rotationPoint.y, config.targetX - rotationPoint.x);
+  }
+
+  const barrelLength =
+    computeWeaponRig({
+      center: { x: config.worm.x, y: config.worm.y },
+      weapon: config.weapon,
+      aimAngle: 0,
+      facing,
+    }).length || 0;
+
+  let angle = Math.atan2(config.targetY - rotationPoint.y, config.targetX - rotationPoint.x);
+  for (let i = 0; i < 2; i++) {
+    const muzzleX = rotationPoint.x + Math.cos(angle) * barrelLength;
+    const muzzleY = rotationPoint.y + Math.sin(angle) * barrelLength;
+    angle = Math.atan2(config.targetY - muzzleY, config.targetX - muzzleX);
+  }
+  return angle;
 }
 
 export function fireWeapon({
@@ -225,10 +273,11 @@ function computeProjectileSpawnPoint(
     return { x: hold.x, y: hold.y };
   }
 
+  const facing = (worm.facing < 0 ? -1 : 1) as -1 | 1;
   return computeWeaponRig({
     center: { x: worm.x, y: worm.y },
-    r: worm.radius,
     weapon,
     aimAngle,
+    facing,
   }).muzzle;
 }

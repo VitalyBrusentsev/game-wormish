@@ -14,6 +14,7 @@ import { TeamManager, type Team } from "./team-manager";
 import type { AimInfo } from "../rendering/game-rendering";
 import {
   computeAimInfo,
+  computeAimAngleFromTarget,
   fireWeapon,
   predictTrajectory,
   shouldPredictPath,
@@ -120,6 +121,7 @@ type TurnLog = {
 
 type UziBurst = {
   origin: { x: number; y: number };
+  facing: -1 | 1;
   aimAngle: number;
   seedBase: number;
   startAtMs: number;
@@ -129,6 +131,7 @@ type UziBurst = {
 
 export type UziBurstSnapshot = {
   origin: { x: number; y: number };
+  facing: -1 | 1;
   aimAngle: number;
   seedBase: number;
   startAtMs: number;
@@ -539,6 +542,7 @@ export class GameSession {
     if (!burst) return null;
     return {
       origin: { ...burst.origin },
+      facing: burst.facing,
       aimAngle: burst.aimAngle,
       seedBase: burst.seedBase,
       startAtMs: burst.startAtMs,
@@ -1211,7 +1215,11 @@ export class GameSession {
     const dir = worm.facing >= 0 ? 1 : -1;
     const targetX = worm.x + dir * 40;
     const targetY = worm.y;
-    return { targetX, targetY, angle: Math.atan2(targetY - worm.y, targetX - worm.x) };
+    return {
+      targetX,
+      targetY,
+      angle: computeAimAngleFromTarget({ weapon: this.state.weapon, worm, targetX, targetY }),
+    };
   }
 
   private computeAimFromInput(
@@ -1528,9 +1536,9 @@ export class GameSession {
     const angle = config.burst.aimAngle + this.uziBloomOffsetRad(config.burst.seedBase, config.shotIndex);
     const muzzle = computeWeaponRig({
       center: { x: config.burst.origin.x, y: config.burst.origin.y },
-      r: this.activeWorm.radius,
       weapon: WeaponType.Uzi,
       aimAngle: angle,
+      facing: config.burst.facing,
     }).muzzle;
     const sx = muzzle.x;
     const sy = muzzle.y;
@@ -1592,8 +1600,10 @@ export class GameSession {
       const currentAtMs = this.turnTimestampMs();
       const startAtMs = Math.max(atMs, currentAtMs);
       const seedBase = this.turnIndex * 100_000 + Math.round(atMs);
+      const facing = (this.activeWorm.facing < 0 ? -1 : 1) as -1 | 1;
       this.uziBurst = {
         origin: { x: this.activeWorm.x, y: this.activeWorm.y },
+        facing,
         aimAngle: aim.angle,
         seedBase,
         startAtMs,
