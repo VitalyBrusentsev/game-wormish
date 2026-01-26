@@ -222,10 +222,7 @@ function computeProjectileSpawnPoint(
       pose: { kind: "aim", weapon, aimAngle },
     });
     const hold = rig.grenade?.center ?? { x: worm.x, y: worm.y };
-    const dirx = Math.cos(aimAngle);
-    const diry = Math.sin(aimAngle);
-    const releaseOffset = worm.radius * 0.25;
-    return { x: hold.x + dirx * releaseOffset, y: hold.y + diry * releaseOffset };
+    return { x: hold.x, y: hold.y };
   }
 
   return computeWeaponRig({

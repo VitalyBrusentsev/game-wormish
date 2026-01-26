@@ -30,8 +30,9 @@ describe("critterHitTestCircle", () => {
 
     const headCenter = applyOffset(rig.head.center, "head");
     const torsoCenter = applyOffset(rig.body.center, "torso");
+    const torsoCenterY = torsoCenter.y - rig.body.h * 0.2;
     expect(critterHitTestCircle(worm, headCenter.x, headCenter.y, 1)).toBe(true);
-    expect(critterHitTestCircle(worm, torsoCenter.x, torsoCenter.y, 1)).toBe(true);
+    expect(critterHitTestCircle(worm, torsoCenter.x, torsoCenterY, 1)).toBe(true);
 
     rig.tail.forEach((seg, i) => {
       const center = applyOffset(seg.center, i === 0 ? "tail1" : "tail2");

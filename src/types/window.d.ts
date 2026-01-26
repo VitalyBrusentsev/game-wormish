@@ -8,5 +8,6 @@ declare global {
         { x: number; y: number }
       >
     >;
+    debugCritterCollision?: boolean;
   }
 }

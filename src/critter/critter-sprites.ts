@@ -149,9 +149,11 @@ export function renderCritterSprites(config: {
   rig: CritterRig;
   team: TeamId;
   facing: -1 | 1;
+  beforeAll?: () => void;
+  afterTorso?: () => void;
   afterHead?: (headCenter: Vec2) => void;
 }): boolean {
-  const { ctx, rig, team, facing, afterHead } = config;
+  const { ctx, rig, team, facing, beforeAll, afterTorso, afterHead } = config;
   const img = getCritterSheet();
   if (!img || !isSheetReady(img)) return false;
 
@@ -161,6 +163,7 @@ export function renderCritterSprites(config: {
   if (!tail1 || !tail2) return false;
 
   // Draw order: tail2 -> tail1 -> torso -> belt1 -> collar -> head -> helmet
+  beforeAll?.();
   drawSprite({
     ctx,
     img,
@@ -193,6 +196,9 @@ export function renderCritterSprites(config: {
     offset: offsets.belt1,
     facing,
   });
+
+  afterTorso?.();
+
   drawSprite({
     ctx,
     img,

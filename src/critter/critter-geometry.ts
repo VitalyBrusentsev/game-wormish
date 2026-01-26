@@ -135,6 +135,7 @@ export function computeCritterRig(config: {
   const longWeaponPose =
     basePose.kind === "aim" &&
     (basePose.weapon === WeaponType.Rifle || basePose.weapon === WeaponType.Bazooka);
+  const grenadePose = basePose.kind === "aim" && basePose.weapon === WeaponType.HandGrenade;
 
   const body = { center, w: bodyW, h: bodyH, cornerR };
   const head = {
@@ -157,9 +158,13 @@ export function computeCritterRig(config: {
 
   const baseUpperLen = config.r * (longWeaponPose ? 0.95 : CRITTER.armUpperFactor);
   const baseLowerLen = config.r * (longWeaponPose ? 0.95 : CRITTER.armLowerFactor);
+  const armLenScale = 1.1;
+  const upperLen = baseUpperLen * armLenScale;
+  const lowerLen = baseLowerLen * armLenScale;
 
   let weapon: WeaponRig | null = null;
   let grenade: { center: Vec2; r: number } | null = null;
+  let grenadeHold: Vec2 | null = null;
   let leftTarget: Vec2;
   let rightTarget: Vec2;
   let supportSide: "left" | "right" | null = null;
@@ -167,18 +172,28 @@ export function computeCritterRig(config: {
   if (basePose.kind === "aim") {
     const nearIsRight = config.facing > 0;
     if (basePose.weapon === WeaponType.HandGrenade) {
-      const up01 = clamp(-Math.sin(basePose.aimAngle), 0, 1);
-      const throwX = center.x - config.facing * (bodyW * (0.9 + 0.12 * up01));
-      const throwY = shoulderY - config.r * (0.25 + 0.28 * up01);
-      const supportX = center.x + config.facing * (bodyW * 0.38);
-      const supportY = shoulderY + config.r * 0.1;
+      const holdDist = config.r * 2;
+      const invSqrt2 = 0.7071067811865476;
+      const backX = -config.facing;
+      const hold = {
+        x: center.x + backX * holdDist * invSqrt2,
+        y: center.y - holdDist * invSqrt2,
+      };
+      grenadeHold = hold;
 
-      if (nearIsRight) {
-        rightTarget = { x: throwX, y: throwY };
-        leftTarget = { x: supportX, y: supportY };
+      const throwArm: "left" | "right" = config.facing > 0 ? "left" : "right";
+      const restTarget = (side: "left" | "right") => {
+        const shoulder = side === "left" ? leftShoulder : rightShoulder;
+        const forward = config.facing * upperLen * 0.25;
+        return { x: shoulder.x + forward, y: shoulder.y + upperLen * 0.9 };
+      };
+
+      if (throwArm === "left") {
+        leftTarget = hold;
+        rightTarget = restTarget("right");
       } else {
-        leftTarget = { x: throwX, y: throwY };
-        rightTarget = { x: supportX, y: supportY };
+        rightTarget = hold;
+        leftTarget = restTarget("left");
       }
     } else {
       weapon = computeWeaponRig({
@@ -246,17 +261,24 @@ export function computeCritterRig(config: {
 
   const allowStretch =
     basePose.kind === "aim" &&
-    (basePose.weapon === WeaponType.Rifle || basePose.weapon === WeaponType.Bazooka);
-  const maxReach = baseUpperLen + baseLowerLen;
+    (basePose.weapon === WeaponType.Rifle ||
+      basePose.weapon === WeaponType.Bazooka ||
+      basePose.weapon === WeaponType.HandGrenade);
+  const maxReach = upperLen + lowerLen;
+  const grenadeThrowArm: "left" | "right" | null = grenadePose ? (config.facing > 0 ? "left" : "right") : null;
   const resolveArmLengths = (shoulder: Vec2, target: Vec2, stretchMax: number) => {
-    if (!allowStretch) return { upperLen: baseUpperLen, lowerLen: baseLowerLen };
+    if (!allowStretch) return { upperLen, lowerLen };
     const dist = Math.hypot(target.x - shoulder.x, target.y - shoulder.y);
     const scale = clamp(dist / (maxReach || 1), 1, stretchMax);
-    return { upperLen: baseUpperLen * scale, lowerLen: baseLowerLen * scale };
+    return { upperLen: upperLen * scale, lowerLen: lowerLen * scale };
   };
 
-  const leftLengths = resolveArmLengths(leftShoulder, leftTarget, supportSide === "left" ? 1.55 : 1.25);
-  const rightLengths = resolveArmLengths(rightShoulder, rightTarget, supportSide === "right" ? 1.55 : 1.25);
+  const leftStretchMax =
+    grenadeThrowArm === "left" ? 4.6 : supportSide === "left" ? 1.55 : 1.25;
+  const rightStretchMax =
+    grenadeThrowArm === "right" ? 4.6 : supportSide === "right" ? 1.55 : 1.25;
+  const leftLengths = resolveArmLengths(leftShoulder, leftTarget, leftStretchMax);
+  const rightLengths = resolveArmLengths(rightShoulder, rightTarget, rightStretchMax);
 
   const leftSolve = solveTwoBoneIk({
     shoulder: leftShoulder,
@@ -274,8 +296,8 @@ export function computeCritterRig(config: {
   });
 
   if (basePose.kind === "aim" && basePose.weapon === WeaponType.HandGrenade) {
-    const throwHand = config.facing > 0 ? rightSolve.hand : leftSolve.hand;
-    grenade = { center: throwHand, r: Math.max(2, config.r * 0.3) };
+    const throwHand = config.facing > 0 ? leftSolve.hand : rightSolve.hand;
+    grenade = { center: grenadeHold ?? throwHand, r: Math.max(2, config.r * 0.3) };
   }
 
   return {

@@ -7,6 +7,13 @@ type CircleShape = { kind: "circle"; x: number; y: number; r: number };
 type AabbShape = { kind: "aabb"; x: number; y: number; hw: number; hh: number };
 type HitShape = CircleShape | AabbShape;
 
+const CRITTER_COLLISION = {
+  headRScale: 1.2,
+  torsoWScale: 1.2,
+  torsoHScale: 1.4,
+  torsoCenterUpFactor: 0.2,
+} as const;
+
 function circleIntersectsShape(cx: number, cy: number, cr: number, shape: HitShape): boolean {
   if (shape.kind === "circle") {
     const dx = cx - shape.x;
@@ -39,9 +46,13 @@ export function critterHitTestCircle(worm: Worm, x: number, y: number, r: number
     r: seg.r,
   }));
 
+  const torsoCenterY = torsoCenter.y - rig.body.h * CRITTER_COLLISION.torsoCenterUpFactor;
+  const torsoHw = (rig.body.w / 2) * CRITTER_COLLISION.torsoWScale;
+  const torsoHh = (rig.body.h / 2) * CRITTER_COLLISION.torsoHScale;
+
   const shapes: HitShape[] = [
-    { kind: "circle", x: headCenter.x, y: headCenter.y, r: rig.head.r },
-    { kind: "aabb", x: torsoCenter.x, y: torsoCenter.y, hw: rig.body.w / 2, hh: rig.body.h / 2 },
+    { kind: "circle", x: headCenter.x, y: headCenter.y, r: rig.head.r * CRITTER_COLLISION.headRScale },
+    { kind: "aabb", x: torsoCenter.x, y: torsoCenterY, hw: torsoHw, hh: torsoHh },
     ...tail.map((seg) => ({ kind: "circle" as const, x: seg.center.x, y: seg.center.y, r: seg.r })),
   ];
 

@@ -2,7 +2,7 @@ import { COLORS, CRITTER, WORLD, WeaponType, nowMs, clamp } from "../definitions
 import type { TeamId } from "../definitions";
 import { computeCritterRig, type BaseCritterPose } from "../critter/critter-geometry";
 import { renderCritterFace } from "../critter/critter-face";
-import { renderCritterSprites } from "../critter/critter-sprites";
+import { renderCritterSprites, resolveCritterSpriteOffsets } from "../critter/critter-sprites";
 import { drawHealthBar, drawRoundedRect } from "../utils";
 import type { Terrain } from "./terrain";
 
@@ -457,11 +457,107 @@ export class Worm {
     }
 
     const lookAngle = aimPose?.angle ?? (facing > 0 ? 0 : Math.PI);
+    const farArmKey = (facing > 0 ? "right" : "left") as "left" | "right";
+    const nearArmKey = (facing > 0 ? "left" : "right") as "left" | "right";
+    const farArmAlpha = saluteArm === farArmKey ? 0.95 : 0.6;
+    const nearArmAlpha = 1;
+
+    const handR = Math.max(2, baseArmThickness * 0.55);
+    const handLineWidth = 4 * activeLineScale;
+    const renderWeapon = () => {
+      ctx.save();
+      if (rig.grenade) {
+        ctx.fillStyle = "#2b2b2b";
+        ctx.strokeStyle = "#0a0a0a";
+        ctx.lineWidth = 2 * activeLineScale;
+        ctx.beginPath();
+        ctx.arc(rig.grenade.center.x, rig.grenade.center.y, rig.grenade.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.arc(
+          rig.grenade.center.x - rig.grenade.r * 0.28,
+          rig.grenade.center.y - rig.grenade.r * 0.28,
+          rig.grenade.r * 0.32,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+        ctx.restore();
+        return;
+      }
+
+      if (rig.weapon) {
+        ctx.strokeStyle = "#3a3a3a";
+        ctx.lineWidth = 3 * activeLineScale;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(rig.weapon.root.x, rig.weapon.root.y);
+        ctx.lineTo(rig.weapon.muzzle.x, rig.weapon.muzzle.y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    };
+
+    const renderHandOverlays = () => {
+      if (aimPose?.weapon === WeaponType.HandGrenade) {
+        const hands = [rig.arms.left.lower.b, rig.arms.right.lower.b];
+        ctx.save();
+        ctx.fillStyle = bodyColor;
+        ctx.strokeStyle = "rgba(0,0,0,0.25)";
+        ctx.lineWidth = handLineWidth;
+        for (const h of hands) {
+          ctx.beginPath();
+          ctx.arc(h.x, h.y, handR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      if (
+        rig.weapon &&
+        (aimPose?.weapon === WeaponType.Rifle || aimPose?.weapon === WeaponType.Bazooka)
+      ) {
+        const nearHand = rig.arms[nearArmKey].lower.b;
+        const farHand = rig.arms[farArmKey].lower.b;
+        ctx.save();
+        ctx.strokeStyle = "rgba(0,0,0,0.25)";
+        ctx.lineWidth = handLineWidth;
+
+        ctx.globalAlpha = 0.7;
+        ctx.fillStyle = bodyColor;
+        ctx.beginPath();
+        ctx.arc(farHand.x, farHand.y, handR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        ctx.arc(nearHand.x, nearHand.y, handR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    };
+
+    const renderFarArm = () => strokeArm(rig.arms[farArmKey], farArmAlpha);
+    const renderNearArm = () => strokeArm(rig.arms[nearArmKey], nearArmAlpha);
+    const renderWeaponAndNearArm = () => {
+      renderWeapon();
+      renderNearArm();
+      renderHandOverlays();
+    };
+
     const renderedSprites = renderCritterSprites({
       ctx,
       rig,
       team: this.team,
       facing,
+      beforeAll: renderFarArm,
+      afterTorso: renderWeaponAndNearArm,
       afterHead: (headCenter) => {
         renderCritterFace({
           ctx,
@@ -477,6 +573,8 @@ export class Worm {
     });
 
     if (!renderedSprites) {
+      renderFarArm();
+
       // Tail segments (worm-ish "j" curve), small -> large
       ctx.fillStyle = bodyColor;
       ctx.strokeStyle = outline;
@@ -504,6 +602,8 @@ export class Worm {
       ctx.fill();
       ctx.stroke();
 
+      renderWeaponAndNearArm();
+
       // Head
       ctx.fillStyle = bodyColor;
       ctx.strokeStyle = outline;
@@ -512,93 +612,6 @@ export class Worm {
       ctx.arc(rig.head.center.x, rig.head.center.y, rig.head.r, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-    }
-
-    // Weapon line (temporary; sprites later)
-    if (rig.weapon) {
-      ctx.save();
-      ctx.strokeStyle = "#3a3a3a";
-      ctx.lineWidth = 3 * activeLineScale;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(rig.weapon.root.x, rig.weapon.root.y);
-      ctx.lineTo(rig.weapon.muzzle.x, rig.weapon.muzzle.y);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // Arms are drawn last (foreground)
-    const farArmKey = (facing > 0 ? "left" : "right") as "left" | "right";
-    const nearArmKey = (facing > 0 ? "right" : "left") as "left" | "right";
-    const farArmAlpha = saluteArm === farArmKey ? 0.95 : 0.6;
-    const nearArmAlpha = 1;
-    strokeArm(rig.arms[farArmKey], farArmAlpha);
-    strokeArm(rig.arms[nearArmKey], nearArmAlpha);
-
-    const handR = Math.max(2, baseArmThickness * 0.55);
-    const handLineWidth = 4 * activeLineScale;
-    if (rig.grenade) {
-      ctx.save();
-      ctx.fillStyle = "#2b2b2b";
-      ctx.strokeStyle = "#0a0a0a";
-      ctx.lineWidth = 2 * activeLineScale;
-      ctx.beginPath();
-      ctx.arc(rig.grenade.center.x, rig.grenade.center.y, rig.grenade.r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.globalAlpha = 0.35;
-      ctx.fillStyle = "#fff";
-      ctx.beginPath();
-      ctx.arc(
-        rig.grenade.center.x - rig.grenade.r * 0.28,
-        rig.grenade.center.y - rig.grenade.r * 0.28,
-        rig.grenade.r * 0.32,
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.restore();
-    }
-
-    if (aimPose?.weapon === WeaponType.HandGrenade) {
-      const hands = [rig.arms.left.lower.b, rig.arms.right.lower.b];
-      ctx.save();
-      ctx.fillStyle = bodyColor;
-      ctx.strokeStyle = "rgba(0,0,0,0.25)";
-      ctx.lineWidth = handLineWidth;
-      for (const h of hands) {
-        ctx.beginPath();
-        ctx.arc(h.x, h.y, handR, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    if (
-      rig.weapon &&
-      (aimPose?.weapon === WeaponType.Rifle || aimPose?.weapon === WeaponType.Bazooka)
-    ) {
-      const nearHand = facing > 0 ? rig.arms.right.lower.b : rig.arms.left.lower.b;
-      const farHand = facing > 0 ? rig.arms.left.lower.b : rig.arms.right.lower.b;
-      ctx.save();
-      ctx.strokeStyle = "rgba(0,0,0,0.25)";
-      ctx.lineWidth = handLineWidth;
-
-      ctx.globalAlpha = 0.7;
-      ctx.fillStyle = bodyColor;
-      ctx.beginPath();
-      ctx.arc(farHand.x, farHand.y, handR, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.globalAlpha = 1;
-      ctx.beginPath();
-      ctx.arc(nearHand.x, nearHand.y, handR, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
     }
 
     if (!renderedSprites) {
@@ -684,6 +697,50 @@ export class Worm {
       COLORS.healthGreen,
       "rgba(0,0,0,0.35)"
     );
+
+    const debugCollision =
+      typeof window !== "undefined" && (window as Window).debugCritterCollision === true;
+    if (debugCollision) {
+      const offsets = resolveCritterSpriteOffsets();
+      const applyOffset = (p: { x: number; y: number }, key: "head" | "torso" | "tail1" | "tail2") => {
+        const o = offsets[key];
+        return { x: p.x + facing * o.x, y: p.y + o.y };
+      };
+
+      const headCenter = applyOffset(rig.head.center, "head");
+      const torsoCenter = applyOffset(rig.body.center, "torso");
+      const torsoCenterY = torsoCenter.y - rig.body.h * 0.2;
+      const torsoW = rig.body.w * 1.2;
+      const torsoH = rig.body.h * 1.4;
+      const tail = rig.tail.map((seg, i) => ({
+        center: applyOffset(seg.center, i === 0 ? "tail1" : "tail2"),
+        r: seg.r,
+      }));
+
+      ctx.save();
+      ctx.globalAlpha = 0.95;
+      ctx.strokeStyle = "rgba(0,255,170,0.9)";
+      ctx.lineWidth = 2 * activeLineScale;
+
+      ctx.beginPath();
+      ctx.arc(headCenter.x, headCenter.y, rig.head.r * 1.2, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeRect(
+        torsoCenter.x - torsoW / 2,
+        torsoCenterY - torsoH / 2,
+        torsoW,
+        torsoH
+      );
+
+      for (const seg of tail) {
+        ctx.beginPath();
+        ctx.arc(seg.center.x, seg.center.y, seg.r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
 
     ctx.restore();
   }
