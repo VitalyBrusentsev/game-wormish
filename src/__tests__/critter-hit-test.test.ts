@@ -3,6 +3,7 @@ import { WeaponType } from "../definitions";
 import { Worm } from "../entities";
 import { computeCritterRig } from "../critter/critter-geometry";
 import { critterHitTestCircle } from "../game/critter-hit-test";
+import { resolveCritterSpriteOffsets } from "../critter/critter-sprites";
 
 function createWorm(config: { x: number; y: number; facing: -1 | 1 }) {
   const worm = new Worm(config.x, config.y, "Red", "Test");
@@ -21,11 +22,21 @@ describe("critterHitTestCircle", () => {
       pose: { kind: "idle" },
     });
 
-    expect(critterHitTestCircle(worm, rig.head.center.x, rig.head.center.y, 1)).toBe(true);
-    expect(critterHitTestCircle(worm, rig.body.center.x, rig.body.center.y, 1)).toBe(true);
-    for (const seg of rig.tail) {
-      expect(critterHitTestCircle(worm, seg.center.x, seg.center.y, 1)).toBe(true);
-    }
+    const offsets = resolveCritterSpriteOffsets();
+    const applyOffset = (p: { x: number; y: number }, key: "head" | "torso" | "tail1" | "tail2") => {
+      const o = offsets[key];
+      return { x: p.x + worm.facing * o.x, y: p.y + o.y };
+    };
+
+    const headCenter = applyOffset(rig.head.center, "head");
+    const torsoCenter = applyOffset(rig.body.center, "torso");
+    expect(critterHitTestCircle(worm, headCenter.x, headCenter.y, 1)).toBe(true);
+    expect(critterHitTestCircle(worm, torsoCenter.x, torsoCenter.y, 1)).toBe(true);
+
+    rig.tail.forEach((seg, i) => {
+      const center = applyOffset(seg.center, i === 0 ? "tail1" : "tail2");
+      expect(critterHitTestCircle(worm, center.x, center.y, 1)).toBe(true);
+    });
   });
 
   it("misses far away points", () => {
@@ -58,11 +69,20 @@ describe("critterHitTestCircle", () => {
       pose: { kind: "idle" },
     });
 
+    const offsets = resolveCritterSpriteOffsets();
+    const applyOffset = (p: { x: number; y: number }, facing: -1 | 1, key: "tail2") => {
+      const o = offsets[key];
+      return { x: p.x + facing * o.x, y: p.y + o.y };
+    };
+
     const farTailRight = rigRight.tail[rigRight.tail.length - 1]!;
     const farTailLeft = rigLeft.tail[rigLeft.tail.length - 1]!;
 
-    expect(critterHitTestCircle(worm, farTailLeft.center.x, farTailLeft.center.y, 1)).toBe(true);
-    expect(critterHitTestCircle(worm, farTailRight.center.x, farTailRight.center.y, 1)).toBe(false);
+    const farTailLeftCenter = applyOffset(farTailLeft.center, -1, "tail2");
+    const farTailRightCenter = applyOffset(farTailRight.center, 1, "tail2");
+
+    expect(critterHitTestCircle(worm, farTailLeftCenter.x, farTailLeftCenter.y, 1)).toBe(true);
+    expect(critterHitTestCircle(worm, farTailRightCenter.x, farTailRightCenter.y, 1)).toBe(false);
   });
 
   it("does not consider arms for collision", () => {
@@ -79,4 +99,3 @@ describe("critterHitTestCircle", () => {
     expect(critterHitTestCircle(worm, hand.x, hand.y, 1)).toBe(false);
   });
 });
-

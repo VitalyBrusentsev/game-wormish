@@ -1,5 +1,6 @@
 import { clamp } from "../definitions";
 import { computeCritterRig } from "../critter/critter-geometry";
+import { resolveCritterSpriteOffsets } from "../critter/critter-sprites";
 import type { Worm } from "../entities";
 
 type CircleShape = { kind: "circle"; x: number; y: number; r: number };
@@ -25,11 +26,23 @@ export function critterHitTestCircle(worm: Worm, x: number, y: number, r: number
   if (!worm.alive) return false;
   const facing = (worm.facing < 0 ? -1 : 1) as -1 | 1;
   const rig = computeCritterRig({ x: worm.x, y: worm.y, r: worm.radius, facing, pose: { kind: "idle" } });
+  const offsets = resolveCritterSpriteOffsets();
+  const applyOffset = (p: { x: number; y: number }, key: "head" | "torso" | "tail1" | "tail2") => {
+    const o = offsets[key];
+    return { x: p.x + facing * o.x, y: p.y + o.y };
+  };
+
+  const headCenter = applyOffset(rig.head.center, "head");
+  const torsoCenter = applyOffset(rig.body.center, "torso");
+  const tail = rig.tail.map((seg, i) => ({
+    center: applyOffset(seg.center, i === 0 ? "tail1" : "tail2"),
+    r: seg.r,
+  }));
 
   const shapes: HitShape[] = [
-    { kind: "circle", x: rig.head.center.x, y: rig.head.center.y, r: rig.head.r },
-    { kind: "aabb", x: rig.body.center.x, y: rig.body.center.y, hw: rig.body.w / 2, hh: rig.body.h / 2 },
-    ...rig.tail.map((seg) => ({ kind: "circle" as const, x: seg.center.x, y: seg.center.y, r: seg.r })),
+    { kind: "circle", x: headCenter.x, y: headCenter.y, r: rig.head.r },
+    { kind: "aabb", x: torsoCenter.x, y: torsoCenter.y, hw: rig.body.w / 2, hh: rig.body.h / 2 },
+    ...tail.map((seg) => ({ kind: "circle" as const, x: seg.center.x, y: seg.center.y, r: seg.r })),
   ];
 
   for (const shape of shapes) {

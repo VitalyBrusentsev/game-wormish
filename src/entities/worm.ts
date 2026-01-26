@@ -1,6 +1,8 @@
 import { COLORS, CRITTER, WORLD, WeaponType, nowMs, clamp } from "../definitions";
 import type { TeamId } from "../definitions";
 import { computeCritterRig, type BaseCritterPose } from "../critter/critter-geometry";
+import { renderCritterFace } from "../critter/critter-face";
+import { renderCritterSprites } from "../critter/critter-sprites";
 import { drawHealthBar, drawRoundedRect } from "../utils";
 import type { Terrain } from "./terrain";
 
@@ -454,41 +456,63 @@ export class Worm {
       }
     }
 
-    // Tail segments (worm-ish "j" curve), small -> large
-    ctx.fillStyle = bodyColor;
-    ctx.strokeStyle = outline;
-    ctx.lineWidth = 2 * activeLineScale;
-    const tail = [...rig.tail].sort((a, b) => a.r - b.r);
-    for (const seg of tail) {
+    const lookAngle = aimPose?.angle ?? (facing > 0 ? 0 : Math.PI);
+    const renderedSprites = renderCritterSprites({
+      ctx,
+      rig,
+      team: this.team,
+      facing,
+      afterHead: (headCenter) => {
+        renderCritterFace({
+          ctx,
+          center: headCenter,
+          headRadius: rig.head.r,
+          lookAngle,
+          highlight,
+          activePulse01,
+          activeLineScale,
+          age: this.age,
+        });
+      },
+    });
+
+    if (!renderedSprites) {
+      // Tail segments (worm-ish "j" curve), small -> large
+      ctx.fillStyle = bodyColor;
+      ctx.strokeStyle = outline;
+      ctx.lineWidth = 2 * activeLineScale;
+      const tail = [...rig.tail].sort((a, b) => a.r - b.r);
+      for (const seg of tail) {
+        ctx.beginPath();
+        ctx.arc(seg.center.x, seg.center.y, seg.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // Body
+      ctx.fillStyle = bodyColor;
+      ctx.strokeStyle = outline;
+      ctx.lineWidth = 2 * activeLineScale;
+      drawRoundedRect(
+        ctx,
+        rig.body.center.x - rig.body.w / 2,
+        rig.body.center.y - rig.body.h / 2,
+        rig.body.w,
+        rig.body.h,
+        rig.body.cornerR
+      );
+      ctx.fill();
+      ctx.stroke();
+
+      // Head
+      ctx.fillStyle = bodyColor;
+      ctx.strokeStyle = outline;
+      ctx.lineWidth = 2 * activeLineScale;
       ctx.beginPath();
-      ctx.arc(seg.center.x, seg.center.y, seg.r, 0, Math.PI * 2);
+      ctx.arc(rig.head.center.x, rig.head.center.y, rig.head.r, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
-
-    // Body
-    ctx.fillStyle = bodyColor;
-    ctx.strokeStyle = outline;
-    ctx.lineWidth = 2 * activeLineScale;
-    drawRoundedRect(
-      ctx,
-      rig.body.center.x - rig.body.w / 2,
-      rig.body.center.y - rig.body.h / 2,
-      rig.body.w,
-      rig.body.h,
-      rig.body.cornerR
-    );
-    ctx.fill();
-    ctx.stroke();
-
-    // Head
-    ctx.fillStyle = bodyColor;
-    ctx.strokeStyle = outline;
-    ctx.lineWidth = 2 * activeLineScale;
-    ctx.beginPath();
-    ctx.arc(rig.head.center.x, rig.head.center.y, rig.head.r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
 
     // Weapon line (temporary; sprites later)
     if (rig.weapon) {
@@ -577,40 +601,51 @@ export class Worm {
       ctx.restore();
     }
 
-    // Eyes + mouth
-    ctx.save();
-    ctx.translate(rig.head.center.x + facing * (rig.head.r * 0.18), rig.head.center.y - rig.head.r * 0.12);
-    const eyeR = Math.max(2.2, rig.head.r * 0.26);
-    const eyeDx = rig.head.r * 0.42;
-    ctx.fillStyle = "#fff";
-    ctx.beginPath();
-    ctx.arc(-eyeDx, 0, eyeR, 0, Math.PI * 2);
-    ctx.arc(eyeDx, 0, eyeR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#000";
-    ctx.beginPath();
-    ctx.arc(-eyeDx + facing * (eyeR * 0.35), eyeR * 0.1, eyeR * 0.5, 0, Math.PI * 2);
-    ctx.arc(eyeDx + facing * (eyeR * 0.35), eyeR * 0.1, eyeR * 0.5, 0, Math.PI * 2);
-    ctx.fill();
+    if (!renderedSprites) {
+      // Eyes + mouth
+      ctx.save();
+      ctx.translate(
+        rig.head.center.x + facing * (rig.head.r * 0.18),
+        rig.head.center.y - rig.head.r * 0.12
+      );
+      const eyeR = Math.max(2.2, rig.head.r * 0.26);
+      const eyeDx = rig.head.r * 0.42;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      ctx.arc(-eyeDx, 0, eyeR, 0, Math.PI * 2);
+      ctx.arc(eyeDx, 0, eyeR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#000";
+      ctx.beginPath();
+      ctx.arc(-eyeDx + facing * (eyeR * 0.35), eyeR * 0.1, eyeR * 0.5, 0, Math.PI * 2);
+      ctx.arc(eyeDx + facing * (eyeR * 0.35), eyeR * 0.1, eyeR * 0.5, 0, Math.PI * 2);
+      ctx.fill();
 
-    const mouthY = rig.head.r * 0.55;
-    const mouthW = rig.head.r * 0.55;
-    const mouthSmile = 0.35 + 0.25 * Math.sin(this.age * 2.0);
-    ctx.strokeStyle = `rgba(0,0,0,${(highlight ? 0.42 + 0.14 * activePulse01 : 0.45).toFixed(3)})`;
-    ctx.lineWidth = 2 * activeLineScale;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(-mouthW, mouthY);
-    ctx.quadraticCurveTo(0, mouthY + rig.head.r * mouthSmile, mouthW, mouthY);
-    ctx.stroke();
-    ctx.restore();
+      const mouthY = rig.head.r * 0.55;
+      const mouthW = rig.head.r * 0.55;
+      const mouthSmile = 0.35 + 0.25 * Math.sin(this.age * 2.0);
+      ctx.strokeStyle = `rgba(0,0,0,${(highlight ? 0.42 + 0.14 * activePulse01 : 0.45).toFixed(3)})`;
+      ctx.lineWidth = 2 * activeLineScale;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(-mouthW, mouthY);
+      ctx.quadraticCurveTo(0, mouthY + rig.head.r * mouthSmile, mouthW, mouthY);
+      ctx.stroke();
+      ctx.restore();
 
-    // Team band
-    ctx.strokeStyle = teamColor;
-    ctx.lineWidth = 3 * activeLineScale;
-    ctx.beginPath();
-    ctx.arc(rig.head.center.x, rig.head.center.y, rig.head.r - 1.5, Math.PI * 0.2, Math.PI * 0.8);
-    ctx.stroke();
+      // Team band
+      ctx.strokeStyle = teamColor;
+      ctx.lineWidth = 3 * activeLineScale;
+      ctx.beginPath();
+      ctx.arc(
+        rig.head.center.x,
+        rig.head.center.y,
+        rig.head.r - 1.5,
+        Math.PI * 0.2,
+        Math.PI * 0.8
+      );
+      ctx.stroke();
+    }
 
     // Highlight ring for active
     if (highlight) {
@@ -642,7 +677,7 @@ export class Worm {
     drawHealthBar(
       ctx,
       0,
-      rig.head.center.y - rig.head.r - 18,
+      rig.head.center.y - rig.head.r - 33,
       hbW,
       hbH,
       this.health / 100,

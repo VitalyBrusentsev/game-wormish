@@ -4,17 +4,19 @@ This document captures the current “critter” (worm) graphics model and the k
 
 ## Scalable Rendering Model
 
-- The critter is rendered procedurally from a single base size `r` (the worm radius, `WORLD.wormRadius`).
-- All proportions are derived from `r` via `CRITTER` constants in `src/definitions.ts`.
+- The critter is rendered from a sprite sheet (`src/assets/critters.png`) composed from a single base size `r` (the worm radius, `WORLD.wormRadius`).
+- Base geometry (arms, weapons, collision shapes) is derived from `r` via `CRITTER` constants in `src/definitions.ts`.
 - The critter is composed of:
-  - **Torso**: a rounded rectangle (parametric width/height).
-  - **Head**: a circle above the torso (parametric radius).
-  - **Tail**: three decreasing circles forming a worm-like “j / flipped-j” curve opposite the facing direction.
+  - **Helmet**: sprite overlay drawn last.
+  - **Torso**: sprite centered on the rig body.
+  - **Head**: sprite centered on the rig head.
+  - **Tail**: two segments forming a worm-like curve opposite the facing direction.
 - Facing is a simple `-1 | 1` flip (left/right) and drives pose mirroring and tail curvature.
 
 Implementation entry points:
 - Geometry is computed via `computeCritterRig()` in `src/critter/critter-geometry.ts`.
-- Rendering is done in `Worm.render()` in `src/entities/worm.ts`, using the rig (no per-entity sprite assets yet).
+- Rendering is done in `Worm.render()` in `src/entities/worm.ts`, using the rig + sprite composition (arms remain lines for now).
+- Sprite offsets can be tweaked live via `window.spriteOffsets` (object keyed by `"tail2" | "tail1" | "torso" | "head" | "helmet"`).
 
 ## Weapon Implementation Model (Temporary Line Weapons)
 
@@ -63,4 +65,3 @@ Projectile collision uses a small set of simple shapes derived from the same rig
 Implementation entry point:
 - Hit test function `critterHitTestCircle()` in `src/game/critter-hit-test.ts`.
 - Covered by unit tests in `src/__tests__/critter-hit-test.test.ts`.
-

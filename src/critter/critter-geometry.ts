@@ -144,13 +144,11 @@ export function computeCritterRig(config: {
 
   const tailR1 = config.r * 0.58;
   const tailR2 = config.r * 0.44;
-  const tailR3 = config.r * 0.32;
   const baseY = center.y + bodyH / 2 + tailR1 * 0.1;
   const backX = -config.facing;
   const tail: Array<{ center: Vec2; r: number }> = [
     { center: { x: center.x + backX * (tailR1 * 0.15), y: baseY + tailR1 * 0.55 }, r: tailR1 },
     { center: { x: center.x + backX * (tailR1 * 0.85), y: baseY + tailR1 * 1.15 }, r: tailR2 },
-    { center: { x: center.x + backX * (tailR1 * 1.55), y: baseY + tailR1 * 1.65 }, r: tailR3 },
   ];
 
   const shoulderY = center.y + bodyH * CRITTER.shoulderYOffsetFactor;
