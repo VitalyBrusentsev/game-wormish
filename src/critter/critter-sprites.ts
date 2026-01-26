@@ -3,22 +3,41 @@ import type { CritterRig, Vec2 } from "./critter-geometry";
 
 export type CritterSpriteOffset = { x: number; y: number };
 
-type CritterSpriteKey = "tail2" | "tail1" | "torso" | "head" | "helmet" | "face";
+type CritterSpriteKey =
+  | "tail2"
+  | "tail1"
+  | "torso"
+  | "belt1"
+  | "collar"
+  | "head"
+  | "helmet"
+  | "face";
 
 const SPRITE_W = 38;
 const SPRITE_H = 32;
-const SPRITE_COUNT = 9;
+const SPRITE_COUNT = 11;
 const CRITTERS_SHEET_URL = new URL("../assets/critters.png", import.meta.url).href;
 
 const DEFAULT_SPRITE_OFFSETS: Record<CritterSpriteKey, CritterSpriteOffset> = {
   tail2: { x: 0, y: 3 },
   tail1: { x: 0, y: 2 },
-  torso: { x: -3, y: 0 },
-  head: { x: 2, y: -8 },
+  torso: { x: 0, y: 0 },
+  belt1: { x: -2, y: 6 },
+  collar: { x: 0, y: -4 },
+  head: { x: 1, y: -8 },
   helmet: { x: -2, y: -17 },
-  face: { x: 0, y: -4 },
+  face: { x: 2, y: -4 },
 };
-const SPRITE_KEYS: readonly CritterSpriteKey[] = ["tail2", "tail1", "torso", "head", "helmet", "face"];
+const SPRITE_KEYS: readonly CritterSpriteKey[] = [
+  "tail2",
+  "tail1",
+  "torso",
+  "belt1",
+  "collar",
+  "head",
+  "helmet",
+  "face",
+];
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -56,6 +75,8 @@ export function resolveCritterSpriteOffsets(): Record<CritterSpriteKey, CritterS
     tail2: { ...DEFAULT_SPRITE_OFFSETS.tail2 },
     tail1: { ...DEFAULT_SPRITE_OFFSETS.tail1 },
     torso: { ...DEFAULT_SPRITE_OFFSETS.torso },
+    belt1: { ...DEFAULT_SPRITE_OFFSETS.belt1 },
+    collar: { ...DEFAULT_SPRITE_OFFSETS.collar },
     head: { ...DEFAULT_SPRITE_OFFSETS.head },
     helmet: { ...DEFAULT_SPRITE_OFFSETS.helmet },
     face: { ...DEFAULT_SPRITE_OFFSETS.face },
@@ -77,6 +98,10 @@ function getSpriteIndex(team: TeamId, kind: "helmet" | "head" | "torso" | "tail1
     case "tail2":
       return team === "Red" ? 4 : 8;
   }
+}
+
+function getNeutralSpriteIndex(kind: "collar" | "belt1"): number {
+  return kind === "collar" ? 9 : 10;
 }
 
 let critterSheet: HTMLImageElement | null = null;
@@ -135,7 +160,7 @@ export function renderCritterSprites(config: {
   const tail2 = rig.tail[1];
   if (!tail1 || !tail2) return false;
 
-  // Draw order: tail2 -> tail1 -> torso -> head -> helmet
+  // Draw order: tail2 -> tail1 -> torso -> belt1 -> collar -> head -> helmet
   drawSprite({
     ctx,
     img,
@@ -158,6 +183,22 @@ export function renderCritterSprites(config: {
     spriteIndex: getSpriteIndex(team, "torso"),
     center: rig.body.center,
     offset: offsets.torso,
+    facing,
+  });
+  drawSprite({
+    ctx,
+    img,
+    spriteIndex: getNeutralSpriteIndex("belt1"),
+    center: rig.body.center,
+    offset: offsets.belt1,
+    facing,
+  });
+  drawSprite({
+    ctx,
+    img,
+    spriteIndex: getNeutralSpriteIndex("collar"),
+    center: rig.body.center,
+    offset: offsets.collar,
     facing,
   });
   drawSprite({

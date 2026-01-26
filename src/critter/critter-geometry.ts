@@ -151,9 +151,9 @@ export function computeCritterRig(config: {
     { center: { x: center.x + backX * (tailR1 * 0.85), y: baseY + tailR1 * 1.15 }, r: tailR2 },
   ];
 
-  const shoulderY = center.y + bodyH * CRITTER.shoulderYOffsetFactor;
-  const leftShoulder = { x: center.x - bodyW / 2, y: shoulderY };
-  const rightShoulder = { x: center.x + bodyW / 2, y: shoulderY };
+  const shoulderY = center.y + bodyH * CRITTER.shoulderYOffsetFactor - 6;
+  const leftShoulder = { x: center.x - bodyW / 2 - 2, y: shoulderY };
+  const rightShoulder = { x: center.x + bodyW / 2 + 2, y: shoulderY };
 
   const baseUpperLen = config.r * (longWeaponPose ? 0.95 : CRITTER.armUpperFactor);
   const baseLowerLen = config.r * (longWeaponPose ? 0.95 : CRITTER.armLowerFactor);
@@ -232,7 +232,7 @@ export function computeCritterRig(config: {
     const offset = salute.offset ?? { x: 0, y: 0 };
     const saluteTarget = {
       x: head.center.x + armSign * headR + offset.x,
-      y: head.center.y + offset.y,
+      y: head.center.y + offset.y - 6,
     };
     const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
     const lerpVec = (a: Vec2, b: Vec2, t: number): Vec2 => ({
