@@ -1,3 +1,5 @@
+import type { GameDebugApi } from "../debug/game-debug";
+
 export {};
 
 declare global {
@@ -15,5 +17,6 @@ declare global {
       >
     >;
     debugCritterCollision?: boolean;
+    Game?: GameDebugApi;
   }
 }

@@ -1,4 +1,5 @@
 import { Game } from "./game";
+import { createGameDebugApi } from "./debug/game-debug";
 
 function main(): void {
   const canvasContainer = document.body;
@@ -13,6 +14,7 @@ function main(): void {
       const newGame = new Game(width, height);
       newGame.mount(canvasContainer);
       newGame.start();
+      window.Game = createGameDebugApi(newGame);
       game = newGame;
       return;
     }

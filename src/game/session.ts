@@ -303,6 +303,36 @@ export class GameSession {
     return this.teamManager.activeWormIndex;
   }
 
+  debugSelectWorm(teamId: TeamId, wormIndex: number) {
+    const teamIndex = this.teamManager.teams.findIndex((team) => team.id === teamId);
+    if (teamIndex < 0) return;
+    this.teamManager.setCurrentTeamIndex(teamIndex);
+    this.teamManager.setActiveWormIndex(wormIndex);
+  }
+
+  debugSetWeapon(weapon: WeaponType) {
+    this.applyRemoteTurnCommand({
+      type: "set-weapon",
+      weapon,
+      atMs: this.turnTimestampMs(),
+    });
+  }
+
+  debugShoot(angle: number, power: number) {
+    const worm = this.activeWorm;
+    const targetDistance = 100;
+    const targetX = worm.x + Math.cos(angle) * targetDistance;
+    const targetY = worm.y + Math.sin(angle) * targetDistance;
+    this.applyRemoteTurnCommand({
+      type: "fire-charged-weapon",
+      weapon: this.state.weapon,
+      power: clamp(power, 0, 1),
+      aim: { angle, targetX, targetY },
+      atMs: this.turnTimestampMs(),
+      projectileIds: [],
+    });
+  }
+
   nextTurn(initial = false) {
     const previousLog = this.turnLog;
     const previousTurnIndex = this.turnIndex;
