@@ -1425,7 +1425,11 @@ export class Game {
   }
 
   private updateCursor() {
-    if (this.helpOverlay.isVisible() || this.startMenu.isVisible()) {
+    if (
+      this.helpOverlay.isVisible() ||
+      this.startMenu.isVisible() ||
+      this.session.state.phase === "gameover"
+    ) {
       this.canvas.style.cursor = "default";
       return;
     }

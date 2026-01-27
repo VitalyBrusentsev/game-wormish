@@ -20,6 +20,11 @@ To validate the tests are still passing after making changes, use `npm run test:
 
 If the `npm run dev` script is launched, the changes will be reflected in the running web app, available for the Browser tool to test and / or screenshot.
 
+## Browser testing (Chrome MCP)
+When using Chrome MCP, launch Chrome with a dedicated profile and remote debugging:
+`google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/.chrome-debug-profile" --no-first-run --no-default-browser-check`
+Then connect with: `codex mcp add chrome-devtools -- npx -y chrome-devtools-mcp@latest --browser-url=http://127.0.0.1:9222`.
+
 # Coding Conventions
 
 ## Typescript

@@ -27,6 +27,20 @@ Common tasks (Windows PowerShell syntax):
 - Run tests in watch mode: `npm run test`
 - Run tests once (CI): `npm run test:run`
 
+## Browser testing (Chrome remote debugging)
+For visual/manual checks (or to connect a browser MCP), launch Chrome with a dedicated profile so it does not reuse your main session:
+
+- Start Chrome (Linux): `google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/.chrome-debug-profile" --no-first-run --no-default-browser-check`
+- Visit the dev server (from `npm run dev`) and run your scenario.
+
+If you want to drive Chrome via an MCP tool, use the same remote debugging port.
+
+### Chrome DevTools MCP (Codex)
+Use the official Chrome DevTools MCP server to let Codex inspect and control your Chrome session:
+
+- Add the MCP server: `codex mcp add chrome-devtools -- npx -y chrome-devtools-mcp@latest --browser-url=http://127.0.0.1:9222`
+- Ensure the Chrome command above uses the same debugging port.
+
 ## Project layout (selected)
 - App entry: [src/main.ts](src/main.ts), game loop: [src/game.ts](src/game.ts)
 - Domain entities: [src/entities/](src/entities/)
