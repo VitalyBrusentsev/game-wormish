@@ -27,6 +27,9 @@ Common tasks (Windows PowerShell syntax):
 - Run tests in watch mode: `npm run test`
 - Run tests once (CI): `npm run test:run`
 
+## Debug API
+For Browser MCP workflows and manual debugging, see [DebugApi.md](DebugApi.md) for the `window.Game` helpers.
+
 ## Browser testing (Chrome remote debugging)
 For visual/manual checks (or to connect a browser MCP), launch Chrome with a dedicated profile so it does not reuse your main session:
 
