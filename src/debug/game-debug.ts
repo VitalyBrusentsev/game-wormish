@@ -105,6 +105,13 @@ export class DebugWorm {
     if (resolved.collided) this.worm.onGround = resolved.onGround;
   }
 
+  walk(direction: -1 | 0 | 1, durationMs: number, jump = false) {
+    this.select();
+    const move = Math.max(-1, Math.min(1, direction)) as -1 | 0 | 1;
+    const duration = Math.max(0, Math.round(durationMs));
+    this.game.session.debugMove(move, duration, jump);
+  }
+
   kill() {
     this.select();
     this.worm.takeDamage(this.worm.health + 999);

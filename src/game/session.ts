@@ -318,6 +318,18 @@ export class GameSession {
     });
   }
 
+  debugMove(move: -1 | 0 | 1, durationMs: number, jump = false) {
+    const dtMs = Math.max(0, Math.round(durationMs));
+    if (dtMs === 0 && move === 0 && !jump) return;
+    this.applyRemoteTurnCommand({
+      type: "move",
+      move,
+      jump,
+      dtMs,
+      atMs: this.turnTimestampMs(),
+    });
+  }
+
   debugShoot(angle: number, power: number) {
     const worm = this.activeWorm;
     const targetDistance = 100;

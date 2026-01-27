@@ -63,6 +63,13 @@ Makes this worm the active worm for its team.
 #### `move(dx, dy = 0)`
 Offsets the worm position by `dx`, `dy` (pixels), then resolves collisions against terrain.
 
+#### `walk(direction, durationMs, jump = false)`
+Moves the worm using in-game movement commands (no teleporting).
+
+- `direction`: `-1 | 0 | 1` (left, idle, right)
+- `durationMs`: number of milliseconds to apply movement for
+- `jump`: optional jump flag for the start of the move
+
 #### `kill()`
 Applies fatal damage to the worm.
 
