@@ -18,18 +18,22 @@ const blue = Game.getTeam("blue");
 red[0].move(80);              // dx (pixels), optional dy
 red[0].useWeapon("bazooka");
 red[0].shoot(Math.PI / 6, 1); // angle in radians, power 0..1
+
+// Set personality and let AI play the active turn
+red[0].setPersonality("Marksman");
+red.playTurnWithGameAI({ minThinkTimeMs: 1000 });
 ```
 
 ## Top-level API
 
 ### `Game.getTeam(teamId)`
-Returns an array of `DebugWorm` wrappers for the given team.
+Returns an array of `DebugWorm` wrappers for the given team, with extra team helpers attached.
 
 - `teamId`: `"Red" | "Blue" | "red" | "blue"`
 - Returns: `DebugWorm[]` (empty array if the team is not found)
 
 ### `Game.getTeams()`
-Returns an object with both teams.
+Returns an object with both teams (arrays with team helpers attached).
 
 - Returns: `{ Red: DebugWorm[]; Blue: DebugWorm[] }`
 
@@ -83,6 +87,25 @@ Fires the current weapon using the supplied aim angle and power.
 
 - `angle`: radians
 - `power`: 0..1 (clamped)
+
+#### `personality`
+Returns the assigned AI personality for this worm (defaults to `Generalist`).
+
+#### `setPersonality(value)`
+Sets the AI personality for this worm.
+
+- `value`: `"Generalist" | "Marksman" | "Demolisher" | "Commando"` (case-insensitive)
+
+## Team helpers
+
+`Game.getTeam()` returns an array of worms and also exposes team-level helpers.
+
+### `team.playTurnWithGameAI({ settings })`
+Invokes Game AI for the currently active worm on this team.
+
+- `settings.minThinkTimeMs`: minimum delay before firing (default 1000ms)
+- `settings.cinematic.chance`: chance to enable cinematic scoring bias
+- `settings.precision.mode`: `"perfect" | "noisy"`
 
 ## Notes & limitations
 

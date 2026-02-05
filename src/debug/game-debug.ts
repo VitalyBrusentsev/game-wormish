@@ -2,6 +2,13 @@ import type { Game } from "../game";
 import type { TeamId } from "../definitions";
 import { WeaponType, clamp } from "../definitions";
 import type { Worm } from "../entities";
+import type { GameAiSettings } from "../ai/types";
+import { playTurnWithGameAiForTeam, type AiTurnPlan } from "../ai/game-ai";
+import {
+  getWormPersonality,
+  normalizeAiPersonality,
+  setWormPersonality,
+} from "../ai/personality-store";
 
 const normalizeTeamId = (value: string | TeamId): TeamId | null => {
   if (value === "Red" || value === "Blue") return value;
@@ -85,6 +92,15 @@ export class DebugWorm {
     return this.worm.age;
   }
 
+  get personality() {
+    return getWormPersonality(this.worm);
+  }
+
+  setPersonality(value: string | ReturnType<typeof getWormPersonality> | null) {
+    const normalized = normalizeAiPersonality(value);
+    setWormPersonality(this.worm, normalized);
+  }
+
   select() {
     this.game.session.debugSelectWorm(this.teamId, this.index);
     return this;
@@ -131,30 +147,50 @@ export class DebugWorm {
 }
 
 export type GameDebugApi = {
-  getTeam: (teamId: string | TeamId) => DebugWorm[];
-  getTeams: () => Record<TeamId, DebugWorm[]>;
+  getTeam: (teamId: string | TeamId) => DebugTeam;
+  getTeams: () => Record<TeamId, DebugTeam>;
   getActiveWorm: () => DebugWorm | null;
   selectWorm: (teamId: string | TeamId, index: number) => DebugWorm | null;
+};
+
+export type DebugTeam = DebugWorm[] & {
+  id: TeamId;
+  playTurnWithGameAI: (settings?: GameAiSettings) => AiTurnPlan | null;
 };
 
 const createDebugWorms = (game: Game, teamId: TeamId, worms: Worm[]) =>
   worms.map((worm, index) => new DebugWorm(game, worm, teamId, index));
 
+const createDebugTeam = (game: Game, teamId: TeamId, worms: Worm[]): DebugTeam => {
+  const team = createDebugWorms(game, teamId, worms) as DebugTeam;
+  team.id = teamId;
+  team.playTurnWithGameAI = (settings) =>
+    playTurnWithGameAiForTeam(game.session, teamId, settings);
+  return team;
+};
+
+const createEmptyDebugTeam = (teamId: TeamId): DebugTeam => {
+  return Object.assign([], {
+    id: teamId,
+    playTurnWithGameAI: () => null,
+  });
+};
+
 export const createGameDebugApi = (game: Game): GameDebugApi => ({
   getTeam: (teamId) => {
     const normalized = normalizeTeamId(teamId);
-    if (!normalized) return [];
+    if (!normalized) return createEmptyDebugTeam(game.session.activeTeam.id);
     const team = game.session.teams.find((entry) => entry.id === normalized);
-    if (!team) return [];
-    return createDebugWorms(game, team.id, team.worms);
+    if (!team) return createEmptyDebugTeam(normalized);
+    return createDebugTeam(game, team.id, team.worms);
   },
   getTeams: () => ({
-    Red: createDebugWorms(
+    Red: createDebugTeam(
       game,
       "Red",
       game.session.teams.find((entry) => entry.id === "Red")?.worms ?? []
     ),
-    Blue: createDebugWorms(
+    Blue: createDebugTeam(
       game,
       "Blue",
       game.session.teams.find((entry) => entry.id === "Blue")?.worms ?? []

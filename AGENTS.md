@@ -49,6 +49,7 @@ Comments should be kept to a minimum. Prefer code readability and clean structur
 - Input glue and overlays live under [src/ui/](src/ui/); keep UI-specific state there.
 - Camera behavior and constraints are documented in [camera.md](camera.md).
 - Sound/SFX architecture is documented in [sound.md](sound.md).
+- Game AI design is documented in [GameAI.md](GameAI.md); implementation should live in [src/ai/](src/ai/).
 - Backend "room registry" design and specs are outlined in [Registry API Spec](cloudflare/registry-api-spec.md)
 - WebRTC realtime network design is reflected in [NetworkDesign.md](NetworkDesign.md)
 
