@@ -70,6 +70,22 @@ If this makes AI too strong, offset with the precision dial.
   for 200-300 ms, optional jump).
 - Panic behavior: if time is low and no good shot exists, fire a quick desperate shot.
 
+## Movement Fallback + Re-Planning (Implemented)
+
+When no viable shot can be found from the current position, the AI should not
+immediately fire a "zero-score" shot (which often looks like shooting at its own feet).
+Instead, it:
+
+- Walks toward the selected target in 200-300ms chunks (with a simple "stuck => jump" heuristic).
+- Re-evaluates shots after movement (same scoring + candidate generation).
+- Stops once it finds a shot with a positive score, or once a movement budget is exhausted.
+
+To avoid spending the entire turn walking, movement is capped by a fixed budget
+(a few seconds) and also respects the remaining turn time.
+
+If movement fails to create a viable shot, the AI falls back to a quick desperation
+shot as comic relief. This shot is clamped to never aim downward.
+
 ## Trickster Check (Folded Into Cinematic)
 
 No fall damage is in scope today (aside from water instadeath), so a full Trickster

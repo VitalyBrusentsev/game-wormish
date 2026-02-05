@@ -198,10 +198,12 @@ export function predictTrajectory({
     const pts: PredictedPoint[] = [];
     const dirx = Math.cos(aim.angle);
     const diry = Math.sin(aim.angle);
-    const hit = terrain.raycast(sx, sy, dirx, diry, 2000, 3);
-    const maxDist =
-      hit?.dist ??
-      (weapon === WeaponType.Rifle ? 800 : Math.min(GAMEPLAY.uzi.maxDistance, 800));
+    const maxRayDist =
+      weapon === WeaponType.Rifle
+        ? Math.max(800, GAMEPLAY.rifle.speed * GAMEPLAY.rifle.maxLifetime)
+        : GAMEPLAY.uzi.maxDistance;
+    const hit = terrain.raycast(sx, sy, dirx, diry, maxRayDist, 3);
+    const maxDist = hit?.dist ?? maxRayDist;
     const step = 16;
     for (let d = 0; d <= maxDist; d += step) {
       const x = sx + dirx * d;

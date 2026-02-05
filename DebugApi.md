@@ -106,6 +106,9 @@ Invokes Game AI for the currently active worm on this team.
 - `settings.minThinkTimeMs`: minimum delay before firing (default 1000ms)
 - `settings.cinematic.chance`: chance to enable cinematic scoring bias
 - `settings.precision.mode`: `"perfect" | "noisy"`
+- `settings.debug.enabled`: when true, the returned plan includes a `debug` object with scoring breakdowns
+- `settings.debug.topN`: number of top candidates to include in `plan.debug` (default 6)
+- `settings.movement.enabled`: when true (default), AI may walk/jump and then re-plan before firing
 
 ## Notes & limitations
 

@@ -13,9 +13,20 @@ export type AiCinematicSettings = {
   chance?: number;
 };
 
+export type GameAiDebugSettings = {
+  enabled?: boolean;
+  topN?: number;
+};
+
+export type GameAiMovementSettings = {
+  enabled?: boolean;
+};
+
 export type GameAiSettings = {
   personality?: AiPersonality;
   minThinkTimeMs?: number;
   cinematic?: AiCinematicSettings;
   precision?: AiPrecisionSettings;
+  debug?: GameAiDebugSettings;
+  movement?: GameAiMovementSettings;
 };
