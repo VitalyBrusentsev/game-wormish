@@ -71,10 +71,10 @@ const WEAPON_BIAS: Record<AiPersonality, Record<WeaponType, number>> = {
     [WeaponType.Uzi]: 0.75,
   },
   Commando: {
-    [WeaponType.Bazooka]: 0.95,
-    [WeaponType.HandGrenade]: 0.8,
-    [WeaponType.Rifle]: 1.05,
-    [WeaponType.Uzi]: 1.4,
+    [WeaponType.Bazooka]: 0.58,
+    [WeaponType.HandGrenade]: 0.55,
+    [WeaponType.Rifle]: 0.92,
+    [WeaponType.Uzi]: 2.45,
   },
 };
 
@@ -386,7 +386,12 @@ export const scoreCandidate = (params: {
   const arcBonus = cinematic ? computeArcOverCoverBonus(session, shooter, target, points) : 0;
   const waterBonus = cinematic ? computeWaterKillBonus(session, target, weapon, effectiveImpact) : 0;
 
-  const baseScore = damageScore + splashProximity * 22 + arcBonus * 18 + waterBonus * 70;
+  const commandoUziBonus =
+    personality === "Commando" && weapon === WeaponType.Uzi
+      ? (hitFactor ?? 0) * 20 + (rangeFactor ?? 0) * 16
+      : 0;
+  const baseScore =
+    damageScore + splashProximity * 22 + arcBonus * 18 + waterBonus * 70 + commandoUziBonus;
   const weaponBias = WEAPON_BIAS[personality][weapon];
   const biased = baseScore * weaponBias;
   const score = biased - selfPenalty * 1.1 - selfBufferPenalty - friendlyPenalty * 1.25;

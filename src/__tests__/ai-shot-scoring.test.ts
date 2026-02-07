@@ -2,7 +2,14 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { GAMEPLAY, WeaponType } from "../definitions";
 import { GameSession } from "../game/session";
 import { buildAimFromAngle, scoreCandidate } from "../ai/shot-scoring";
-import { planMovement, planPanicShot, type ResolvedAiSettings } from "../ai/turn-planning";
+import {
+  computeMovementBudgetMs,
+  planMovement,
+  planPanicShot,
+  planShot,
+  shouldAcceptMovementShot,
+  type ResolvedAiSettings,
+} from "../ai/turn-planning";
 import { Worm } from "../entities";
 
 const originalDocument = (globalThis as { document?: Document }).document;
@@ -79,8 +86,8 @@ function createRng(seed: number) {
   };
 }
 
-const buildSettings = (): ResolvedAiSettings => ({
-  personality: "Generalist",
+const buildSettings = (personality: ResolvedAiSettings["personality"] = "Generalist"): ResolvedAiSettings => ({
+  personality,
   minThinkTimeMs: 1000,
   cinematicChance: 0,
   precisionMode: "perfect",
@@ -259,6 +266,139 @@ describe("AI shot scoring", () => {
     expect(escape.candidate.power).toBeGreaterThanOrEqual(0.82);
     expect(Math.cos(escape.candidate.angle)).toBeGreaterThan(0);
     expect(escape.candidate.debug.distToSelf).toBeGreaterThan(GAMEPLAY.bazooka.explosionRadius * 1.5);
+  });
+
+  it("makes commando prefer uzi when uzi lane is available", () => {
+    const session = new GameSession(1400, 900, { random: createRng(19), now: () => 0 });
+    session.wind = 0;
+    session.terrain.applyHeightMap(session.terrain.heightMap.map(() => 760));
+
+    const shooter = session.activeTeam.worms[0]!;
+    const targetTeam = session.teams.find((team) => team.id !== session.activeTeam.id)!;
+    const target = targetTeam.worms[0]!;
+
+    for (const team of session.teams) {
+      for (const worm of team.worms) {
+        worm.alive = false;
+      }
+    }
+    shooter.alive = true;
+    target.alive = true;
+
+    shooter.x = 280;
+    shooter.y = 700;
+    shooter.facing = 1;
+    target.x = 470;
+    target.y = 700;
+
+    const planned = planShot({
+      session,
+      shooter,
+      target,
+      cinematic: false,
+      settings: buildSettings("Commando"),
+    });
+
+    expect(planned).not.toBeNull();
+    expect(planned!.chosen.weapon).toBe(WeaponType.Uzi);
+  });
+
+  it("keeps commando moving when only long-range non-uzi shots are viable", () => {
+    const session = new GameSession(1400, 900, { random: createRng(20), now: () => 0 });
+    session.wind = 0;
+    session.terrain.applyHeightMap(session.terrain.heightMap.map(() => 760));
+
+    const shooter = session.activeTeam.worms[0]!;
+    const targetTeam = session.teams.find((team) => team.id !== session.activeTeam.id)!;
+    const target = targetTeam.worms[0]!;
+
+    for (const team of session.teams) {
+      for (const worm of team.worms) {
+        worm.alive = false;
+      }
+    }
+    shooter.alive = true;
+    target.alive = true;
+
+    shooter.x = 220;
+    shooter.y = 700;
+    shooter.facing = 1;
+    target.x = 980;
+    target.y = 700;
+
+    const movement = planMovement({
+      session,
+      shooter,
+      target,
+      cinematic: false,
+      settings: buildSettings("Commando"),
+      timeLeftMs: 6500,
+    });
+
+    expect(movement.steps.length).toBeGreaterThan(0);
+    const firstShot = planShot({
+      session,
+      shooter,
+      target,
+      cinematic: false,
+      settings: buildSettings("Commando"),
+    });
+    expect(firstShot).not.toBeNull();
+    expect(firstShot!.chosen.weapon).not.toBe(WeaponType.Uzi);
+  });
+
+  it("does not accept hitscan shot as resolved when repeatedly stuck", () => {
+    const session = new GameSession(1400, 900, { random: createRng(21), now: () => 0 });
+    session.wind = 0;
+    session.terrain.applyHeightMap(session.terrain.heightMap.map(() => 760));
+
+    const shooter = session.activeTeam.worms[0]!;
+    const targetTeam = session.teams.find((team) => team.id !== session.activeTeam.id)!;
+    const target = targetTeam.worms[0]!;
+
+    for (const team of session.teams) {
+      for (const worm of team.worms) {
+        worm.alive = false;
+      }
+    }
+    shooter.alive = true;
+    target.alive = true;
+
+    shooter.x = 280;
+    shooter.y = 700;
+    target.x = 470;
+    target.y = 700;
+
+    const shot = planShot({
+      session,
+      shooter,
+      target,
+      cinematic: false,
+      settings: buildSettings("Commando"),
+    });
+
+    expect(shot).not.toBeNull();
+    expect(shot!.fired.weapon).toBe(WeaponType.Uzi);
+    const accepted = shouldAcceptMovementShot({
+      shot: shot!,
+      sawRepeatedStuck: true,
+      shooter,
+      target,
+      usedMs: 2000,
+      budgetMs: 12000,
+      settings: buildSettings("Commando"),
+    });
+    expect(accepted).toBe(false);
+  });
+
+  it("extends move budget well beyond the old 9-second cap", () => {
+    const budget = computeMovementBudgetMs({
+      settings: buildSettings("Commando"),
+      timeLeftMs: 28000,
+    });
+
+    expect(budget).toBeGreaterThan(9000);
+    expect(budget).toBe(22000);
   });
 
   it("includes a retreat step before crater panic when movement exits early", () => {

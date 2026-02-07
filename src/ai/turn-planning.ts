@@ -25,7 +25,7 @@ export type ResolvedAiSettings = {
 };
 
 const MOVE_STEP_MS = 260;
-const MAX_MOVE_BUDGET_MS = 9000;
+const MAX_MOVE_BUDGET_MS = 22000;
 const PANIC_WINDOW_MS = 2500;
 const PANIC_THINK_MS = 250;
 const TURN_SAFETY_MS = 150;
@@ -36,6 +36,14 @@ const PANIC_ESCAPE_MAGNITUDES = [0.72, 0.9, 1.08, 1.2];
 const STUCK_ESCAPE_THRESHOLD = 3;
 const STUCK_ESCAPE_STEPS = 3;
 const MAX_STUCK_STEPS = 12;
+const MAX_MOVE_STEPS = 64;
+const MAX_MOVE_STEPS_COMMANDO = 96;
+const COMMANDO_UZI_SCORE_MIN = 0;
+const COMMANDO_UZI_HIT_MIN = 0.18;
+const COMMANDO_UZI_RANGE_MIN = 0.14;
+const COMMANDO_UZI_COMPETITIVE_RATIO = 0.14;
+const COMMANDO_UZI_MOVE_CLOSE_DIST = 290;
+const COMMANDO_UZI_MOVE_BUDGET_RATIO = 0.78;
 export type PanicShotStrategy = "default" | "escape-arc";
 
 export type AiMoveStep = {
@@ -103,13 +111,12 @@ export type PanicPlan = {
   delayMs: number;
 };
 
-const chooseCandidate = (candidates: ShotCandidate[], settings: ResolvedAiSettings): ShotCandidate | null => {
+const pickWeightedCandidate = (
+  candidates: ShotCandidate[],
+  limit: number
+): ShotCandidate | null => {
   if (candidates.length === 0) return null;
-  const sorted = [...candidates].sort((a, b) => b.score - a.score);
-  if (settings.precisionMode === "perfect") {
-    return sorted[0]!;
-  }
-  const top = sorted.slice(0, settings.precisionTopK);
+  const top = candidates.slice(0, Math.max(1, limit));
   let total = 0;
   const weights = top.map((candidate) => {
     const weight = Math.max(0.001, candidate.score + 0.001);
@@ -122,6 +129,50 @@ const chooseCandidate = (candidates: ShotCandidate[], settings: ResolvedAiSettin
     if (roll <= 0) return top[i]!;
   }
   return top[0]!;
+};
+
+const bestCandidateForWeapon = (
+  candidates: ShotCandidate[],
+  weapon: WeaponType
+): ShotCandidate | null => {
+  for (const candidate of candidates) {
+    if (candidate.weapon === weapon) return candidate;
+  }
+  return null;
+};
+
+const selectCommandoUziCandidate = (
+  sorted: ShotCandidate[],
+  settings: ResolvedAiSettings
+): ShotCandidate | null => {
+  const bestOverall = sorted[0];
+  if (!bestOverall) return null;
+  const bestUzi = bestCandidateForWeapon(sorted, WeaponType.Uzi);
+  if (!bestUzi) return null;
+  const hitFactor = bestUzi.debug.hitFactor ?? 0;
+  const rangeFactor = bestUzi.debug.rangeFactor ?? 0;
+  const usable =
+    bestUzi.score > COMMANDO_UZI_SCORE_MIN &&
+    hitFactor >= COMMANDO_UZI_HIT_MIN &&
+    rangeFactor >= COMMANDO_UZI_RANGE_MIN;
+  const competitive = bestUzi.score >= bestOverall.score * COMMANDO_UZI_COMPETITIVE_RATIO;
+  if (!usable || !competitive) return null;
+  if (settings.precisionMode === "perfect") return bestUzi;
+  const uziCandidates = sorted.filter((candidate) => candidate.weapon === WeaponType.Uzi);
+  return pickWeightedCandidate(uziCandidates, settings.precisionTopK);
+};
+
+const chooseCandidate = (candidates: ShotCandidate[], settings: ResolvedAiSettings): ShotCandidate | null => {
+  if (candidates.length === 0) return null;
+  const sorted = [...candidates].sort((a, b) => b.score - a.score);
+  if (settings.personality === "Commando") {
+    const uziPreferred = selectCommandoUziCandidate(sorted, settings);
+    if (uziPreferred) return uziPreferred;
+  }
+  if (settings.precisionMode === "perfect") {
+    return sorted[0]!;
+  }
+  return pickWeightedCandidate(sorted, settings.precisionTopK);
 };
 
 const applyPrecisionNoise = (
@@ -346,6 +397,64 @@ const cloneWormForSim = (worm: Worm): Worm => {
   return sim;
 };
 
+const shouldCommandoAdvanceForUzi = (params: {
+  shot: ShotPlan;
+  shooter: Worm;
+  target: Worm;
+  usedMs: number;
+  budgetMs: number;
+  settings: ResolvedAiSettings;
+}): boolean => {
+  const { shot, shooter, target, usedMs, budgetMs, settings } = params;
+  if (settings.personality !== "Commando") return false;
+  const bestUzi = bestCandidateForWeapon(
+    [...shot.candidates].sort((a, b) => b.score - a.score),
+    WeaponType.Uzi
+  );
+  if (bestUzi) {
+    const hitFactor = bestUzi.debug.hitFactor ?? 0;
+    const rangeFactor = bestUzi.debug.rangeFactor ?? 0;
+    const readyToSpray =
+      bestUzi.score > COMMANDO_UZI_SCORE_MIN &&
+      hitFactor >= COMMANDO_UZI_HIT_MIN &&
+      rangeFactor >= COMMANDO_UZI_RANGE_MIN;
+    if (readyToSpray) return false;
+  }
+  const horizontalDistance = Math.abs(target.x - shooter.x);
+  const hasSearchBudget = usedMs < budgetMs * COMMANDO_UZI_MOVE_BUDGET_RATIO;
+  return horizontalDistance > COMMANDO_UZI_MOVE_CLOSE_DIST && hasSearchBudget;
+};
+
+export const shouldAcceptMovementShot = (params: {
+  shot: ShotPlan;
+  sawRepeatedStuck: boolean;
+  shooter: Worm;
+  target: Worm;
+  usedMs: number;
+  budgetMs: number;
+  settings: ResolvedAiSettings;
+}): boolean => {
+  const { shot, sawRepeatedStuck, shooter, target, usedMs, budgetMs, settings } = params;
+  const hitscan =
+    shot.fired.weapon === WeaponType.Uzi || shot.fired.weapon === WeaponType.Rifle;
+  if (sawRepeatedStuck && hitscan) {
+    return false;
+  }
+  if (
+    shouldCommandoAdvanceForUzi({
+      shot,
+      shooter,
+      target,
+      usedMs,
+      budgetMs,
+      settings,
+    })
+  ) {
+    return false;
+  }
+  return true;
+};
+
 export const planMovement = (params: {
   session: GameSession;
   shooter: Worm;
@@ -359,11 +468,7 @@ export const planMovement = (params: {
     return { steps: [], usedMs: 0, budgetMs: 0, plannedShooter: shooter, craterStuck: false };
   }
 
-  const budgetMs = clamp(
-    Math.min(MAX_MOVE_BUDGET_MS, timeLeftMs - settings.minThinkTimeMs - TURN_SAFETY_MS),
-    0,
-    MAX_MOVE_BUDGET_MS
-  );
+  const budgetMs = computeMovementBudgetMs({ settings, timeLeftMs });
   if (budgetMs <= 0 || timeLeftMs <= PANIC_WINDOW_MS) {
     return { steps: [], usedMs: 0, budgetMs, plannedShooter: shooter, craterStuck: false };
   }
@@ -376,13 +481,26 @@ export const planMovement = (params: {
   let sawRepeatedStuck = false;
   let foundShot = false;
 
-  const maxSteps = Math.min(24, Math.ceil(budgetMs / Math.max(1, MOVE_STEP_MS)));
+  const stepCap = settings.personality === "Commando" ? MAX_MOVE_STEPS_COMMANDO : MAX_MOVE_STEPS;
+  const maxSteps = Math.min(stepCap, Math.ceil(budgetMs / Math.max(1, MOVE_STEP_MS)));
   const waterLine = session.height - 8;
   for (let i = 0; i < maxSteps; i++) {
     const shot = planShot({ session, shooter: plannedShooter, target, cinematic, settings });
     if (shot) {
-      foundShot = true;
-      break;
+      if (
+        shouldAcceptMovementShot({
+          shot,
+          sawRepeatedStuck,
+          shooter: plannedShooter,
+          target,
+          usedMs,
+          budgetMs,
+          settings,
+        })
+      ) {
+        foundShot = true;
+        break;
+      }
     }
 
     const towardTarget = (target.x < plannedShooter.x ? -1 : 1) as -1 | 1;
@@ -443,6 +561,18 @@ export const planMovement = (params: {
     plannedShooter,
     craterStuck,
   };
+};
+
+export const computeMovementBudgetMs = (params: {
+  settings: ResolvedAiSettings;
+  timeLeftMs: number;
+}): number => {
+  const { settings, timeLeftMs } = params;
+  return clamp(
+    Math.min(MAX_MOVE_BUDGET_MS, timeLeftMs - settings.minThinkTimeMs - TURN_SAFETY_MS),
+    0,
+    MAX_MOVE_BUDGET_MS
+  );
 };
 
 export const timeLeftMsForTurn = (session: GameSession): number => {
