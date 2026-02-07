@@ -36,6 +36,8 @@ const PANIC_ESCAPE_MAGNITUDES = [0.72, 0.9, 1.08, 1.2];
 const STUCK_ESCAPE_THRESHOLD = 3;
 const STUCK_ESCAPE_STEPS = 3;
 const MAX_STUCK_STEPS = 12;
+const BLOCKED_ADVANCE_THRESHOLD = 3;
+const MIN_FORWARD_PROGRESS_PX = 6;
 const MAX_MOVE_STEPS = 64;
 const MAX_MOVE_STEPS_COMMANDO = 96;
 const COMMANDO_UZI_SCORE_MIN = 0;
@@ -477,6 +479,7 @@ export const planMovement = (params: {
   const steps: MovementPlan["steps"] = [];
   let usedMs = 0;
   let stuckSteps = 0;
+  let blockedAdvanceSteps = 0;
   let escapeStepsRemaining = 0;
   let sawRepeatedStuck = false;
   let foundShot = false;
@@ -505,18 +508,31 @@ export const planMovement = (params: {
 
     const towardTarget = (target.x < plannedShooter.x ? -1 : 1) as -1 | 1;
     const move = (escapeStepsRemaining > 0 ? -towardTarget : towardTarget) as -1 | 1;
-    const jump = stuckSteps >= 2;
+    const jump = stuckSteps >= 2 || blockedAdvanceSteps >= 2;
     const dtMs = Math.min(MOVE_STEP_MS, budgetMs - usedMs);
     if (dtMs <= 0) break;
 
     const from = { x: plannedShooter.x, y: plannedShooter.y };
     const res = simulateMove(plannedShooter, session, { move, dtMs, jump });
     const to = { x: plannedShooter.x, y: plannedShooter.y };
+    const forwardProgress = (to.x - from.x) * towardTarget;
+    const blockedAdvance =
+      move === towardTarget &&
+      (res.stuck || forwardProgress < MIN_FORWARD_PROGRESS_PX);
     steps.push({ move, dtMs, jump, from, to, stuck: res.stuck });
     usedMs += dtMs;
 
     if (escapeStepsRemaining > 0) {
       escapeStepsRemaining -= 1;
+    }
+    if (blockedAdvance) {
+      blockedAdvanceSteps += 1;
+      if (blockedAdvanceSteps >= BLOCKED_ADVANCE_THRESHOLD) {
+        sawRepeatedStuck = true;
+        break;
+      }
+    } else if (move === towardTarget && forwardProgress >= MIN_FORWARD_PROGRESS_PX) {
+      blockedAdvanceSteps = 0;
     }
     if (res.stuck) {
       stuckSteps += 1;

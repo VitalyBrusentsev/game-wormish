@@ -508,6 +508,54 @@ describe("AI shot scoring", () => {
     }
   });
 
+  it("treats repeated low forward progress as stuck and exits movement early", () => {
+    const session = new GameSession(1400, 900, { random: createRng(28), now: () => 0 });
+    session.wind = 0;
+    session.terrain.applyHeightMap(session.terrain.heightMap.map(() => 760));
+
+    const shooter = session.activeTeam.worms[0]!;
+    const targetTeam = session.teams.find((team) => team.id !== session.activeTeam.id)!;
+    const target = targetTeam.worms[0]!;
+
+    for (const team of session.teams) {
+      for (const worm of team.worms) {
+        worm.alive = false;
+      }
+    }
+    shooter.alive = true;
+    target.alive = true;
+
+    shooter.x = 240;
+    shooter.y = 700;
+    shooter.facing = 1;
+    target.x = 5000;
+    target.y = 700;
+
+    const updateSpy = vi
+      .spyOn(Worm.prototype, "update")
+      .mockImplementation(function (this: Worm, _dt, _terrain, move) {
+        this.x += move * 0.1;
+        this.y += 0.02;
+      });
+
+    try {
+      const movement = planMovement({
+        session,
+        shooter,
+        target,
+        cinematic: false,
+        settings: buildSettings(),
+        timeLeftMs: 18000,
+      });
+
+      expect(movement.craterStuck).toBe(true);
+      expect(movement.steps.length).toBeLessThanOrEqual(4);
+      expect(movement.steps[movement.steps.length - 1]!.move).toBe(-1);
+    } finally {
+      updateSpy.mockRestore();
+    }
+  });
+
   it("penalizes explosive shots that land too close to the shooter", () => {
     const session = new GameSession(1400, 900, { random: createRng(13), now: () => 0 });
     session.wind = 0;
