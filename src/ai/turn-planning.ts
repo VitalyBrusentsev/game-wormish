@@ -376,7 +376,7 @@ export const planMovement = (params: {
   let sawRepeatedStuck = false;
   let foundShot = false;
 
-  const maxSteps = Math.min(24, Math.floor(budgetMs / Math.max(1, MOVE_STEP_MS)));
+  const maxSteps = Math.min(24, Math.ceil(budgetMs / Math.max(1, MOVE_STEP_MS)));
   const waterLine = session.height - 8;
   for (let i = 0; i < maxSteps; i++) {
     const shot = planShot({ session, shooter: plannedShooter, target, cinematic, settings });
@@ -419,12 +419,29 @@ export const planMovement = (params: {
     if (plannedShooter.y >= waterLine - 2) break;
   }
 
+  const craterStuck = sawRepeatedStuck && !foundShot;
+  if (craterStuck && steps.length > 0) {
+    const towardTarget = (target.x < plannedShooter.x ? -1 : 1) as -1 | 1;
+    const retreatMove = (-towardTarget) as -1 | 1;
+    const remainingMs = Math.max(0, budgetMs - usedMs);
+    const lastStep = steps[steps.length - 1]!;
+    if (remainingMs > 0 && lastStep.move !== retreatMove) {
+      const dtMs = Math.min(MOVE_STEP_MS, remainingMs);
+      const jump = stuckSteps >= 2;
+      const from = { x: plannedShooter.x, y: plannedShooter.y };
+      const res = simulateMove(plannedShooter, session, { move: retreatMove, dtMs, jump });
+      const to = { x: plannedShooter.x, y: plannedShooter.y };
+      steps.push({ move: retreatMove, dtMs, jump, from, to, stuck: res.stuck });
+      usedMs += dtMs;
+    }
+  }
+
   return {
     steps,
     usedMs,
     budgetMs,
     plannedShooter,
-    craterStuck: sawRepeatedStuck && !foundShot,
+    craterStuck,
   };
 };
 

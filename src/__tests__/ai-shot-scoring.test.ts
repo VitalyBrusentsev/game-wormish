@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { GAMEPLAY, WeaponType } from "../definitions";
 import { GameSession } from "../game/session";
 import { buildAimFromAngle, scoreCandidate } from "../ai/shot-scoring";
-import { planPanicShot, type ResolvedAiSettings } from "../ai/turn-planning";
+import { planMovement, planPanicShot, type ResolvedAiSettings } from "../ai/turn-planning";
+import { Worm } from "../entities";
 
 const originalDocument = (globalThis as { document?: Document }).document;
 const originalHTMLCanvasElement = (globalThis as { HTMLCanvasElement?: typeof HTMLCanvasElement })
@@ -258,6 +259,54 @@ describe("AI shot scoring", () => {
     expect(escape.candidate.power).toBeGreaterThanOrEqual(0.82);
     expect(Math.cos(escape.candidate.angle)).toBeGreaterThan(0);
     expect(escape.candidate.debug.distToSelf).toBeGreaterThan(GAMEPLAY.bazooka.explosionRadius * 1.5);
+  });
+
+  it("includes a retreat step before crater panic when movement exits early", () => {
+    const session = new GameSession(1400, 900, { random: createRng(18), now: () => 0 });
+    session.wind = 0;
+    session.terrain.applyHeightMap(session.terrain.heightMap.map(() => 760));
+
+    const shooter = session.activeTeam.worms[0]!;
+    const targetTeam = session.teams.find((team) => team.id !== session.activeTeam.id)!;
+    const target = targetTeam.worms[0]!;
+
+    for (const team of session.teams) {
+      for (const worm of team.worms) {
+        worm.alive = false;
+      }
+    }
+    shooter.alive = true;
+    target.alive = true;
+
+    shooter.x = 240;
+    shooter.y = session.height - 12;
+    shooter.facing = 1;
+    target.x = 5000;
+    target.y = 700;
+
+    const updateSpy = vi
+      .spyOn(Worm.prototype, "update")
+      .mockImplementation(function (this: Worm) {
+        this.x = 240;
+        this.y += 0.03;
+      });
+
+    try {
+      const movement = planMovement({
+        session,
+        shooter,
+        target,
+        cinematic: false,
+        settings: buildSettings(),
+        timeLeftMs: 4200,
+      });
+
+      expect(movement.craterStuck).toBe(true);
+      expect(movement.steps.length).toBeGreaterThan(3);
+      expect(movement.steps[movement.steps.length - 1]!.move).toBe(-1);
+    } finally {
+      updateSpy.mockRestore();
+    }
   });
 
   it("penalizes explosive shots that land too close to the shooter", () => {
