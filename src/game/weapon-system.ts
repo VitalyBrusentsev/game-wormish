@@ -214,6 +214,50 @@ export function predictTrajectory({
     return pts;
   }
 
+  if (weapon === WeaponType.HandGrenade) {
+    const speed =
+      GAMEPLAY.handGrenade.minPower +
+      (GAMEPLAY.handGrenade.maxPower - GAMEPLAY.handGrenade.minPower) * power01;
+    const vx = Math.cos(aim.angle) * speed;
+    const vy = Math.sin(aim.angle) * speed;
+
+    const projectile = new Projectile(
+      sx,
+      sy,
+      vx,
+      vy,
+      WORLD.projectileRadius,
+      WeaponType.HandGrenade,
+      wind,
+      () => undefined,
+      {
+        fuse: GAMEPLAY.handGrenade.fuseMs,
+        restitution: GAMEPLAY.handGrenade.restitution,
+      }
+    );
+
+    const specHG = {
+      gravity: WORLD.gravity,
+      explosionRadius: GAMEPLAY.handGrenade.explosionRadius,
+      damage: GAMEPLAY.handGrenade.damage,
+    };
+    const dt = 1 / 60;
+    const maxT = Math.max(3.2, GAMEPLAY.handGrenade.fuseMs / 1000 + 0.25);
+    const steps = Math.floor(maxT / dt);
+    const pts: PredictedPoint[] = [];
+
+    for (let i = 0; i < steps; i++) {
+      projectile.update(dt, terrain, specHG);
+      if (i % 2 === 0) {
+        const t = i * dt;
+        const alpha = clamp(1 - t / maxT, 0.15, 1);
+        pts.push({ x: projectile.x, y: projectile.y, alpha });
+      }
+      if (projectile.exploded) break;
+    }
+    return pts;
+  }
+
   const speed =
     weapon === WeaponType.Bazooka
       ? GAMEPLAY.bazooka.minPower +
