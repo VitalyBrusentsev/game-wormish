@@ -303,6 +303,65 @@ describe("AI shot scoring", () => {
     expect(planned!.chosen.weapon).toBe(WeaponType.Uzi);
   });
 
+  it("penalizes uzi scoring when terrain blocks the direct lane", () => {
+    const session = new GameSession(1400, 900, { random: createRng(26), now: () => 0 });
+    session.wind = 0;
+    const heightMap = session.terrain.heightMap.map(() => 760);
+    for (let x = 360; x <= 410; x++) {
+      heightMap[x] = 620;
+    }
+    session.terrain.applyHeightMap(heightMap);
+
+    const shooter = session.activeTeam.worms[0]!;
+    const targetTeam = session.teams.find((team) => team.id !== session.activeTeam.id)!;
+    const target = targetTeam.worms[0]!;
+
+    for (const team of session.teams) {
+      for (const worm of team.worms) {
+        worm.alive = false;
+      }
+    }
+    shooter.alive = true;
+    target.alive = true;
+
+    shooter.x = 280;
+    shooter.y = 700;
+    shooter.facing = 1;
+    target.x = 470;
+    target.y = 700;
+
+    const angle = 0;
+    const aim = buildAimFromAngle(shooter, angle);
+    const blocked = scoreCandidate({
+      session,
+      shooter,
+      target,
+      weapon: WeaponType.Uzi,
+      aim,
+      angle,
+      power: 1,
+      cinematic: false,
+      personality: "Commando",
+      baseAngle: angle,
+      angleOffset: 0,
+    });
+
+    expect(blocked.debug.hitFactor).toBe(0);
+    expect(blocked.debug.rangeFactor).toBe(0);
+    expect(blocked.score).toBeLessThanOrEqual(0);
+
+    const planned = planShot({
+      session,
+      shooter,
+      target,
+      cinematic: false,
+      settings: buildSettings("Commando"),
+    });
+    if (planned) {
+      expect(planned.chosen.weapon).not.toBe(WeaponType.Uzi);
+    }
+  });
+
   it("keeps commando moving when only long-range non-uzi shots are viable", () => {
     const session = new GameSession(1400, 900, { random: createRng(20), now: () => 0 });
     session.wind = 0;

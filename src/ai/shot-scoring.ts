@@ -258,6 +258,38 @@ const computeWaterKillBonus = (
   return pushDown * clamp(1 - dist / radius, 0, 1);
 };
 
+const hitscanLineOfFireFactor = (params: {
+  session: GameSession;
+  shooter: Worm;
+  target: Worm;
+  weapon: WeaponType.Rifle | WeaponType.Uzi;
+  angle: number;
+}): number => {
+  const { session, shooter, target, weapon, angle } = params;
+  const spawn = computeProjectileSpawnPoint(weapon, shooter, angle);
+  const dirx = Math.cos(angle);
+  const diry = Math.sin(angle);
+  const toTargetX = target.x - spawn.x;
+  const toTargetY = target.y - spawn.y;
+  const along = toTargetX * dirx + toTargetY * diry;
+  if (along <= 0) return 0;
+
+  const hitRadius = WORLD.wormRadius * 1.1;
+  const perpSq = toTargetX * toTargetX + toTargetY * toTargetY - along * along;
+  if (perpSq >= hitRadius * hitRadius) return 1;
+
+  const approach = Math.sqrt(Math.max(0, hitRadius * hitRadius - perpSq));
+  const entryDist = Math.max(0, along - approach);
+  const maxRayDist =
+    weapon === WeaponType.Rifle
+      ? Math.max(800, GAMEPLAY.rifle.speed * GAMEPLAY.rifle.maxLifetime)
+      : GAMEPLAY.uzi.maxDistance;
+  if (entryDist > maxRayDist) return 0;
+
+  const hit = session.terrain.raycast(spawn.x, spawn.y, dirx, diry, entryDist, 3);
+  return hit ? 0 : 1;
+};
+
 export const scoreCandidate = (params: {
   session: GameSession;
   shooter: Worm;
@@ -342,10 +374,17 @@ export const scoreCandidate = (params: {
   let rangeFactor: number | null = null;
   let expectedHits: number | null = null;
   if (weapon === WeaponType.Rifle || weapon === WeaponType.Uzi) {
+    const lineOfFire = hitscanLineOfFireFactor({
+      session,
+      shooter,
+      target,
+      weapon,
+      angle: aim.angle,
+    });
     const minDist = minDistanceToPath(points, target);
-    hitFactor = clamp(1 - minDist / (WORLD.wormRadius * 1.1), 0, 1);
+    hitFactor = clamp(1 - minDist / (WORLD.wormRadius * 1.1), 0, 1) * lineOfFire;
     const range = distance(shooter.x, shooter.y, target.x, target.y);
-    rangeFactor = clamp(1 - range / 600, 0, 1);
+    rangeFactor = clamp(1 - range / 600, 0, 1) * lineOfFire;
     const base = weaponDamage(weapon) * hitFactor;
     if (weapon === WeaponType.Uzi) {
       expectedHits = GAMEPLAY.uzi.burstCount * 0.35 * rangeFactor;
