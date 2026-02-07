@@ -30,6 +30,7 @@ import {
   type TurnDriver,
 } from "./game/turn-driver";
 import { AiTurnController } from "./game/ai-turn-controller";
+import { assignAiTeamPersonalities } from "./ai/personality-assignment";
 import { NetworkSessionState, type NetworkSessionStateSnapshot } from "./network/session-state";
 import type { TurnCommand } from "./game/network/turn-payload";
 import type {
@@ -348,7 +349,7 @@ export class Game {
       onRestart: () => {
         this.hideStartMenu();
         initialMenuDismissed = true;
-        this.session.restart();
+        this.restartSinglePlayerMatch();
         this.canvas.focus();
         this.updateCursor();
       },
@@ -384,6 +385,25 @@ export class Game {
       }
     }
     this.session.setTurnControllers(this.turnControllers);
+    this.assignAiWormPersonalities();
+  }
+
+  private assignAiWormPersonalities() {
+    for (const team of this.session.teams) {
+      const controller = this.turnControllers.get(team.id);
+      if (controller?.type !== "ai") continue;
+      const enemyTeams = this.session.teams.filter((enemyTeam) => enemyTeam.id !== team.id);
+      assignAiTeamPersonalities({
+        team,
+        enemyTeams,
+        random: Math.random,
+      });
+    }
+  }
+
+  private restartSinglePlayerMatch() {
+    this.session.restart();
+    this.assignAiWormPersonalities();
   }
 
   setTurnController(teamId: TeamId, controller: TurnDriver) {
@@ -1170,7 +1190,7 @@ export class Game {
       const snapshot = this.networkState.getSnapshot();
       this.input.consumeKey("KeyR");
       if (snapshot.mode === "local") {
-        this.session.restart();
+        this.restartSinglePlayerMatch();
       } else if (snapshot.mode === "network-host") {
         this.restartNetworkMatchAsHost();
       } else {
