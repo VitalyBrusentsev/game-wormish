@@ -1620,6 +1620,7 @@ export class Game {
       terrain: this.session.terrain,
       teams: this.teams,
       projectiles: this.session.projectiles,
+      showRadar: initialMenuDismissed,
     });
 
     renderGameOver({

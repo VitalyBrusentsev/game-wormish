@@ -14,6 +14,7 @@ type MapGadgetOptions = {
   terrain: Terrain;
   teams: readonly Team[];
   projectiles?: readonly Projectile[];
+  showRadar?: boolean;
 };
 
 type Layout = {
@@ -323,7 +324,7 @@ function drawSquadDots(
   layout: Layout,
   terrain: Terrain,
   teams: readonly Team[],
-  radar: RadarState
+  radar: RadarState | null
 ) {
   const { innerX, innerY, mapWidth, mapHeight, scale } = layout;
   const dotRadius = 2.6;
@@ -340,8 +341,8 @@ function drawSquadDots(
       const mx = innerX + (worm.x - terrain.worldLeft) * scale;
       const my = innerY + worm.y * scale;
       if (mx < innerX || mx > innerX + mapWidth || my < innerY || my > innerY + mapHeight) continue;
-      const ping01 = Math.max(0, 1 - Math.abs(mx - radar.sweepX) / pingRange);
-      if (ping01 > 0) {
+      const ping01 = radar ? Math.max(0, 1 - Math.abs(mx - radar.sweepX) / pingRange) : 0;
+      if (radar && ping01 > 0) {
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
         ctx.globalAlpha = 0.6 * ping01;
@@ -370,7 +371,7 @@ function drawProjectileDot(
   layout: Layout,
   terrain: Terrain,
   projectiles: readonly Projectile[],
-  radar: RadarState
+  radar: RadarState | null
 ) {
   const { innerX, innerY, mapWidth, mapHeight, scale } = layout;
 
@@ -387,7 +388,7 @@ function drawProjectileDot(
   const mx = innerX + (projectile.x - terrain.worldLeft) * scale;
   const my = innerY + projectile.y * scale;
   if (mx < innerX || mx > innerX + mapWidth || my < innerY || my > innerY + mapHeight) return;
-  const ping01 = Math.max(0, 1 - Math.abs(mx - radar.sweepX) / 14);
+  const ping01 = radar ? Math.max(0, 1 - Math.abs(mx - radar.sweepX) / 14) : 0;
 
   ctx.save();
   drawRoundedRect(ctx, innerX, innerY, mapWidth, mapHeight, 8);
@@ -397,7 +398,7 @@ function drawProjectileDot(
   ctx.beginPath();
   ctx.arc(mx, my, 2.0, 0, Math.PI * 2);
   ctx.fill();
-  if (ping01 > 0) {
+  if (radar && ping01 > 0) {
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     ctx.globalAlpha = 0.45 * ping01;
@@ -418,6 +419,7 @@ export function renderMapGadget({
   terrain,
   teams,
   projectiles = [],
+  showRadar = true,
 }: MapGadgetOptions): void {
   if (viewportWidth <= 0 || viewportHeight <= 0) return;
   if (teams.length === 0) return;
@@ -427,12 +429,14 @@ export function renderMapGadget({
   if (layout.y + layout.outerHeight < 0) return;
   if (layout.x > viewportWidth) return;
 
-  const radar = getRadarState(layout, now);
+  const radar = showRadar ? getRadarState(layout, now) : null;
 
   ctx.save();
   drawMetalFrame(ctx, layout);
   drawMapContents(ctx, layout, terrain);
-  drawRadarOverlays(ctx, layout, now);
+  if (showRadar) {
+    drawRadarOverlays(ctx, layout, now);
+  }
   drawSquadDots(ctx, layout, terrain, teams, radar);
   if (projectiles.length > 0) drawProjectileDot(ctx, layout, terrain, projectiles, radar);
   ctx.restore();
