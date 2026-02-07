@@ -1497,7 +1497,7 @@ export class Game {
   }
 
   private getAimInfo(): AimInfo {
-    return this.session.getAimInfo();
+    return this.session.getRenderAimInfo();
   }
 
   render() {

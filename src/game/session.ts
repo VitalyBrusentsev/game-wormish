@@ -139,6 +139,20 @@ export type UziBurstSnapshot = {
   shotCount: number;
 };
 
+type AiPreShotVisual = {
+  turnIndex: number;
+  teamId: TeamId;
+  wormIndex: number;
+  weapon: WeaponType;
+  power01: number;
+  startMs: number;
+  endMs: number;
+  startAngle: number;
+  targetAngle: number;
+  overshootAngle: number;
+  undershootAngle: number;
+};
+
 export class GameSession {
   readonly width: number;
   readonly height: number;
@@ -170,6 +184,7 @@ export class GameSession {
   private waitingForRemoteResolution = false;
   private currentTurnInitial = true;
   private uziBurst: UziBurst | null = null;
+  private aiPreShotVisual: AiPreShotVisual | null = null;
 
   constructor(
     width: number,
@@ -331,6 +346,7 @@ export class GameSession {
   }
 
   debugShoot(angle: number, power: number) {
+    this.clearAiPreShotVisual();
     const worm = this.activeWorm;
     const targetDistance = 100;
     const targetX = worm.x + Math.cos(angle) * targetDistance;
@@ -343,6 +359,38 @@ export class GameSession {
       atMs: this.turnTimestampMs(),
       projectileIds: [],
     });
+  }
+
+  beginAiPreShotVisual(params: {
+    weapon: WeaponType;
+    targetAngle: number;
+    power01: number;
+    durationMs: number;
+  }) {
+    if (this.state.phase !== "aim") return;
+    const now = this.now();
+    const durationMs = Math.max(0, params.durationMs);
+    const startAngle = this.aim.angle;
+    const delta = this.normalizeAngleRad(params.targetAngle - startAngle);
+    const direction = delta >= 0 ? 1 : -1;
+    const overshootMagnitude = clamp(Math.abs(delta) * 0.3, 0.05, 0.18);
+    this.aiPreShotVisual = {
+      turnIndex: this.turnIndex,
+      teamId: this.activeTeam.id,
+      wormIndex: this.activeWormIndex,
+      weapon: params.weapon,
+      power01: clamp(params.power01, 0, 1),
+      startMs: now,
+      endMs: now + durationMs,
+      startAngle,
+      targetAngle: params.targetAngle,
+      overshootAngle: params.targetAngle + direction * overshootMagnitude,
+      undershootAngle: params.targetAngle - direction * overshootMagnitude * 0.55,
+    };
+  }
+
+  clearAiPreShotVisual() {
+    this.aiPreShotVisual = null;
   }
 
   nextTurn(initial = false) {
@@ -359,6 +407,7 @@ export class GameSession {
     if (initial) this.teamManager.resetActiveWormIndex();
     else this.teamManager.advanceToNextTeam();
     this.aim = this.createDefaultAim();
+    this.clearAiPreShotVisual();
 
     const snapshot = this.toNetworkTurnSnapshot();
 
@@ -579,6 +628,14 @@ export class GameSession {
     return this.aim;
   }
 
+  getRenderAimInfo(): AimInfo {
+    const preview = this.resolveAiPreShotAim(this.now());
+    if (!preview) return this.aim;
+    const worm = this.activeWorm;
+    worm.facing = preview.targetX < worm.x ? -1 : 1;
+    return preview;
+  }
+
   getUziBurstSnapshot(): UziBurstSnapshot | null {
     const burst = this.uziBurst;
     if (!burst) return null;
@@ -594,6 +651,20 @@ export class GameSession {
   }
 
   predictPath(): PredictedPoint[] {
+    const preview = this.resolveAiPreShotPreview(this.now());
+    if (preview && preview.visual.weapon === WeaponType.HandGrenade) {
+      return predictTrajectory({
+        weapon: WeaponType.HandGrenade,
+        activeWorm: this.activeWorm,
+        aim: preview.aim,
+        power01: preview.visual.power01,
+        wind: this.wind,
+        terrain: this.terrain,
+        width: this.width,
+        height: this.height,
+      });
+    }
+
     if (!shouldPredictPath(this.state)) return [];
     const aim = this.aim;
     const power01 = this.state.getCharge01(this.state.turnStartMs + this.turnTimestampMs());
@@ -607,6 +678,80 @@ export class GameSession {
       width: this.width,
       height: this.height,
     });
+  }
+
+  private resolveAiPreShotPreview(now: number): { visual: AiPreShotVisual; aim: AimInfo } | null {
+    const visual = this.getActiveAiPreShotVisual(now);
+    if (!visual) return null;
+    const durationMs = Math.max(1, visual.endMs - visual.startMs);
+    const progress = clamp((now - visual.startMs) / durationMs, 0, 1);
+    const overshootEnd = 0.4;
+    const undershootEnd = 0.72;
+
+    let angle = visual.targetAngle;
+    if (progress <= overshootEnd) {
+      angle = this.lerpAngle(
+        visual.startAngle,
+        visual.overshootAngle,
+        progress / overshootEnd
+      );
+    } else if (progress <= undershootEnd) {
+      angle = this.lerpAngle(
+        visual.overshootAngle,
+        visual.undershootAngle,
+        (progress - overshootEnd) / (undershootEnd - overshootEnd)
+      );
+    } else {
+      angle = this.lerpAngle(
+        visual.undershootAngle,
+        visual.targetAngle,
+        (progress - undershootEnd) / (1 - undershootEnd)
+      );
+    }
+
+    const worm = this.activeWorm;
+    const targetDistance = 120;
+    return {
+      visual,
+      aim: {
+        angle,
+        targetX: worm.x + Math.cos(angle) * targetDistance,
+        targetY: worm.y + Math.sin(angle) * targetDistance,
+      },
+    };
+  }
+
+  private resolveAiPreShotAim(now: number): AimInfo | null {
+    return this.resolveAiPreShotPreview(now)?.aim ?? null;
+  }
+
+  private getActiveAiPreShotVisual(now: number): AiPreShotVisual | null {
+    const visual = this.aiPreShotVisual;
+    if (!visual) return null;
+    if (
+      this.state.phase !== "aim" ||
+      visual.turnIndex !== this.turnIndex ||
+      visual.teamId !== this.activeTeam.id ||
+      visual.wormIndex !== this.activeWormIndex
+    ) {
+      this.aiPreShotVisual = null;
+      return null;
+    }
+    if (now > visual.endMs + 2000) {
+      this.aiPreShotVisual = null;
+      return null;
+    }
+    return visual;
+  }
+
+  private normalizeAngleRad(angle: number): number {
+    let normalized = (angle + Math.PI) % (Math.PI * 2);
+    if (normalized < 0) normalized += Math.PI * 2;
+    return normalized - Math.PI;
+  }
+
+  private lerpAngle(from: number, to: number, t: number): number {
+    return from + this.normalizeAngleRad(to - from) * clamp(t, 0, 1);
   }
 
   getTeamHealth(id: TeamId) {
@@ -628,6 +773,7 @@ export class GameSession {
     this.projectileIds.clear();
     this.terminatedProjectiles.clear();
     this.nextProjectileId = 1;
+    this.clearAiPreShotVisual();
     this.nextTurn(true);
     gameEvents.emit("match.restarted", { source: "system" });
   }
@@ -779,6 +925,7 @@ export class GameSession {
     this.particles = [];
     this.aim = this.createDefaultAim();
     this.uziBurst = null;
+    this.clearAiPreShotVisual();
   }
 
   loadMatchInitSnapshot(snapshot: MatchInitSnapshot) {
@@ -813,6 +960,7 @@ export class GameSession {
     this.particles = [];
     this.aim = this.createDefaultAim();
     this.uziBurst = null;
+    this.clearAiPreShotVisual();
   }
 
   loadNetworkTurnSnapshot(snapshot: NetworkTurnSnapshot) {
@@ -825,6 +973,7 @@ export class GameSession {
     this.particles = [];
     this.aim = this.createDefaultAim();
     this.uziBurst = null;
+    this.clearAiPreShotVisual();
   }
 
   private restoreTeams(teams: TeamSnapshot[]): Team[] {
@@ -1231,6 +1380,7 @@ export class GameSession {
     command: Extract<TurnCommand, { type: "fire-charged-weapon" }>
   ): TurnCommand | null {
     if (this.state.phase !== "aim") return null;
+    this.clearAiPreShotVisual();
     this.state.setWeapon(command.weapon);
     this.aim = command.aim;
     const worm = this.activeWorm;
@@ -1919,6 +2069,7 @@ export class GameSession {
   }
 
   private endAimPhaseWithoutShot() {
+    this.clearAiPreShotVisual();
     this.state.expireAimPhase();
     if (!this.isLocalTurnActive()) return;
     setTimeout(() => {
@@ -1927,6 +2078,7 @@ export class GameSession {
   }
 
   private endAimPhaseAfterShot() {
+    this.clearAiPreShotVisual();
     this.state.shotFired();
     this.message = null;
   }

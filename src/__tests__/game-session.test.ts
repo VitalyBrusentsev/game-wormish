@@ -257,3 +257,64 @@ describe("GameSession turn logging", () => {
     expect(resolution.projectileEventCount).toBe(log.projectileEvents.length);
   });
 });
+
+describe("GameSession AI pre-shot visuals", () => {
+  const normalizeAngle = (angle: number): number => {
+    let normalized = (angle + Math.PI) % (Math.PI * 2);
+    if (normalized < 0) normalized += Math.PI * 2;
+    return normalized - Math.PI;
+  };
+
+  it("applies overshoot and undershoot before settling on target aim", () => {
+    let now = 1000;
+    const session = new GameSession(320, 240, {
+      random: createRng(77),
+      now: () => now,
+    });
+
+    const targetAngle = -0.85;
+    session.beginAiPreShotVisual({
+      weapon: WeaponType.Bazooka,
+      targetAngle,
+      power01: 0.8,
+      durationMs: 1000,
+    });
+
+    const startAngle = session.getRenderAimInfo().angle;
+    const direction = normalizeAngle(targetAngle - startAngle) >= 0 ? 1 : -1;
+
+    now = 1400;
+    const overshootAngle = session.getRenderAimInfo().angle;
+    now = 1720;
+    const undershootAngle = session.getRenderAimInfo().angle;
+    now = 2000;
+    const settledAngle = session.getRenderAimInfo().angle;
+
+    expect(Math.sign(normalizeAngle(overshootAngle - targetAngle))).toBe(direction);
+    expect(Math.sign(normalizeAngle(undershootAngle - targetAngle))).toBe(-direction);
+    expect(normalizeAngle(settledAngle - targetAngle)).toBeCloseTo(0, 4);
+  });
+
+  it("renders grenade trajectory preview during AI pre-shot visuals", () => {
+    let now = 1000;
+    const session = new GameSession(320, 240, {
+      random: createRng(33),
+      now: () => now,
+    });
+
+    session.debugSetWeapon(WeaponType.HandGrenade);
+    session.beginAiPreShotVisual({
+      weapon: WeaponType.HandGrenade,
+      targetAngle: -0.7,
+      power01: 0.75,
+      durationMs: 800,
+    });
+
+    const previewPath = session.predictPath();
+    expect(previewPath.length).toBeGreaterThan(0);
+
+    session.clearAiPreShotVisual();
+    const noPreviewPath = session.predictPath();
+    expect(noPreviewPath).toHaveLength(0);
+  });
+});

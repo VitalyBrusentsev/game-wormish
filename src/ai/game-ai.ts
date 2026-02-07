@@ -247,7 +247,8 @@ export const playTurnWithGameAi = (
   const expectedTurn = session.getTurnIndex();
   const expectedWorm = session.activeWorm;
   const movementTotalMs = plan.movedMs ?? 0;
-  const executeAt = nowMs() + movementTotalMs + plan.delayMs;
+  const pauseStartAt = nowMs() + movementTotalMs;
+  const executeAt = pauseStartAt + plan.delayMs;
 
   const stillValid = () =>
     session.getTurnIndex() === expectedTurn &&
@@ -266,8 +267,23 @@ export const playTurnWithGameAi = (
     }
   }
 
+  const beginPreShotVisuals = () => {
+    if (!stillValid()) return;
+    session.debugSetWeapon(plan.weapon);
+    session.beginAiPreShotVisual({
+      weapon: plan.weapon,
+      targetAngle: plan.angle,
+      power01: plan.power,
+      durationMs: Math.max(0, executeAt - nowMs()),
+    });
+  };
+
+  const visualDelay = Math.max(0, pauseStartAt - nowMs());
+  setTimeout(beginPreShotVisuals, visualDelay);
+
   const fire = () => {
     if (!stillValid()) return;
+    session.clearAiPreShotVisual();
     session.debugSetWeapon(plan.weapon);
     session.debugShoot(plan.angle, plan.power);
   };
