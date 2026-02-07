@@ -308,7 +308,9 @@ export const scoreCandidate = (params: {
       : { x: shooter.x, y: shooter.y };
 
   const liveWorms = session.teams.flatMap((team) => team.worms).filter((worm) => worm.alive);
-  const nonShooterWorms = liveWorms.filter((worm) => worm !== shooter);
+  const nonShooterWorms = liveWorms.filter(
+    (worm) => worm.team !== shooter.team || worm.name !== shooter.name
+  );
 
   // Simulate bazooka with the same projectile + worm-hit loop ordering used at runtime.
   const bazookaImpact =

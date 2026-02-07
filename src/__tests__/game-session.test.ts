@@ -317,4 +317,27 @@ describe("GameSession AI pre-shot visuals", () => {
     const noPreviewPath = session.predictPath();
     expect(noPreviewPath).toHaveLength(0);
   });
+
+  it("renders bazooka trajectory preview during AI pre-shot visuals", () => {
+    let now = 1000;
+    const session = new GameSession(320, 240, {
+      random: createRng(34),
+      now: () => now,
+    });
+
+    session.debugSetWeapon(WeaponType.Bazooka);
+    session.beginAiPreShotVisual({
+      weapon: WeaponType.Bazooka,
+      targetAngle: -0.55,
+      power01: 0.65,
+      durationMs: 900,
+    });
+
+    const previewPath = session.predictPath();
+    expect(previewPath.length).toBeGreaterThan(0);
+
+    session.clearAiPreShotVisual();
+    const noPreviewPath = session.predictPath();
+    expect(noPreviewPath).toHaveLength(0);
+  });
 });

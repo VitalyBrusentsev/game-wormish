@@ -652,9 +652,13 @@ export class GameSession {
 
   predictPath(): PredictedPoint[] {
     const preview = this.resolveAiPreShotPreview(this.now());
-    if (preview && preview.visual.weapon === WeaponType.HandGrenade) {
+    if (
+      preview &&
+      (preview.visual.weapon === WeaponType.HandGrenade ||
+        preview.visual.weapon === WeaponType.Bazooka)
+    ) {
       return predictTrajectory({
-        weapon: WeaponType.HandGrenade,
+        weapon: preview.visual.weapon,
         activeWorm: this.activeWorm,
         aim: preview.aim,
         power01: preview.visual.power01,

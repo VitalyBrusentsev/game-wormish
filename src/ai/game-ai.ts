@@ -1,6 +1,7 @@
-import { WeaponType, clamp, distance, nowMs, type TeamId } from "../definitions";
+import { GAMEPLAY, WeaponType, clamp, distance, nowMs, type TeamId } from "../definitions";
 import type { GameSession } from "../game/session";
 import { Worm } from "../entities";
+import { predictTrajectory } from "../game/weapon-system";
 import type { AiPersonality, GameAiSettings } from "./types";
 import { getWormPersonality } from "./personality-store";
 import type { AiShotDebug } from "./shot-scoring";
@@ -30,8 +31,10 @@ export type AiTurnPlan = {
   panicShot?: boolean;
 };
 
-const DEFAULT_MIN_THINK_MS = 1000;
+const DEFAULT_MIN_THINK_MS = 1500;
 const DEFAULT_CINEMATIC_CHANCE = 0.12;
+const FIRE_SAFETY_MS = 220;
+const PANIC_FIRE_SAFETY_MS = 80;
 
 const DEFAULT_PRECISION_TOP_K = 3;
 const DEFAULT_NOISE_ANGLE_RAD = 0.05;
@@ -112,6 +115,40 @@ const selectTarget = (session: GameSession, personality: AiPersonality): Worm | 
   return best;
 };
 
+const isLikelySelfHit = (
+  session: GameSession,
+  shooter: Worm,
+  shot: { weapon: WeaponType; angle: number; power: number }
+): boolean => {
+  if (shot.weapon !== WeaponType.Bazooka && shot.weapon !== WeaponType.HandGrenade) return false;
+  const aim = {
+    angle: shot.angle,
+    targetX: shooter.x + Math.cos(shot.angle) * 120,
+    targetY: shooter.y + Math.sin(shot.angle) * 120,
+  };
+  const previousFacing = shooter.facing;
+  shooter.facing = aim.targetX < shooter.x ? -1 : 1;
+  const points = predictTrajectory({
+    weapon: shot.weapon,
+    activeWorm: shooter,
+    aim,
+    power01: shot.power,
+    wind: session.wind,
+    terrain: session.terrain,
+    width: session.width,
+    height: session.height,
+  });
+  shooter.facing = previousFacing;
+  if (points.length === 0) return true;
+  const impact = points[points.length - 1]!;
+  const radius =
+    shot.weapon === WeaponType.Bazooka
+      ? GAMEPLAY.bazooka.explosionRadius
+      : GAMEPLAY.handGrenade.explosionRadius;
+  const dist = distance(impact.x, impact.y, shooter.x, shooter.y);
+  return dist < radius * 0.85;
+};
+
 export const planAiTurn = (
   session: GameSession,
   settings?: GameAiSettings
@@ -160,7 +197,10 @@ export const planAiTurn = (
       });
   const firedCandidate = shot?.fired ?? panic!.candidate;
   const panicShot = !shot;
-  const delayMs = panicShot ? panic!.delayMs : resolved.minThinkTimeMs;
+  const baseDelayMs = panicShot ? panic!.delayMs : resolved.minThinkTimeMs;
+  const safetyMs = panicShot ? PANIC_FIRE_SAFETY_MS : FIRE_SAFETY_MS;
+  const availableDelayMs = Math.max(0, timeLeftMs - movement.usedMs - safetyMs);
+  const delayMs = Math.min(baseDelayMs, availableDelayMs);
 
   let debug: AiTurnDebug | undefined;
   if (resolved.debugEnabled) {
@@ -283,9 +323,44 @@ export const playTurnWithGameAi = (
 
   const fire = () => {
     if (!stillValid()) return;
+    const shooter = session.activeWorm;
+    const resolved = resolveSettings(shooter, settings);
+    const target = plan.target.alive ? plan.target : selectTarget(session, resolved.personality);
+    let shot = { weapon: plan.weapon, angle: plan.angle, power: plan.power };
+
+    if (isLikelySelfHit(session, shooter, shot) && target) {
+      const recovered = planShot({
+        session,
+        shooter,
+        target,
+        cinematic: plan.cinematic,
+        settings: resolved,
+      })?.fired;
+      if (recovered) {
+        shot = {
+          weapon: recovered.weapon,
+          angle: recovered.angle,
+          power: recovered.power,
+        };
+      } else {
+        const panic = planPanicShot({
+          session,
+          shooter,
+          target,
+          cinematic: plan.cinematic,
+          settings: resolved,
+        });
+        shot = {
+          weapon: panic.candidate.weapon,
+          angle: panic.candidate.angle,
+          power: panic.candidate.power,
+        };
+      }
+    }
+
     session.clearAiPreShotVisual();
-    session.debugSetWeapon(plan.weapon);
-    session.debugShoot(plan.angle, plan.power);
+    session.debugSetWeapon(shot.weapon);
+    session.debugShoot(shot.angle, shot.power);
   };
 
   const delay = Math.max(0, executeAt - nowMs());
