@@ -12,6 +12,7 @@ import {
   planShot,
   timeLeftMsForTurn,
   type AiMoveStep,
+  type PanicShotStrategy,
   type AiTurnDebug,
   type ResolvedAiSettings,
 } from "./turn-planning";
@@ -29,6 +30,7 @@ export type AiTurnPlan = {
   moves?: AiMoveStep[];
   movedMs?: number;
   panicShot?: boolean;
+  panicStrategy?: PanicShotStrategy;
 };
 
 const DEFAULT_MIN_THINK_MS = 1500;
@@ -186,6 +188,7 @@ export const planAiTurn = (
     jump: step.jump,
   }));
 
+  const panicStrategy: PanicShotStrategy = movement.craterStuck ? "escape-arc" : "default";
   const panic = shot
     ? null
     : planPanicShot({
@@ -194,6 +197,7 @@ export const planAiTurn = (
         target,
         cinematic,
         settings: resolved,
+        strategy: panicStrategy,
       });
   const firedCandidate = shot?.fired ?? panic!.candidate;
   const panicShot = !shot;
@@ -274,7 +278,10 @@ export const planAiTurn = (
     plan.moves = moveSteps;
     plan.movedMs = movement.usedMs;
   }
-  if (panicShot) plan.panicShot = true;
+  if (panicShot) {
+    plan.panicShot = true;
+    plan.panicStrategy = panicStrategy;
+  }
   return plan;
 };
 
@@ -349,6 +356,7 @@ export const playTurnWithGameAi = (
           target,
           cinematic: plan.cinematic,
           settings: resolved,
+          strategy: plan.panicStrategy ?? "default",
         });
         shot = {
           weapon: panic.candidate.weapon,

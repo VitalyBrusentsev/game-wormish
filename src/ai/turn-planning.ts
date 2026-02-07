@@ -29,11 +29,14 @@ const MAX_MOVE_BUDGET_MS = 9000;
 const PANIC_WINDOW_MS = 2500;
 const PANIC_THINK_MS = 250;
 const TURN_SAFETY_MS = 150;
-const PANIC_OFFSETS = [-0.7, -0.5, -0.35, -0.2, 0, 0.2, 0.35, 0.5];
-const PANIC_POWERS = [0.55, 0.7, 0.85, 1];
+const PANIC_DEFAULT_OFFSETS = [-0.7, -0.5, -0.35, -0.2, 0, 0.2, 0.35, 0.5];
+const PANIC_DEFAULT_POWERS = [0.55, 0.7, 0.85, 1];
+const PANIC_ESCAPE_POWERS = [0.82, 0.9, 1];
+const PANIC_ESCAPE_MAGNITUDES = [0.72, 0.9, 1.08, 1.2];
 const STUCK_ESCAPE_THRESHOLD = 3;
 const STUCK_ESCAPE_STEPS = 3;
 const MAX_STUCK_STEPS = 12;
+export type PanicShotStrategy = "default" | "escape-arc";
 
 export type AiMoveStep = {
   move: -1 | 1;
@@ -86,6 +89,7 @@ export type MovementPlan = {
   usedMs: number;
   budgetMs: number;
   plannedShooter: Worm;
+  craterStuck: boolean;
 };
 
 export type ShotPlan = {
@@ -190,14 +194,59 @@ const clampAngleToNotDown = (angle: number): number => {
   return dir < 0 ? -Math.PI + 0.35 : -0.35;
 };
 
+const uniqueRoundedAngles = (angles: number[]): number[] => {
+  const seen = new Set<number>();
+  const deduped: number[] = [];
+  for (const angle of angles) {
+    const rounded = Math.round(angle * 1000);
+    if (seen.has(rounded)) continue;
+    seen.add(rounded);
+    deduped.push(angle);
+  }
+  return deduped;
+};
+
+const buildEscapeArcAngles = (baseAngle: number, shooter: Worm, target: Worm): number[] => {
+  const towardLeft = target.x < shooter.x;
+  const baseMagnitude = towardLeft
+    ? clamp(baseAngle + Math.PI, 0.2, 1.25)
+    : clamp(-baseAngle, 0.2, 1.25);
+  const dynamicMagnitudes = [
+    clamp(baseMagnitude + 0.22, 0.72, 1.25),
+    clamp(baseMagnitude + 0.38, 0.9, 1.25),
+    clamp(baseMagnitude + 0.54, 1.08, 1.25),
+  ];
+  const magnitudes = [...dynamicMagnitudes, ...PANIC_ESCAPE_MAGNITUDES];
+  const angles = magnitudes.map((magnitude) =>
+    clampAngleToNotDown(towardLeft ? -Math.PI + magnitude : -magnitude)
+  );
+  return uniqueRoundedAngles(angles);
+};
+
+const scorePanicCandidateForStrategy = (
+  candidate: ShotCandidate,
+  strategy: PanicShotStrategy
+): number => {
+  if (strategy === "default") return candidate.score;
+  const upward = clamp(-Math.sin(candidate.angle), 0, 1);
+  const safeDistance = GAMEPLAY.bazooka.explosionRadius * 2.2;
+  const distanceBonus = clamp((candidate.debug.distToSelf - safeDistance) / 220, 0, 1) * 26;
+  const steepBonus = clamp((upward - 0.55) / 0.45, 0, 1) * 24;
+  const nearPenalty =
+    candidate.debug.distToSelf < GAMEPLAY.bazooka.explosionRadius * 1.8 ? 80 : 0;
+  return candidate.score + distanceBonus + steepBonus - nearPenalty;
+};
+
 export const planPanicShot = (params: {
   session: GameSession;
   shooter: Worm;
   target: Worm;
   cinematic: boolean;
   settings: ResolvedAiSettings;
+  strategy?: PanicShotStrategy;
 }): PanicPlan => {
   const { session, shooter, target, cinematic, settings } = params;
+  const strategy = params.strategy ?? "default";
   const weapon = WeaponType.Bazooka;
   const baseAngle = computeAimAngleFromTarget({
     weapon,
@@ -206,10 +255,15 @@ export const planPanicShot = (params: {
     targetY: target.y,
   });
   let candidate: ShotCandidate | null = null;
-  for (const offset of PANIC_OFFSETS) {
-    const rawAngle = baseAngle + offset;
-    const angle = clampAngleToNotDown(rawAngle);
-    for (const power of PANIC_POWERS) {
+  let bestRank = -Infinity;
+  const angles =
+    strategy === "escape-arc"
+      ? buildEscapeArcAngles(baseAngle, shooter, target)
+      : PANIC_DEFAULT_OFFSETS.map((offset) => clampAngleToNotDown(baseAngle + offset));
+  const powers = strategy === "escape-arc" ? PANIC_ESCAPE_POWERS : PANIC_DEFAULT_POWERS;
+
+  for (const angle of angles) {
+    for (const power of powers) {
       const aim = buildAimFromAngle(shooter, angle);
       const scored = scoreCandidate({
         session,
@@ -224,18 +278,23 @@ export const planPanicShot = (params: {
         baseAngle,
         angleOffset: angle - baseAngle,
       });
+      const rank = scorePanicCandidateForStrategy(scored, strategy);
       if (
         !candidate ||
-        scored.score > candidate.score ||
-        (scored.score === candidate.score && scored.debug.distToSelf > candidate.debug.distToSelf)
+        rank > bestRank ||
+        (rank === bestRank && scored.debug.distToSelf > candidate.debug.distToSelf)
       ) {
         candidate = scored;
+        bestRank = rank;
       }
     }
   }
   if (!candidate) {
-    const angle = clampAngleToNotDown(baseAngle);
-    const power = 0.85;
+    const angle =
+      strategy === "escape-arc"
+        ? buildEscapeArcAngles(baseAngle, shooter, target)[0] ?? clampAngleToNotDown(baseAngle)
+        : clampAngleToNotDown(baseAngle);
+    const power = strategy === "escape-arc" ? 0.95 : 0.85;
     const aim = buildAimFromAngle(shooter, angle);
     candidate = scoreCandidate({
       session,
@@ -297,7 +356,7 @@ export const planMovement = (params: {
 }): MovementPlan => {
   const { session, shooter, target, cinematic, settings, timeLeftMs } = params;
   if (!settings.movementEnabled) {
-    return { steps: [], usedMs: 0, budgetMs: 0, plannedShooter: shooter };
+    return { steps: [], usedMs: 0, budgetMs: 0, plannedShooter: shooter, craterStuck: false };
   }
 
   const budgetMs = clamp(
@@ -306,7 +365,7 @@ export const planMovement = (params: {
     MAX_MOVE_BUDGET_MS
   );
   if (budgetMs <= 0 || timeLeftMs <= PANIC_WINDOW_MS) {
-    return { steps: [], usedMs: 0, budgetMs, plannedShooter: shooter };
+    return { steps: [], usedMs: 0, budgetMs, plannedShooter: shooter, craterStuck: false };
   }
 
   const plannedShooter = cloneWormForSim(shooter);
@@ -314,12 +373,17 @@ export const planMovement = (params: {
   let usedMs = 0;
   let stuckSteps = 0;
   let escapeStepsRemaining = 0;
+  let sawRepeatedStuck = false;
+  let foundShot = false;
 
   const maxSteps = Math.min(24, Math.floor(budgetMs / Math.max(1, MOVE_STEP_MS)));
   const waterLine = session.height - 8;
   for (let i = 0; i < maxSteps; i++) {
     const shot = planShot({ session, shooter: plannedShooter, target, cinematic, settings });
-    if (shot) break;
+    if (shot) {
+      foundShot = true;
+      break;
+    }
 
     const towardTarget = (target.x < plannedShooter.x ? -1 : 1) as -1 | 1;
     const move = (escapeStepsRemaining > 0 ? -towardTarget : towardTarget) as -1 | 1;
@@ -339,6 +403,7 @@ export const planMovement = (params: {
     if (res.stuck) {
       stuckSteps += 1;
       if (stuckSteps >= STUCK_ESCAPE_THRESHOLD && escapeStepsRemaining === 0) {
+        sawRepeatedStuck = true;
         // If forward motion repeatedly fails, deliberately backstep to escape pits/craters.
         escapeStepsRemaining = STUCK_ESCAPE_STEPS;
       }
@@ -354,7 +419,13 @@ export const planMovement = (params: {
     if (plannedShooter.y >= waterLine - 2) break;
   }
 
-  return { steps, usedMs, budgetMs, plannedShooter };
+  return {
+    steps,
+    usedMs,
+    budgetMs,
+    plannedShooter,
+    craterStuck: sawRepeatedStuck && !foundShot,
+  };
 };
 
 export const timeLeftMsForTurn = (session: GameSession): number => {

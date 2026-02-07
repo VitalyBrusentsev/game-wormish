@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { WeaponType } from "../definitions";
+import { GAMEPLAY, WeaponType } from "../definitions";
 import { GameSession } from "../game/session";
 import { buildAimFromAngle, scoreCandidate } from "../ai/shot-scoring";
 import { planPanicShot, type ResolvedAiSettings } from "../ai/turn-planning";
@@ -212,6 +212,52 @@ describe("AI shot scoring", () => {
 
     expect(panic.candidate.debug.friendlyDamage).toBe(0);
     expect(panic.candidate.debug.hitWormTeam).not.toBe(shooter.team);
+  });
+
+  it("uses a steeper, high-power bazooka arc for crater escape panic shots", () => {
+    const session = new GameSession(1400, 900, { random: createRng(17), now: () => 0 });
+    session.wind = 0;
+    session.terrain.applyHeightMap(session.terrain.heightMap.map(() => 760));
+
+    const shooter = session.activeTeam.worms[0]!;
+    const targetTeam = session.teams.find((team) => team.id !== session.activeTeam.id)!;
+    const target = targetTeam.worms[0]!;
+
+    for (const team of session.teams) {
+      for (const worm of team.worms) {
+        worm.alive = false;
+      }
+    }
+    shooter.alive = true;
+    target.alive = true;
+
+    shooter.x = 240;
+    shooter.y = 700;
+    shooter.facing = 1;
+    target.x = 980;
+    target.y = 700;
+
+    const standard = planPanicShot({
+      session,
+      shooter,
+      target,
+      cinematic: false,
+      settings: buildSettings(),
+    });
+    const escape = planPanicShot({
+      session,
+      shooter,
+      target,
+      cinematic: false,
+      settings: buildSettings(),
+      strategy: "escape-arc",
+    });
+
+    expect(Math.sin(escape.candidate.angle)).toBeLessThanOrEqual(Math.sin(standard.candidate.angle));
+    expect(Math.sin(escape.candidate.angle)).toBeLessThanOrEqual(-0.55);
+    expect(escape.candidate.power).toBeGreaterThanOrEqual(0.82);
+    expect(Math.cos(escape.candidate.angle)).toBeGreaterThan(0);
+    expect(escape.candidate.debug.distToSelf).toBeGreaterThan(GAMEPLAY.bazooka.explosionRadius * 1.5);
   });
 
   it("penalizes explosive shots that land too close to the shooter", () => {
