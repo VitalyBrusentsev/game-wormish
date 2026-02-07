@@ -103,7 +103,7 @@ export const deriveDialogStateFromSnapshot = (
   };
 };
 
-const PLAYER_NAME_STORAGE_KEY = "wormish.network.playerName";
+export const PLAYER_NAME_STORAGE_KEY = "wormish.network.playerName";
 
 export class NetworkMatchDialog {
   private readonly dialog: CommandDialog;

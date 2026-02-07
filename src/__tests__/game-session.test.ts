@@ -189,6 +189,24 @@ describe("GameSession snapshots", () => {
   });
 });
 
+describe("GameSession team setup", () => {
+  it("applies and preserves configured team order across restarts", () => {
+    const session = new GameSession(320, 240, {
+      random: createRng(17),
+      now: createNow(0, 1000),
+      teamOrder: ["Blue", "Red"],
+    });
+
+    expect(session.teams.map((team) => team.id)).toEqual(["Blue", "Red"]);
+
+    session.restart();
+    expect(session.teams.map((team) => team.id)).toEqual(["Blue", "Red"]);
+
+    session.restart({ teamOrder: ["Red", "Blue"] });
+    expect(session.teams.map((team) => team.id)).toEqual(["Red", "Blue"]);
+  });
+});
+
 describe("GameSession turn logging", () => {
   it("builds a network-ready turn resolution from the command log", () => {
     const now = createNow(1000, 250);

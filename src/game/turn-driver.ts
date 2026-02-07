@@ -3,7 +3,7 @@ import type { TurnCommand, TurnResolution } from "./network/turn-payload";
 import type { GameSession } from "./session";
 import type { Team } from "./team-manager";
 
-export type TurnControlType = "local" | "remote";
+export type TurnControlType = "local" | "remote" | "ai";
 
 export interface TurnContext {
   session: GameSession;

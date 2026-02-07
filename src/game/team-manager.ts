@@ -19,11 +19,14 @@ export class TeamManager {
     private readonly random: () => number = Math.random
   ) { }
 
-  initialize(terrain: Terrain) {
-    this.teams = [
-      { id: "Red", worms: [] },
-      { id: "Blue", worms: [] },
-    ];
+  initialize(
+    terrain: Terrain,
+    options?: {
+      teamOrder?: readonly TeamId[];
+    }
+  ) {
+    const teamOrder = this.resolveTeamOrder(options?.teamOrder);
+    this.teams = teamOrder.map((id) => ({ id, worms: [] }));
     this.currentTeamIndex = 0;
     this.currentWormIndex = 0;
     this.spawnTeams(terrain);
@@ -211,5 +214,17 @@ export class TeamManager {
       values[i] = values[j]!;
       values[j] = tmp;
     }
+  }
+
+  private resolveTeamOrder(order?: readonly TeamId[]): TeamId[] {
+    if (!order || order.length !== 2) {
+      return ["Red", "Blue"];
+    }
+    const first = order[0];
+    const second = order[1];
+    if (!first || !second || first === second) {
+      return ["Red", "Blue"];
+    }
+    return [first, second];
   }
 }

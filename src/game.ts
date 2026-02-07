@@ -4,7 +4,7 @@ import { Input, drawText } from "./utils";
 import type { Worm } from "./entities";
 import { HelpOverlay } from "./ui/help-overlay";
 import { StartMenuOverlay } from "./ui/start-menu-overlay";
-import { NetworkMatchDialog } from "./ui/network-match-dialog";
+import { NetworkMatchDialog, PLAYER_NAME_STORAGE_KEY } from "./ui/network-match-dialog";
 import { gameEvents } from "./events/game-events";
 import { DamageFloaters } from "./ui/damage-floaters";
 import { ActiveWormArrow } from "./ui/active-worm-arrow";
@@ -29,6 +29,7 @@ import {
   RemoteTurnController,
   type TurnDriver,
 } from "./game/turn-driver";
+import { AiTurnController } from "./game/ai-turn-controller";
 import { NetworkSessionState, type NetworkSessionStateSnapshot } from "./network/session-state";
 import type { TurnCommand } from "./game/network/turn-payload";
 import type {
@@ -49,6 +50,29 @@ import { SoundSystem, type SoundLevels, type SoundSnapshot } from "./audio/sound
 
 let initialMenuDismissed = false;
 
+export type SinglePlayerTeamSide = "left" | "right";
+
+export type SinglePlayerConfig = {
+  playerTeamColor?: TeamId;
+  playerStartSide?: SinglePlayerTeamSide;
+};
+
+export type GameOptions = {
+  singlePlayer?: SinglePlayerConfig;
+};
+
+type ResolvedSinglePlayerConfig = {
+  playerTeamColor: TeamId;
+  playerStartSide: SinglePlayerTeamSide;
+};
+
+const resolveSinglePlayerConfig = (config?: SinglePlayerConfig): ResolvedSinglePlayerConfig => ({
+  playerTeamColor: config?.playerTeamColor ?? "Blue",
+  playerStartSide: config?.playerStartSide ?? "left",
+});
+
+const oppositeTeamId = (teamId: TeamId): TeamId => (teamId === "Red" ? "Blue" : "Red");
+
 const cleanPlayerName = (name: string | null) => {
   const cleaned = name?.trim();
   return cleaned ? cleaned : null;
@@ -66,15 +90,6 @@ const getNetworkTeamNames = (snapshot: NetworkSessionStateSnapshot) => {
   if (localTeamId && localName) names[localTeamId] = localName;
   if (remoteTeamId && remoteName) names[remoteTeamId] = remoteName;
   return names;
-};
-
-const getNetworkTeamName = (snapshot: NetworkSessionStateSnapshot, teamId: TeamId) => {
-  if (snapshot.mode === "local") return null;
-  const localName = cleanPlayerName(snapshot.player.localName);
-  const remoteName = cleanPlayerName(snapshot.player.remoteName);
-  if (snapshot.player.localTeamId === teamId) return localName;
-  if (snapshot.player.remoteTeamId === teamId) return remoteName;
-  return null;
 };
 
 type NetworkMicroStatus = { text: string; color: string; opponentSide: "left" | "right" };
@@ -125,18 +140,14 @@ const getNetworkMicroStatus = (snapshot: NetworkSessionStateSnapshot): NetworkMi
   return { text: "Unknown", color: COLORS.white, opponentSide };
 };
 
-const replaceWinnerInMessage = (
-  message: string | null,
-  snapshot: NetworkSessionStateSnapshot
-) => {
+const replaceWinnerInMessage = (message: string | null, teamLabels?: Partial<Record<TeamId, string>>) => {
   if (!message) return null;
-  if (snapshot.mode === "local") return message;
 
   const match = /^(Red|Blue) wins!/.exec(message);
   if (!match) return message;
 
   const teamId = match[1] as TeamId;
-  const teamName = getNetworkTeamName(snapshot, teamId);
+  const teamName = cleanPlayerName(teamLabels?.[teamId] ?? null);
   if (!teamName) return message;
 
   const winnerToken = match[1];
@@ -236,15 +247,19 @@ export class Game {
   private readonly sound = new SoundSystem();
 
   private readonly turnControllers = new Map<TeamId, TurnDriver>();
+  private readonly singlePlayer: ResolvedSinglePlayerConfig;
+  private singlePlayerName: string | null = null;
   private aimThrottleState: AimThrottleState | null = null;
   private moveThrottleState: MoveThrottleState | null = null;
   private pendingTurnEffects: TurnEffectsMessage["payload"] | null = null;
   private pendingTurnEffectsNextFlushAtMs = 0;
   private readonly turnEffectsFlushIntervalMs = 1000;
 
-  constructor(width: number, height: number) {
+  constructor(width: number, height: number, options?: GameOptions) {
     this.width = width;
     this.height = height;
+    this.singlePlayer = resolveSinglePlayerConfig(options?.singlePlayer);
+    this.singlePlayerName = this.readSinglePlayerNameFromStorage();
 
     // Determine registry URL based on environment
     const isDev = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
@@ -265,7 +280,10 @@ export class Game {
 
     const groundWidth = WORLD.groundWidth;
     this.subscribeToGameEvents();
-    this.session = new GameSession(groundWidth, height, { horizontalPadding: 0 });
+    this.session = new GameSession(groundWidth, height, {
+      horizontalPadding: 0,
+      teamOrder: this.getSinglePlayerTeamOrder(),
+    });
 
     this.initializeTurnControllers();
     this.cameraX = this.clampCameraX(this.activeWorm.x - this.width / 2);
@@ -280,12 +298,14 @@ export class Game {
 
     this.networkDialog = new NetworkMatchDialog({
       onCreateRoom: async (playerName) => {
+        this.singlePlayerName = cleanPlayerName(playerName);
         await this.createHostRoom({ registryUrl: this.registryUrl, playerName });
       },
       onLookupRoom: async (roomCode) => {
         await this.lookupRoom({ registryUrl: this.registryUrl, roomCode });
       },
       onJoinRoom: async (roomCode, joinCode, playerName) => {
+        this.singlePlayerName = cleanPlayerName(playerName);
         await this.joinRoom({ registryUrl: this.registryUrl, playerName, roomCode, joinCode });
       },
       onCancel: () => {
@@ -355,8 +375,13 @@ export class Game {
 
   private initializeTurnControllers() {
     this.turnControllers.clear();
+    const playerTeamId = this.getSinglePlayerPlayerTeamId();
     for (const team of this.session.teams) {
-      this.turnControllers.set(team.id, new LocalTurnController());
+      if (team.id === playerTeamId) {
+        this.turnControllers.set(team.id, new LocalTurnController());
+      } else {
+        this.turnControllers.set(team.id, new AiTurnController());
+      }
     }
     this.session.setTurnControllers(this.turnControllers);
   }
@@ -364,6 +389,49 @@ export class Game {
   setTurnController(teamId: TeamId, controller: TurnDriver) {
     this.turnControllers.set(teamId, controller);
     this.session.setTurnControllers(this.turnControllers);
+  }
+
+  private getSinglePlayerPlayerTeamId(): TeamId {
+    return this.singlePlayer.playerTeamColor;
+  }
+
+  private getSinglePlayerComputerTeamId(): TeamId {
+    return oppositeTeamId(this.getSinglePlayerPlayerTeamId());
+  }
+
+  private getSinglePlayerTeamOrder(): readonly [TeamId, TeamId] {
+    const playerTeamId = this.getSinglePlayerPlayerTeamId();
+    const computerTeamId = this.getSinglePlayerComputerTeamId();
+    return this.singlePlayer.playerStartSide === "left"
+      ? [playerTeamId, computerTeamId]
+      : [computerTeamId, playerTeamId];
+  }
+
+  private getSinglePlayerTeamLabels(): Record<TeamId, string> {
+    const playerTeamId = this.getSinglePlayerPlayerTeamId();
+    const computerTeamId = this.getSinglePlayerComputerTeamId();
+    const playerName = this.singlePlayerName ?? "Player";
+    return {
+      [playerTeamId]: playerName,
+      [computerTeamId]: "Computer",
+    } as Record<TeamId, string>;
+  }
+
+  private readSinglePlayerNameFromStorage(): string | null {
+    try {
+      return cleanPlayerName(window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY));
+    } catch {
+      return null;
+    }
+  }
+
+  private getDisplayedTeamLabels(
+    snapshot: NetworkSessionStateSnapshot
+  ): Partial<Record<TeamId, string>> | null {
+    if (snapshot.mode === "local") {
+      return this.getSinglePlayerTeamLabels();
+    }
+    return getNetworkTeamNames(snapshot);
   }
 
   mount(parent: HTMLElement) {
@@ -767,6 +835,7 @@ export class Game {
     this.hasReceivedMatchInit = false;
     this.networkState.setMode("local");
     this.networkState.resetNetworkOnlyState();
+    this.singlePlayerName = this.readSinglePlayerNameFromStorage();
     this.initializeTurnControllers();
     this.notifyNetworkStateChange();
   }
@@ -857,7 +926,7 @@ export class Game {
   private startNetworkMatchAsHost() {
     const state = this.networkState.getSnapshot();
     if (state.mode !== "network-host") return;
-    this.session.restart({ startingTeamIndex: 0 });
+    this.session.restart({ startingTeamIndex: 0, teamOrder: ["Red", "Blue"] });
     this.lastTurnStartMs = this.session.state.turnStartMs;
     this.cameraX = this.clampCameraX(this.activeWorm.x - this.width / 2);
     this.cameraTargetX = this.cameraX;
@@ -943,7 +1012,7 @@ export class Game {
     const remoteTeamId: TeamId = snapshot.mode === "network-host" ? "Blue" : "Red";
 
     this.networkState.assignTeams(localTeamId, remoteTeamId);
-
+    this.turnControllers.clear();
     this.turnControllers.set(localTeamId, new LocalTurnController());
     this.turnControllers.set(remoteTeamId, new RemoteTurnController());
     this.session.setTurnControllers(this.turnControllers);
@@ -1099,14 +1168,16 @@ export class Game {
 
     if (this.input.pressed("KeyR") && this.session.state.phase === "gameover") {
       const snapshot = this.networkState.getSnapshot();
-      if (snapshot.mode !== "local") {
-        this.input.consumeKey("KeyR");
-        if (snapshot.mode === "network-host") {
-          this.restartNetworkMatchAsHost();
-        } else {
-          this.sendNetworkMessage({ type: "match_restart_request", payload: {} });
-        }
+      this.input.consumeKey("KeyR");
+      if (snapshot.mode === "local") {
+        this.session.restart();
+      } else if (snapshot.mode === "network-host") {
+        this.restartNetworkMatchAsHost();
+      } else {
+        this.sendNetworkMessage({ type: "match_restart_request", payload: {} });
       }
+      this.updateCursor();
+      return;
     }
 
     if (escapePressed) {
@@ -1581,11 +1652,13 @@ export class Game {
 
     ctx.save();
     ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
-    const teamLabels = getNetworkTeamNames(networkSnapshot) ?? undefined;
-    const activeTeamLabel =
-      getNetworkTeamName(networkSnapshot, this.activeTeam.id) ?? undefined;
+    const displayTeamLabels = this.getDisplayedTeamLabels(networkSnapshot);
+    const teamDisplayOrder =
+      networkSnapshot.mode === "local" ? this.getSinglePlayerTeamOrder() : undefined;
+    const teamLabels = displayTeamLabels ?? undefined;
+    const activeTeamLabel = displayTeamLabels?.[this.activeTeam.id] ?? undefined;
     const networkMicroStatus = getNetworkMicroStatus(networkSnapshot) ?? undefined;
-    const displayMessage = replaceWinnerInMessage(this.session.message, networkSnapshot);
+    const displayMessage = replaceWinnerInMessage(this.session.message, displayTeamLabels ?? undefined);
     renderHUD(
       {
         ctx,
@@ -1594,6 +1667,7 @@ export class Game {
         state: this.session.state,
         now,
         activeTeamId: this.activeTeam.id,
+        ...(teamDisplayOrder ? { teamDisplayOrder } : {}),
         getTeamHealth: (teamId) => this.getTeamHealth(teamId),
         wind: this.session.wind,
         message: displayMessage,

@@ -162,6 +162,7 @@ export class GameSession {
 
   private readonly teamManager: TeamManager;
   private readonly horizontalPadding: number;
+  private readonly defaultTeamOrder: readonly TeamId[] | undefined;
   private readonly random: () => number;
   private readonly now: () => number;
 
@@ -191,6 +192,7 @@ export class GameSession {
     height: number,
     options?: {
       horizontalPadding?: number;
+      teamOrder?: readonly TeamId[];
       random?: () => number;
       now?: () => number;
     }
@@ -198,6 +200,7 @@ export class GameSession {
     this.width = width;
     this.height = height;
     this.horizontalPadding = Math.max(0, options?.horizontalPadding ?? 0);
+    this.defaultTeamOrder = options?.teamOrder;
     this.random = options?.random ?? Math.random;
     this.now = options?.now ?? nowMs;
 
@@ -210,7 +213,10 @@ export class GameSession {
     this.terrain.generate();
 
     this.teamManager = new TeamManager(width, height, this.random);
-    this.teamManager.initialize(this.terrain);
+    this.teamManager.initialize(
+      this.terrain,
+      this.defaultTeamOrder ? { teamOrder: this.defaultTeamOrder } : undefined
+    );
 
     this.state = new GameState();
     this.aim = this.createDefaultAim();
@@ -762,9 +768,13 @@ export class GameSession {
     return this.teamManager.getTeamHealth(id);
   }
 
-  restart(options?: { startingTeamIndex?: number }) {
+  restart(options?: { startingTeamIndex?: number; teamOrder?: readonly TeamId[] }) {
     this.terrain.generate();
-    this.teamManager.initialize(this.terrain);
+    const teamOrder = options?.teamOrder ?? this.defaultTeamOrder;
+    this.teamManager.initialize(
+      this.terrain,
+      teamOrder ? { teamOrder } : undefined
+    );
     this.projectiles = [];
     this.particles = [];
     this.uziBurst = null;

@@ -46,6 +46,7 @@ export type RenderHudOptions = {
   state: GameState;
   now: number;
   activeTeamId: TeamId;
+  teamDisplayOrder?: readonly [TeamId, TeamId];
   activeTeamLabel?: string;
   teamLabels?: Partial<Record<TeamId, string>>;
   networkMicroStatus?: { text: string; color: string; opponentSide: "left" | "right" };
@@ -90,6 +91,7 @@ export function renderHUD({
   state,
   now,
   activeTeamId,
+  teamDisplayOrder,
   activeTeamLabel,
   teamLabels,
   networkMicroStatus,
@@ -109,8 +111,9 @@ export function renderHUD({
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  const redHealth = getTeamHealth("Red");
-  const blueHealth = getTeamHealth("Blue");
+  const [leftTeamId, rightTeamId] = teamDisplayOrder ?? ["Red", "Blue"];
+  const leftHealth = getTeamHealth(leftTeamId);
+  const rightHealth = getTeamHealth(rightTeamId);
   const maxTeamHealth = GAMEPLAY.teamSize * 100;
   const hbW = 140;
   const hbH = 10;
@@ -118,37 +121,37 @@ export function renderHUD({
   const rightX = width - padding - 12 - hbW / 2;
   const topY = padding + 10;
 
-  const redLabel = truncateHudText(
+  const leftLabel = truncateHudText(
     ctx,
-    teamLabels?.Red ?? "RED",
+    teamLabels?.[leftTeamId] ?? leftTeamId.toUpperCase(),
     hbW,
     14
   );
   ctx.font = `bold 14px ${HUD_FONT_STACK}`;
-  const redLabelWidth = ctx.measureText(redLabel).width;
-  drawText(ctx, redLabel, padding + 12, topY, COLORS.white, 14);
+  const leftLabelWidth = ctx.measureText(leftLabel).width;
+  drawText(ctx, leftLabel, padding + 12, topY, COLORS.white, 14);
   drawHealthBar(
     ctx,
     leftX,
     topY + 16,
     hbW,
     hbH,
-    redHealth / maxTeamHealth,
+    leftHealth / maxTeamHealth,
     COLORS.healthGreen,
     COLORS.healthRed
   );
 
-  const blueLabel = truncateHudText(
+  const rightLabel = truncateHudText(
     ctx,
-    teamLabels?.Blue ?? "BLUE",
+    teamLabels?.[rightTeamId] ?? rightTeamId.toUpperCase(),
     hbW,
     14
   );
   ctx.font = `bold 14px ${HUD_FONT_STACK}`;
-  const blueLabelWidth = ctx.measureText(blueLabel).width;
+  const rightLabelWidth = ctx.measureText(rightLabel).width;
   drawText(
     ctx,
-    blueLabel,
+    rightLabel,
     width - padding - 12,
     topY,
     COLORS.white,
@@ -161,7 +164,7 @@ export function renderHUD({
     topY + 16,
     hbW,
     hbH,
-    blueHealth / maxTeamHealth,
+    rightHealth / maxTeamHealth,
     COLORS.healthGreen,
     COLORS.healthRed
   );
@@ -219,7 +222,7 @@ export function renderHUD({
     const textY = topY + 1;
 
     if (networkMicroStatus.opponentSide === "left") {
-      const startX = padding + 12 + redLabelWidth + gapFromLabel;
+      const startX = padding + 12 + leftLabelWidth + gapFromLabel;
       const maxX = centerX - minGapFromCenter;
       const availableWidth = maxX - startX;
       if (availableWidth > dotAndGap + 4) {
@@ -246,7 +249,7 @@ export function renderHUD({
         );
       }
     } else {
-      const endX = width - padding - 12 - blueLabelWidth - gapFromLabel;
+      const endX = width - padding - 12 - rightLabelWidth - gapFromLabel;
       const minX = centerX + minGapFromCenter;
       const availableWidth = endX - minX;
       if (availableWidth > dotAndGap + 4) {

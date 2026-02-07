@@ -18,6 +18,26 @@ This document captures the agreed Game AI principles, strategies, and extension 
 5) Optional movement if no acceptable shot.
 6) Execute with timing constraints and optional panic behavior.
 
+## Single-Player Mode (Implemented)
+
+- Local mode now treats teams as:
+  - Player team (configurable color: `Red` or `Blue`)
+  - Computer team (the opposite color)
+- Spawn side is configurable for the player team:
+  - `playerStartSide: "left" | "right"`
+- Default local setup is:
+  - `playerTeamColor: "Blue"`
+  - `playerStartSide: "left"`
+- HUD/team naming in local mode:
+  - Player label is `"Player"` by default.
+  - If `wormish.network.playerName` exists in local storage, that value is used instead.
+  - Opponent label is `"Computer"`.
+- Turn driving in local mode:
+  - Player turns use local input controller.
+  - Computer turns use AI turn controller.
+  - AI execution uses the same debug-facing API entry path (`playTurnWithGameAiForTeam(...)`) so `Game.getTeam("red").playTurnWithGameAI(...)` remains aligned with production behavior.
+- During computer turns, user worm input is not accepted (similar to passive/remote turn control behavior), while simulation continues normally.
+
 ## Scoring Function Overview
 
 Each candidate action (weapon + angle + power + optional movement) is evaluated by a
