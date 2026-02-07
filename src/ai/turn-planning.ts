@@ -31,6 +31,9 @@ const PANIC_THINK_MS = 250;
 const TURN_SAFETY_MS = 150;
 const PANIC_OFFSETS = [-0.7, -0.5, -0.35, -0.2, 0, 0.2, 0.35, 0.5];
 const PANIC_POWERS = [0.55, 0.7, 0.85, 1];
+const STUCK_ESCAPE_THRESHOLD = 3;
+const STUCK_ESCAPE_STEPS = 3;
+const MAX_STUCK_STEPS = 12;
 
 export type AiMoveStep = {
   move: -1 | 1;
@@ -310,6 +313,7 @@ export const planMovement = (params: {
   const steps: MovementPlan["steps"] = [];
   let usedMs = 0;
   let stuckSteps = 0;
+  let escapeStepsRemaining = 0;
 
   const maxSteps = Math.min(24, Math.floor(budgetMs / Math.max(1, MOVE_STEP_MS)));
   const waterLine = session.height - 8;
@@ -317,7 +321,8 @@ export const planMovement = (params: {
     const shot = planShot({ session, shooter: plannedShooter, target, cinematic, settings });
     if (shot) break;
 
-    const move = (target.x < plannedShooter.x ? -1 : 1) as -1 | 1;
+    const towardTarget = (target.x < plannedShooter.x ? -1 : 1) as -1 | 1;
+    const move = (escapeStepsRemaining > 0 ? -towardTarget : towardTarget) as -1 | 1;
     const jump = stuckSteps >= 2;
     const dtMs = Math.min(MOVE_STEP_MS, budgetMs - usedMs);
     if (dtMs <= 0) break;
@@ -328,7 +333,22 @@ export const planMovement = (params: {
     steps.push({ move, dtMs, jump, from, to, stuck: res.stuck });
     usedMs += dtMs;
 
-    stuckSteps = res.stuck ? stuckSteps + 1 : 0;
+    if (escapeStepsRemaining > 0) {
+      escapeStepsRemaining -= 1;
+    }
+    if (res.stuck) {
+      stuckSteps += 1;
+      if (stuckSteps >= STUCK_ESCAPE_THRESHOLD && escapeStepsRemaining === 0) {
+        // If forward motion repeatedly fails, deliberately backstep to escape pits/craters.
+        escapeStepsRemaining = STUCK_ESCAPE_STEPS;
+      }
+      if (stuckSteps >= MAX_STUCK_STEPS && escapeStepsRemaining === 0) {
+        break;
+      }
+    } else {
+      stuckSteps = 0;
+      escapeStepsRemaining = 0;
+    }
 
     // Don't happily march into water for a "no shot" situation.
     if (plannedShooter.y >= waterLine - 2) break;

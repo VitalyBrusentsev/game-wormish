@@ -213,4 +213,67 @@ describe("AI shot scoring", () => {
     expect(panic.candidate.debug.friendlyDamage).toBe(0);
     expect(panic.candidate.debug.hitWormTeam).not.toBe(shooter.team);
   });
+
+  it("penalizes explosive shots that land too close to the shooter", () => {
+    const session = new GameSession(1400, 900, { random: createRng(13), now: () => 0 });
+    session.wind = 0;
+    const heightMap = session.terrain.heightMap.map(() => 820);
+    for (let x = 320; x <= 360; x++) {
+      heightMap[x] = 730;
+    }
+    session.terrain.applyHeightMap(heightMap);
+
+    const shooter = session.activeTeam.worms[0]!;
+    const targetTeam = session.teams.find((team) => team.id !== session.activeTeam.id)!;
+    const target = targetTeam.worms[0]!;
+
+    for (const team of session.teams) {
+      for (const worm of team.worms) {
+        worm.alive = false;
+      }
+    }
+    shooter.alive = true;
+    target.alive = true;
+
+    shooter.x = 260;
+    shooter.y = 780;
+    shooter.facing = 1;
+    target.x = 1100;
+    target.y = 700;
+
+    const closeAim = buildAimFromAngle(shooter, -0.03);
+    const close = scoreCandidate({
+      session,
+      shooter,
+      target,
+      weapon: WeaponType.Bazooka,
+      aim: closeAim,
+      angle: -0.03,
+      power: 0.55,
+      cinematic: false,
+      personality: "Generalist",
+      baseAngle: -0.03,
+      angleOffset: 0,
+    });
+
+    const safeAim = buildAimFromAngle(shooter, -0.9);
+    const safe = scoreCandidate({
+      session,
+      shooter,
+      target,
+      weapon: WeaponType.Bazooka,
+      aim: safeAim,
+      angle: -0.9,
+      power: 0.95,
+      cinematic: false,
+      personality: "Generalist",
+      baseAngle: -0.9,
+      angleOffset: 0,
+    });
+
+    expect(close.debug.distToSelf).toBeLessThan(safe.debug.distToSelf);
+    expect(close.debug.selfBufferPenalty).toBeGreaterThan(0);
+    expect(safe.debug.selfBufferPenalty).toBe(0);
+    expect(close.score).toBeLessThan(safe.score);
+  });
 });

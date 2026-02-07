@@ -301,7 +301,7 @@ export function resolveCharge01(state: GameState): number {
   return state.getCharge01(nowMs());
 }
 
-function computeProjectileSpawnPoint(
+export function computeProjectileSpawnPoint(
   weapon: WeaponType,
   worm: Worm,
   aimAngle: number
