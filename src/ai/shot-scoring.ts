@@ -1,4 +1,4 @@
-import { GAMEPLAY, WeaponType, WORLD, clamp, distance } from "../definitions";
+import { GAMEPLAY, WeaponType, WORLD, clamp, distance, type TeamId } from "../definitions";
 import type { GameSession } from "../game/session";
 import type { Worm } from "../entities";
 import type { AimInfo } from "../rendering/game-rendering";
@@ -25,6 +25,10 @@ export type AiShotDebug = {
   baseAngle: number;
   angleOffset: number;
   simFacing: -1 | 1;
+  hitWormTeam: TeamId | null;
+  hitWormName: string | null;
+  friendlyDamage: number;
+  friendlyPenalty: number;
   bazookaDirectHitDist: number | null;
   hitFactor: number | null;
   rangeFactor: number | null;
@@ -73,6 +77,13 @@ const RISK_MULTIPLIER: Record<AiPersonality, number> = {
   Marksman: 1.2,
   Demolisher: 1,
   Commando: 0.8,
+};
+
+const FRIENDLY_FIRE_MULTIPLIER: Record<AiPersonality, number> = {
+  Generalist: 1.4,
+  Marksman: 1.5,
+  Demolisher: 1.1,
+  Commando: 1.3,
 };
 
 const ANGLE_OFFSETS = [-0.5, -0.35, -0.2, -0.1, 0, 0.1, 0.2, 0.35, 0.5];
@@ -140,6 +151,30 @@ const closestPointToWorm = (
     if (!best || d < best.dist) best = { x: point.x, y: point.y, dist: d };
   }
   return best;
+};
+
+const firstWormHitAlongPath = (
+  points: { x: number; y: number }[],
+  worms: Worm[],
+  projectileRadius: number
+): { worm: Worm; x: number; y: number; dist: number } | null => {
+  for (const point of points) {
+    let bestAtPoint: { worm: Worm; x: number; y: number; dist: number } | null = null;
+    for (const worm of worms) {
+      const d = distance(point.x, point.y, worm.x, worm.y);
+      if (d > worm.radius + projectileRadius) continue;
+      if (!bestAtPoint || d < bestAtPoint.dist) {
+        bestAtPoint = {
+          worm,
+          x: point.x,
+          y: point.y,
+          dist: d,
+        };
+      }
+    }
+    if (bestAtPoint) return bestAtPoint;
+  }
+  return null;
 };
 
 const computeArcOverCoverBonus = (
@@ -236,16 +271,24 @@ export const scoreCandidate = (params: {
       ? { x: points[points.length - 1]!.x, y: points[points.length - 1]!.y }
       : { x: shooter.x, y: shooter.y };
 
+  const liveWorms = session.teams.flatMap((team) => team.worms).filter((worm) => worm.alive);
+  const nonShooterWorms = liveWorms.filter((worm) => worm !== shooter);
+
   // Bazooka explodes on worm hit, but the trajectory predictor currently only stops on terrain.
-  // Approximate direct hits by checking the closest simulated point to the target worm.
+  // Approximate worm collision using the first path point intersecting any live worm.
+  const bazookaPathHit =
+    weapon === WeaponType.Bazooka
+      ? firstWormHitAlongPath(points, nonShooterWorms, WORLD.projectileRadius)
+      : null;
+  // Keep target-closest debug metric for tuning direct-hit quality.
   const bazookaHit =
     weapon === WeaponType.Bazooka
       ? closestPointToWorm(points, target)
       : null;
   const bazookaDirectHitDist = bazookaHit?.dist ?? null;
   const effectiveImpact =
-    bazookaHit && bazookaHit.dist <= target.radius + WORLD.projectileRadius
-      ? { x: bazookaHit.x, y: bazookaHit.y }
+    bazookaPathHit
+      ? { x: bazookaPathHit.x, y: bazookaPathHit.y }
       : impact;
 
   const distToTarget = distance(effectiveImpact.x, effectiveImpact.y, target.x, target.y);
@@ -280,13 +323,23 @@ export const scoreCandidate = (params: {
       : estimateExplosionDamage(distToSelf, weapon);
   const selfPenalty = selfDamage * RISK_MULTIPLIER[personality];
 
+  const friendlyWorms = nonShooterWorms.filter((worm) => worm.team === shooter.team);
+  const friendlyDamage =
+    weapon === WeaponType.Rifle || weapon === WeaponType.Uzi
+      ? 0
+      : friendlyWorms.reduce((sum, worm) => {
+          const d = distance(effectiveImpact.x, effectiveImpact.y, worm.x, worm.y);
+          return sum + estimateExplosionDamage(d, weapon);
+        }, 0);
+  const friendlyPenalty = friendlyDamage * FRIENDLY_FIRE_MULTIPLIER[personality];
+
   const arcBonus = cinematic ? computeArcOverCoverBonus(session, shooter, target, points) : 0;
   const waterBonus = cinematic ? computeWaterKillBonus(session, target, weapon, effectiveImpact) : 0;
 
   const baseScore = damageScore + splashProximity * 22 + arcBonus * 18 + waterBonus * 70;
   const weaponBias = WEAPON_BIAS[personality][weapon];
   const biased = baseScore * weaponBias;
-  const score = biased - selfPenalty * 1.1;
+  const score = biased - selfPenalty * 1.1 - friendlyPenalty * 1.25;
 
   return {
     weapon,
@@ -315,6 +368,10 @@ export const scoreCandidate = (params: {
       baseAngle,
       angleOffset,
       simFacing,
+      hitWormTeam: bazookaPathHit?.worm.team ?? null,
+      hitWormName: bazookaPathHit?.worm.name ?? null,
+      friendlyDamage,
+      friendlyPenalty,
       bazookaDirectHitDist,
       hitFactor,
       rangeFactor,
@@ -391,4 +448,3 @@ export const buildCandidates = (params: {
   }
   return candidates;
 };
-

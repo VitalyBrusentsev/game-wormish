@@ -29,6 +29,8 @@ const MAX_MOVE_BUDGET_MS = 9000;
 const PANIC_WINDOW_MS = 2500;
 const PANIC_THINK_MS = 250;
 const TURN_SAFETY_MS = 150;
+const PANIC_OFFSETS = [-0.7, -0.5, -0.35, -0.2, 0, 0.2, 0.35, 0.5];
+const PANIC_POWERS = [0.55, 0.7, 0.85, 1];
 
 export type AiMoveStep = {
   move: -1 | 1;
@@ -200,22 +202,52 @@ export const planPanicShot = (params: {
     targetX: target.x,
     targetY: target.y,
   });
-  const angle = clampAngleToNotDown(baseAngle);
-  const power = 0.85;
-  const aim = buildAimFromAngle(shooter, angle);
-  const candidate = scoreCandidate({
-    session,
-    shooter,
-    target,
-    weapon,
-    aim,
-    angle,
-    power,
-    cinematic,
-    personality: settings.personality,
-    baseAngle,
-    angleOffset: angle - baseAngle,
-  });
+  let candidate: ShotCandidate | null = null;
+  for (const offset of PANIC_OFFSETS) {
+    const rawAngle = baseAngle + offset;
+    const angle = clampAngleToNotDown(rawAngle);
+    for (const power of PANIC_POWERS) {
+      const aim = buildAimFromAngle(shooter, angle);
+      const scored = scoreCandidate({
+        session,
+        shooter,
+        target,
+        weapon,
+        aim,
+        angle,
+        power,
+        cinematic,
+        personality: settings.personality,
+        baseAngle,
+        angleOffset: angle - baseAngle,
+      });
+      if (
+        !candidate ||
+        scored.score > candidate.score ||
+        (scored.score === candidate.score && scored.debug.distToSelf > candidate.debug.distToSelf)
+      ) {
+        candidate = scored;
+      }
+    }
+  }
+  if (!candidate) {
+    const angle = clampAngleToNotDown(baseAngle);
+    const power = 0.85;
+    const aim = buildAimFromAngle(shooter, angle);
+    candidate = scoreCandidate({
+      session,
+      shooter,
+      target,
+      weapon,
+      aim,
+      angle,
+      power,
+      cinematic,
+      personality: settings.personality,
+      baseAngle,
+      angleOffset: angle - baseAngle,
+    });
+  }
   const delayMs = Math.min(settings.minThinkTimeMs, PANIC_THINK_MS);
   return { candidate, delayMs };
 };
@@ -308,4 +340,3 @@ export const planMovement = (params: {
 export const timeLeftMsForTurn = (session: GameSession): number => {
   return session.state.timeLeftMs(nowMs(), GAMEPLAY.turnTimeMs);
 };
-
