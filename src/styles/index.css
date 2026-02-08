@@ -418,19 +418,6 @@ Help dialog
 .help-dialog {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-
-.help-dialog__intro,
-.help-dialog__footer {
-  margin: 0;
-  color: rgba(220, 230, 252, 0.9);
-  font-size: 15px;
-}
-
-.help-dialog__footer {
-  text-align: right;
-  font-style: italic;
 }
 
 .help-topics {
@@ -438,28 +425,158 @@ Help dialog
   padding: 0;
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
 .help-topics__item {
   padding: 12px 14px;
+  min-height: 148px;
   border-radius: 14px;
   background: linear-gradient(150deg, rgba(34, 52, 92, 0.9), rgba(18, 32, 70, 0.92));
   border: 1px solid rgba(120, 170, 255, 0.2);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.help-topics__item--centered {
+  justify-content: center;
+}
+
+.help-topics__item--centered .help-topics__title {
+  text-align: center;
+}
+
+.help-topics__item--title-centered .help-topics__title {
+  text-align: center;
 }
 
 .help-topics__title {
-  margin: 0 0 6px;
+  margin: 0;
   font-size: 16px;
+  font-weight: 700;
   color: #e8f1ff;
   letter-spacing: 0.01em;
 }
 
-.help-topics__text {
+.help-line-text {
   margin: 0;
   color: rgba(220, 228, 244, 0.9);
   font-size: 14px;
   line-height: 1.5;
+}
+
+.help-move-line {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.help-keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(180, 214, 255, 0.34);
+  background: linear-gradient(160deg, rgba(28, 45, 84, 0.85), rgba(16, 30, 63, 0.92));
+  color: rgba(238, 246, 255, 0.95);
+  font-family: "Consolas", "Menlo", "Monaco", monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.help-keycap--wide {
+  min-width: 60px;
+}
+
+.help-aim-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.help-aim-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.help-crosshair-canvas {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 auto;
+}
+
+.help-weapon-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+}
+
+.help-weapon-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 10px;
+  padding: 6px 8px;
+  background: rgba(12, 22, 46, 0.4);
+  border: 1px solid rgba(136, 188, 255, 0.15);
+}
+
+.help-weapon-shortcut {
+  color: rgba(231, 243, 255, 0.9);
+  font-family: "Consolas", "Menlo", "Monaco", monospace;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  min-width: 24px;
+}
+
+.help-weapon-canvas {
+  width: 90px;
+  height: 56px;
+  display: block;
+}
+
+.help-wind-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.help-windsock-canvas {
+  width: 136px;
+  height: 82px;
+  display: block;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 760px) {
+  .help-topics {
+    grid-template-columns: 1fr;
+  }
+
+  .help-topics__item {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .help-wind-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .help-aim-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
