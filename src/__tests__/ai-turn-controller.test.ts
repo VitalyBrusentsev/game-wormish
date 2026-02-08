@@ -2,11 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Worm } from "../entities";
 import type { Team } from "../game/team-manager";
 import { AiTurnController } from "../game/ai-turn-controller";
-import { playTurnWithGameAiForTeam } from "../ai/game-ai";
+import { playTurnWithGameAiForTeamAsync } from "../ai/game-ai-async";
 import type { TurnContext, TurnDriverUpdateOptions } from "../game/turn-driver";
 
-vi.mock("../ai/game-ai", () => ({
-  playTurnWithGameAiForTeam: vi.fn(),
+vi.mock("../ai/game-ai-async", () => ({
+  playTurnWithGameAiForTeamAsync: vi.fn(() => Promise.resolve(null)),
 }));
 
 const createWorm = (x: number, teamId: Team["id"], name: string): Worm => {
@@ -52,18 +52,18 @@ describe("AiTurnController", () => {
     controller.update(context, 0, options);
     expect(session.debugSelectWorm).toHaveBeenCalledTimes(1);
     expect(session.debugSelectWorm).toHaveBeenLastCalledWith("Red", 2);
-    expect(playTurnWithGameAiForTeam).toHaveBeenCalledTimes(1);
+    expect(playTurnWithGameAiForTeamAsync).toHaveBeenCalledTimes(1);
 
     controller.beginTurn(context);
     controller.update(context, 0, options);
     expect(session.debugSelectWorm).toHaveBeenCalledTimes(1);
-    expect(playTurnWithGameAiForTeam).toHaveBeenCalledTimes(2);
+    expect(playTurnWithGameAiForTeamAsync).toHaveBeenCalledTimes(2);
 
     turnIndex = 1;
     controller.beginTurn(context);
     controller.update(context, 0, options);
     expect(session.debugSelectWorm).toHaveBeenCalledTimes(2);
     expect(session.debugSelectWorm).toHaveBeenLastCalledWith("Red", 2);
-    expect(playTurnWithGameAiForTeam).toHaveBeenCalledTimes(3);
+    expect(playTurnWithGameAiForTeamAsync).toHaveBeenCalledTimes(3);
   });
 });

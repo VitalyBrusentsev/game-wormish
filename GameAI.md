@@ -35,8 +35,32 @@ This document captures the agreed Game AI principles, strategies, and extension 
 - Turn driving in local mode:
   - Player turns use local input controller.
   - Computer turns use AI turn controller.
-  - AI execution uses the same debug-facing API entry path (`playTurnWithGameAiForTeam(...)`) so `Game.getTeam("red").playTurnWithGameAI(...)` remains aligned with production behavior.
+  - Runtime turn flow uses an async AI entry point (`playTurnWithGameAiForTeamAsync(...)`) so heavy planning can run off the main thread.
+  - Debug API still exposes `playTurnWithGameAiForTeam(...)` for deterministic/manual debugging.
 - During computer turns, user worm input is not accepted (similar to passive/remote turn control behavior), while simulation continues normally.
+
+## Non-Blocking Planner (Implemented)
+
+To keep rendering responsive during AI thinking, planning now runs in a dedicated Web Worker.
+
+- Main thread captures a lightweight AI snapshot (terrain mask/height map, team + worm state, turn timing).
+- Worker reconstructs sim-only state and calls the same planner (`planAiTurn(...)`) used by the synchronous path.
+- Worker returns a serializable plan (weapon/angle/power, movement steps, debug data, and target reference).
+- Main thread hydrates that plan against live entities and executes commands via the normal command path (weapon select, movement chunks, pre-shot visual, fire).
+
+Safety and compatibility:
+
+- Turn validity is checked before and after async planning, and again before scheduled movement/fire commands.
+- If `Worker` is unavailable or worker planning fails, the AI falls back to synchronous planning (`planAiTurn(...)`) on the main thread.
+- The execution phase remains main-thread only (it mutates `GameSession` and emits events); only planning/simulation is offloaded.
+
+## Personality Metadata in Worker Snapshots
+
+Per-worm personality is stored in a `WeakMap` at runtime. Worker planning uses cloned worm instances, so personality must be explicitly carried in snapshots and restored in the worker clone stage.
+
+- Snapshot now includes `worm.personality`.
+- Worker clone restores personality before planning.
+- This preserves intended behavior such as the opening farthest-worm `Commando` bias (movement + Uzi preference).
 
 ## Scoring Function Overview
 

@@ -1,4 +1,4 @@
-import { playTurnWithGameAiForTeam } from "../ai/game-ai";
+import { playTurnWithGameAiForTeamAsync } from "../ai/game-ai-async";
 import { findFarthestWormIndex } from "../ai/team-worm-selection";
 import type { TurnContext, TurnDriver, TurnDriverUpdateOptions } from "./turn-driver";
 
@@ -35,7 +35,9 @@ export class AiTurnController implements TurnDriver {
     if (!options.allowInput) return;
     if (!context.session.isLocalTurnActive()) return;
     this.pendingStart = false;
-    playTurnWithGameAiForTeam(context.session, context.team.id);
+    void Promise.resolve(playTurnWithGameAiForTeamAsync(context.session, context.team.id)).catch(
+      () => undefined
+    );
   }
 
   endTurn() {

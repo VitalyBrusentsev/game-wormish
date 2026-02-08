@@ -291,6 +291,14 @@ export const playTurnWithGameAi = (
 ): AiTurnPlan | null => {
   const plan = planAiTurn(session, settings);
   if (!plan) return null;
+  return executeAiTurnPlan(session, plan, settings);
+};
+
+export const executeAiTurnPlan = (
+  session: GameSession,
+  plan: AiTurnPlan,
+  settings?: GameAiSettings
+): AiTurnPlan => {
   const expectedTurn = session.getTurnIndex();
   const expectedWorm = session.activeWorm;
   const movementTotalMs = plan.movedMs ?? 0;
