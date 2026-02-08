@@ -240,6 +240,7 @@ export function drawWindsock(
 ) {
   const clothLen = Math.max(0, length);
   if (clothLen <= 0) return;
+  const stripeWhite = "#ecf2ff";
 
   const stripes = 3;
   const baseW = Math.min(12, Math.max(4, clothLen * 0.9));
@@ -278,7 +279,7 @@ export function drawWindsock(
       const p1ry = c1y - perpY * (w1 / 2);
 
       ctx.globalAlpha = segAlpha;
-      ctx.fillStyle = i % 2 === 0 ? color : "rgba(255,255,255,0.75)";
+      ctx.fillStyle = i % 2 === 0 ? color : stripeWhite;
       ctx.beginPath();
       ctx.moveTo(p0lx, p0ly);
       ctx.lineTo(p1lx, p1ly);

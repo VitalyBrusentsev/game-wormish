@@ -58,6 +58,7 @@ export type RenderHudOptions = {
 
 const HUD_FONT_STACK =
   "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+const HUD_WINDSOCK_ORANGE = "#d54f45";
 
 function truncateHudText(
   ctx: CanvasRenderingContext2D,
@@ -197,7 +198,7 @@ export function renderHUD({
       const maxLen = width - padding - 12 - startX;
       const windLen = Math.max(0, Math.min(desiredWindLen, maxLen));
       if (windLen > 0) {
-        drawWindsock(ctx, startX, arrowY, 1, windLen, windMag01, COLORS.power);
+        drawWindsock(ctx, startX, arrowY, 1, windLen, windMag01, HUD_WINDSOCK_ORANGE);
         drawText(ctx, "Wind", startX + windLen / 2, labelY, COLORS.white, 10, "center", "top", false);
       }
     } else {
@@ -205,7 +206,7 @@ export function renderHUD({
       const maxLen = startX - (padding + 12);
       const windLen = Math.max(0, Math.min(desiredWindLen, maxLen));
       if (windLen > 0) {
-        drawWindsock(ctx, startX, arrowY, -1, windLen, windMag01, COLORS.power);
+        drawWindsock(ctx, startX, arrowY, -1, windLen, windMag01, HUD_WINDSOCK_ORANGE);
         drawText(ctx, "Wind", startX - windLen / 2, labelY, COLORS.white, 10, "center", "top", false);
       }
     }
