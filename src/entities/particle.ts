@@ -11,6 +11,7 @@ export class Particle {
   r: number;
   color: string;
   gravity: number;
+  collideTerrain: boolean;
   constructor(
     x: number,
     y: number,
@@ -19,7 +20,8 @@ export class Particle {
     life: number,
     r: number,
     color: string,
-    gravity = WORLD.gravity * 0.2
+    gravity = WORLD.gravity * 0.2,
+    collideTerrain = true
   ) {
     this.x = x;
     this.y = y;
@@ -30,13 +32,14 @@ export class Particle {
     this.r = r;
     this.color = color;
     this.gravity = gravity;
+    this.collideTerrain = collideTerrain;
   }
   update(dt: number, terrain: Terrain) {
     this.life -= dt;
     this.vy += this.gravity * dt;
     this.x += this.vx * dt;
     this.y += this.vy * dt;
-    if (terrain.isSolid(Math.round(this.x), Math.round(this.y))) {
+    if (this.collideTerrain && terrain.isSolid(Math.round(this.x), Math.round(this.y))) {
       this.vx *= 0.4;
       this.vy *= -0.3;
       this.y -= 2;

@@ -158,6 +158,47 @@ export class Projectile {
       const bodyHeight = 8 * slimFactor;
       const cornerRadius = 3 * slimFactor;
       const tipRadius = 3 * slimFactor;
+      const speed = Math.hypot(this.vx, this.vy);
+
+      // Smoke puffs that drift backward and expand over time.
+      const trailCount = 8;
+      const trailCycle = 84;
+      const trailSpeed = Math.max(58, speed * 0.46);
+      const nozzleX = -bodyWidth * 0.48;
+      for (let i = 0; i < trailCount; i++) {
+        const trail = (this.age * trailSpeed + i * (trailCycle / trailCount)) % trailCycle;
+        const spread = trail / trailCycle;
+        const puffRadius = 2.6 + spread * 5.2;
+        const puffX = nozzleX - trail;
+        const wobble = Math.sin(this.age * 8 + i * 1.6) * (0.65 + spread * 1.4);
+        const puffY = wobble;
+        const alpha = 0.28 * (1 - spread) + 0.08;
+        const puffGradient = ctx.createRadialGradient(
+          puffX,
+          puffY,
+          puffRadius * 0.15,
+          puffX,
+          puffY,
+          puffRadius
+        );
+        puffGradient.addColorStop(0, `rgba(104, 110, 118, ${alpha * 1.1})`);
+        puffGradient.addColorStop(0.55, `rgba(134, 142, 152, ${alpha * 0.65})`);
+        puffGradient.addColorStop(1, "rgba(96, 104, 114, 0)");
+        ctx.fillStyle = puffGradient;
+        ctx.beginPath();
+        ctx.arc(puffX, puffY, puffRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      const plumeRadius = 4.6;
+      const pulse = 0.85 + Math.sin(this.age * 26) * 0.15;
+      const plume = ctx.createRadialGradient(nozzleX - 1.2, 0, 0, nozzleX - 1.2, 0, plumeRadius);
+      plume.addColorStop(0, `rgba(92, 98, 106, ${0.34 * pulse})`);
+      plume.addColorStop(1, "rgba(118, 126, 136, 0)");
+      ctx.fillStyle = plume;
+      ctx.beginPath();
+      ctx.arc(nozzleX - 1.2, 0, plumeRadius, 0, Math.PI * 2);
+      ctx.fill();
 
       ctx.fillStyle = "#666";
       ctx.strokeStyle = "#222";

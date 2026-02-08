@@ -186,6 +186,7 @@ export class GameSession {
   private currentTurnInitial = true;
   private uziBurst: UziBurst | null = null;
   private aiPreShotVisual: AiPreShotVisual | null = null;
+  private grenadeSmokeCarry = new WeakMap<Projectile, number>();
 
   constructor(
     width: number,
@@ -537,6 +538,10 @@ export class GameSession {
         else if (projectile.type === WeaponType.Uzi)
           projectile.update(dt, this.terrain, specUzi);
         else projectile.update(dt, this.terrain, specRifle);
+
+        if (projectile.type === WeaponType.HandGrenade && !projectile.exploded) {
+          this.emitGrenadeFuseSmoke(projectile, dt);
+        }
 
         if (
           (projectile.type === WeaponType.Rifle || projectile.type === WeaponType.Uzi) &&
@@ -2026,6 +2031,56 @@ export class GameSession {
       }
     }
 
+  }
+
+  private emitGrenadeFuseSmoke(projectile: Projectile, dt: number) {
+    const localFuseX = 4;
+    const localFuseY = -projectile.r - 6;
+    const angle = Math.atan2(projectile.vy, projectile.vx);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const fuseX = projectile.x + localFuseX * cos - localFuseY * sin;
+    const fuseY = projectile.y + localFuseX * sin + localFuseY * cos;
+
+    const radialX = fuseX - projectile.x;
+    const radialY = fuseY - projectile.y;
+    const radialLen = Math.hypot(radialX, radialY) || 1;
+    const dirX = radialX / radialLen;
+    const dirY = radialY / radialLen;
+    const driftX = -dirY;
+    const driftY = dirX;
+
+    const emissionRate = 26;
+    let carry = (this.grenadeSmokeCarry.get(projectile) ?? 0) + dt * emissionRate;
+    const emitCount = Math.floor(carry);
+    carry -= emitCount;
+    this.grenadeSmokeCarry.set(projectile, carry);
+
+    for (let i = 0; i < emitCount; i++) {
+      const phase = projectile.age * 18 + i * 2.31;
+      const jitter01 = (Math.sin(phase * 1.9) + 1) * 0.5;
+      const dist = 1.4 + jitter01 * 1.2;
+      const jitter = Math.sin(phase * 1.3) * (2 + jitter01 * 3.4);
+      const speed = 20 + jitter01 * 16;
+      const vx = dirX * speed + driftX * jitter + projectile.vx * 0.08;
+      const vy = dirY * speed + driftY * jitter + projectile.vy * 0.08;
+      const life = 0.44 + jitter01 * 0.34;
+      const radius = 1.6 + jitter01 * 1.8;
+      const color = `rgba(92, 100, 112, ${0.44 + jitter01 * 0.22})`;
+      this.particles.push(
+        new Particle(
+          fuseX + dirX * dist + driftX * jitter * 0.2,
+          fuseY + dirY * dist + driftY * jitter * 0.2,
+          vx,
+          vy,
+          life,
+          radius,
+          color,
+          -24,
+          false
+        )
+      );
+    }
   }
 
   private emitTurnStarted(config: { initial: boolean; source: GameEventSource }) {
