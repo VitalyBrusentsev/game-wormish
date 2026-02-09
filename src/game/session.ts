@@ -34,6 +34,7 @@ import type {
   TurnContext,
 } from "./turn-driver";
 import { critterHitTestCircle } from "./critter-hit-test";
+import type { WormMovementSmoothingMode } from "../rendering/worm-animation-setting";
 
 export interface WormSnapshot {
   name: string;
@@ -152,6 +153,8 @@ type AiPreShotVisual = {
   overshootAngle: number;
   undershootAngle: number;
 };
+
+type MovementSmoothingMode = WormMovementSmoothingMode | "none";
 
 export class GameSession {
   readonly width: number;
@@ -349,7 +352,7 @@ export class GameSession {
       jump,
       dtMs,
       atMs: this.turnTimestampMs(),
-    });
+    }, { movementSmoothingMode: "ai" });
   }
 
   debugShoot(angle: number, power: number) {
@@ -413,6 +416,7 @@ export class GameSession {
 
     if (initial) this.teamManager.resetActiveWormIndex();
     else this.teamManager.advanceToNextTeam();
+    this.snapWormMovementSmoothing();
     this.aim = this.createDefaultAim();
     this.clearAiPreShotVisual();
 
@@ -494,8 +498,19 @@ export class GameSession {
     }
   }
 
-  applyRemoteTurnCommand(command: TurnCommand) {
-    this.applyCommand(command);
+  applyRemoteTurnCommand(
+    command: TurnCommand,
+    options?: { movementSmoothingMode?: WormMovementSmoothingMode }
+  ) {
+    if (
+      command.type === "set-weapon" ||
+      command.type === "start-charge" ||
+      command.type === "cancel-charge" ||
+      command.type === "fire-charged-weapon"
+    ) {
+      this.activeWorm.snapMovementSmoothing();
+    }
+    this.applyCommand(command, { movementSmoothingMode: options?.movementSmoothingMode ?? "network" });
     gameEvents.emit("turn.command.recorded", {
       source: "remote-sim",
       turnIndex: this.turnIndex,
@@ -792,6 +807,7 @@ export class GameSession {
     this.projectileIds.clear();
     this.terminatedProjectiles.clear();
     this.nextProjectileId = 1;
+    this.snapWormMovementSmoothing();
     this.clearAiPreShotVisual();
     this.nextTurn(true);
     gameEvents.emit("match.restarted", { source: "system" });
@@ -944,6 +960,7 @@ export class GameSession {
     this.particles = [];
     this.aim = this.createDefaultAim();
     this.uziBurst = null;
+    this.snapWormMovementSmoothing();
     this.clearAiPreShotVisual();
   }
 
@@ -979,6 +996,7 @@ export class GameSession {
     this.particles = [];
     this.aim = this.createDefaultAim();
     this.uziBurst = null;
+    this.snapWormMovementSmoothing();
     this.clearAiPreShotVisual();
   }
 
@@ -992,6 +1010,7 @@ export class GameSession {
     this.particles = [];
     this.aim = this.createDefaultAim();
     this.uziBurst = null;
+    this.snapWormMovementSmoothing();
     this.clearAiPreShotVisual();
   }
 
@@ -1025,6 +1044,12 @@ export class GameSession {
     this.state.turnStartMs = state.turnStartMs;
     this.state.charging = state.charging;
     this.state.chargeStartMs = state.chargeStartMs;
+  }
+
+  private snapWormMovementSmoothing() {
+    for (const team of this.teams) {
+      for (const worm of team.worms) worm.snapMovementSmoothing();
+    }
   }
 
   finalizeTurn(): TurnResolution {
@@ -1328,7 +1353,7 @@ export class GameSession {
   }
 
   private recordCommand(command: TurnCommand) {
-    const finalized = this.applyCommand(command);
+    const finalized = this.applyCommand(command, { movementSmoothingMode: "none" });
     if (!finalized) return;
     this.turnLog.commands.push(finalized);
     gameEvents.emit("turn.command.recorded", {
@@ -1356,7 +1381,11 @@ export class GameSession {
     return { ...command };
   }
 
-  private applyCommand(command: TurnCommand): TurnCommand | null {
+  private applyCommand(
+    command: TurnCommand,
+    options?: { movementSmoothingMode?: MovementSmoothingMode }
+  ): TurnCommand | null {
+    const movementSmoothingMode = options?.movementSmoothingMode ?? "none";
     switch (command.type) {
       case "set-weapon": {
         this.state.setWeapon(command.weapon);
@@ -1370,11 +1399,16 @@ export class GameSession {
       }
       case "move": {
         if (this.state.phase !== "aim") return null;
+        const worm = this.activeWorm;
+        const from = worm.getMotionSample();
         this.applyActiveWormMovement({
           move: command.move,
           jump: command.jump,
           dtMs: command.dtMs,
         });
+        if (movementSmoothingMode !== "none") {
+          worm.queueMovementSmoothing(movementSmoothingMode, from, command.dtMs);
+        }
         return command;
       }
       case "start-charge": {

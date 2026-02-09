@@ -6,6 +6,8 @@ import { renderCritterSprites, resolveCritterSpriteOffsets } from "../critter/cr
 import { drawWeaponSprite } from "../weapons/weapon-sprites";
 import { drawHealthBar, drawRoundedRect } from "../utils";
 import type { Terrain } from "./terrain";
+import { WormVisualAnimator, type MotionSample } from "./worm-visual-animator";
+import type { WormMovementSmoothingMode } from "../rendering/worm-animation-setting";
 
 export class Worm {
   x: number;
@@ -23,6 +25,7 @@ export class Worm {
   private saluteStartMs: number | null = null;
   private saluteUntilMs = 0;
   private static readonly saluteTimeScale = 1;
+  private readonly visualAnimator: WormVisualAnimator;
 
   constructor(x: number, y: number, team: TeamId, name: string) {
     this.x = x;
@@ -37,6 +40,29 @@ export class Worm {
     this.onGround = false;
     this.name = name;
     this.age = 0;
+    this.visualAnimator = new WormVisualAnimator(this.x, this.y);
+  }
+
+  getMotionSample(): MotionSample {
+    return { x: this.x, y: this.y, vx: this.vx, vy: this.vy };
+  }
+
+  queueMovementSmoothing(
+    mode: WormMovementSmoothingMode,
+    from: MotionSample,
+    dtMs: number
+  ) {
+    this.visualAnimator.scheduleMovementBlend({
+      mode,
+      nowMs: nowMs(),
+      from,
+      to: this.getMotionSample(),
+      dtMs,
+    });
+  }
+
+  snapMovementSmoothing() {
+    this.visualAnimator.snapToPhysics(this.getMotionSample());
   }
 
   applyImpulse(ix: number, iy: number) {
@@ -219,8 +245,10 @@ export class Worm {
     highlight = false,
     aimPose?: { weapon: WeaponType; angle: number; recoil?: { kick01: number } } | null
   ) {
+    const now = nowMs();
+    const motion = this.visualAnimator.sampleMotion(now, this.getMotionSample());
     ctx.save();
-    ctx.translate(this.x, this.y);
+    ctx.translate(motion.x, motion.y);
 
     if (!this.alive) {
       const baseY = this.radius + 1;
@@ -326,10 +354,17 @@ export class Worm {
     }
 
     const facing = (this.facing < 0 ? -1 : 1) as -1 | 1;
+    const elasticOffsets = this.visualAnimator.computeElasticOffsets({
+      nowMs: now,
+      motion,
+      facing,
+      hasWeapon: Boolean(aimPose),
+      onGround: this.onGround,
+    });
+    const renderedAimAngle = aimPose ? aimPose.angle + elasticOffsets.weapon.rockRad : 0;
     const basePose: BaseCritterPose = aimPose
-      ? { kind: "aim", weapon: aimPose.weapon, aimAngle: aimPose.angle }
+      ? { kind: "aim", weapon: aimPose.weapon, aimAngle: renderedAimAngle }
       : { kind: "idle" };
-    const now = nowMs();
     const activeLineScale = highlight ? 1.5 : 1;
     const activePulse01 = highlight ? 0.5 + 0.5 * Math.sin(now * 0.008) : 0;
     const saluteActive = this.saluteStartMs !== null && now < this.saluteUntilMs;
@@ -377,12 +412,48 @@ export class Worm {
         }
       : basePose;
     const rig = computeCritterRig({ x: 0, y: 0, r: this.radius, facing, pose });
+    if (rig.tail.length >= 2) {
+      const tail1 = rig.tail[0]!;
+      const tail2 = rig.tail[1]!;
+      const dx = tail2.center.x - tail1.center.x;
+      const dy = tail2.center.y - tail1.center.y;
+      rig.tail.push({
+        center: { x: tail2.center.x + dx * 0.9, y: tail2.center.y + dy * 0.9 },
+        r: tail2.r * 0.72,
+      });
+    }
 
     const bodyColor = this.team === "Red" ? "#ff9aa9" : "#9ad0ff";
     const teamColor = this.team === "Red" ? COLORS.red : COLORS.blue;
     const outlineAlpha = highlight ? 0.26 + 0.16 * activePulse01 : 0.25;
     const outline = `rgba(0,0,0,${outlineAlpha.toFixed(3)})`;
     const armColor = this.team === "Red" ? "#ff8b9c" : "#84c6ff";
+
+    const shift = (p: { x: number; y: number }, dx: number, dy: number) => {
+      p.x += dx;
+      p.y += dy;
+    };
+    shift(rig.head.center, elasticOffsets.head.x, elasticOffsets.head.y);
+    for (let i = 0; i < rig.tail.length; i++) {
+      const seg = rig.tail[i];
+      const part = elasticOffsets.tail[i];
+      if (!seg || !part) continue;
+      shift(seg.center, part.x, part.y);
+    }
+
+    const weaponBobY = elasticOffsets.weapon.bobY;
+    if (rig.weapon && aimPose && Math.abs(weaponBobY) > 0.001) {
+      shift(rig.weapon.root, 0, weaponBobY);
+      shift(rig.weapon.muzzle, 0, weaponBobY);
+      shift(rig.weapon.grip1, 0, weaponBobY);
+      if (rig.weapon.grip2) shift(rig.weapon.grip2, 0, weaponBobY);
+      for (const side of ["left", "right"] as const) {
+        shift(rig.arms[side].upper.a, 0, weaponBobY * 0.35);
+        shift(rig.arms[side].upper.b, 0, weaponBobY * 0.8);
+        shift(rig.arms[side].lower.a, 0, weaponBobY * 0.8);
+        shift(rig.arms[side].lower.b, 0, weaponBobY);
+      }
+    }
 
     const baseArmThickness = Math.max(2, this.radius * CRITTER.armThicknessFactor) * 2;
     const armStrokeWidth = baseArmThickness * activeLineScale;
@@ -410,10 +481,6 @@ export class Worm {
       const kickPx = this.radius * 0.22 * recoilKick01;
       const kickDx = -facing * kickPx;
       const kickDy = -kickPx * 0.25;
-      const shift = (p: { x: number; y: number }, dx: number, dy: number) => {
-        p.x += dx;
-        p.y += dy;
-      };
 
       for (const seg of rig.tail) shift(seg.center, kickDx, kickDy);
       shift(rig.body.center, kickDx, kickDy);
@@ -457,7 +524,7 @@ export class Worm {
       }
     }
 
-    const lookAngle = aimPose?.angle ?? (facing > 0 ? 0 : Math.PI);
+    const lookAngle = aimPose ? renderedAimAngle : facing > 0 ? 0 : Math.PI;
     const farArmKey = (facing > 0 ? "right" : "left") as "left" | "right";
     const nearArmKey = (facing > 0 ? "left" : "right") as "left" | "right";
     const farArmAlpha = saluteArm === farArmKey ? 0.95 : 0.6;
@@ -555,6 +622,10 @@ export class Worm {
       rig,
       team: this.team,
       facing,
+      partOffsets: {
+        collar: elasticOffsets.collar,
+        helmet: elasticOffsets.helmet,
+      },
       beforeAll: renderFarArm,
       afterTorso: renderNearArmAndHands,
       afterHead: (headCenter) => {

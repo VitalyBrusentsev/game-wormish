@@ -1,4 +1,5 @@
 import type { GameDebugApi } from "../debug/game-debug";
+import type { WormAnimationSettingInput } from "../rendering/worm-animation-setting";
 
 export {};
 
@@ -18,5 +19,6 @@ declare global {
     >;
     debugCritterCollision?: boolean;
     Game?: GameDebugApi;
+    wormAnimationSetting?: WormAnimationSettingInput;
   }
 }

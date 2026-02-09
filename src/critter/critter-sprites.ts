@@ -149,27 +149,44 @@ export function renderCritterSprites(config: {
   rig: CritterRig;
   team: TeamId;
   facing: -1 | 1;
+  partOffsets?: Partial<Record<CritterSpriteKey, Vec2>>;
   beforeAll?: () => void;
   afterTorso?: () => void;
   afterHead?: (headCenter: Vec2) => void;
   afterAll?: () => void;
 }): boolean {
-  const { ctx, rig, team, facing, beforeAll, afterTorso, afterHead, afterAll } = config;
+  const { ctx, rig, team, facing, partOffsets, beforeAll, afterTorso, afterHead, afterAll } = config;
   const img = getCritterSheet();
   if (!img || !isSheetReady(img)) return false;
 
   const offsets = resolveCritterSpriteOffsets();
+  const withPartOffset = (center: Vec2, key: CritterSpriteKey): Vec2 => {
+    const p = partOffsets?.[key];
+    if (!p) return center;
+    return { x: center.x + p.x, y: center.y + p.y };
+  };
   const tail1 = rig.tail[0];
   const tail2 = rig.tail[1];
   if (!tail1 || !tail2) return false;
+  const tail3 = rig.tail[2];
 
-  // Draw order: tail2 -> tail1 -> torso -> belt1 -> collar -> head -> helmet
+  // Draw order: tail3 -> tail2 -> tail1 -> torso -> belt1 -> collar -> head -> helmet
   beforeAll?.();
+  if (tail3) {
+    drawSprite({
+      ctx,
+      img,
+      spriteIndex: getSpriteIndex(team, "tail2"),
+      center: withPartOffset(tail3.center, "tail2"),
+      offset: offsets.tail2,
+      facing,
+    });
+  }
   drawSprite({
     ctx,
     img,
     spriteIndex: getSpriteIndex(team, "tail2"),
-    center: tail2.center,
+    center: withPartOffset(tail2.center, "tail2"),
     offset: offsets.tail2,
     facing,
   });
@@ -177,7 +194,7 @@ export function renderCritterSprites(config: {
     ctx,
     img,
     spriteIndex: getSpriteIndex(team, "tail1"),
-    center: tail1.center,
+    center: withPartOffset(tail1.center, "tail1"),
     offset: offsets.tail1,
     facing,
   });
@@ -185,7 +202,7 @@ export function renderCritterSprites(config: {
     ctx,
     img,
     spriteIndex: getSpriteIndex(team, "torso"),
-    center: rig.body.center,
+    center: withPartOffset(rig.body.center, "torso"),
     offset: offsets.torso,
     facing,
   });
@@ -193,7 +210,7 @@ export function renderCritterSprites(config: {
     ctx,
     img,
     spriteIndex: getNeutralSpriteIndex("belt1"),
-    center: rig.body.center,
+    center: withPartOffset(rig.body.center, "belt1"),
     offset: offsets.belt1,
     facing,
   });
@@ -204,7 +221,7 @@ export function renderCritterSprites(config: {
     ctx,
     img,
     spriteIndex: getNeutralSpriteIndex("collar"),
-    center: rig.body.center,
+    center: withPartOffset(rig.body.center, "collar"),
     offset: offsets.collar,
     facing,
   });
@@ -212,14 +229,15 @@ export function renderCritterSprites(config: {
     ctx,
     img,
     spriteIndex: getSpriteIndex(team, "head"),
-    center: rig.head.center,
+    center: withPartOffset(rig.head.center, "head"),
     offset: offsets.head,
     facing,
   });
 
+  const shiftedHead = withPartOffset(rig.head.center, "head");
   const headCenter = {
-    x: rig.head.center.x + facing * (offsets.head.x + offsets.face.x),
-    y: rig.head.center.y + offsets.head.y + offsets.face.y,
+    x: shiftedHead.x + facing * (offsets.head.x + offsets.face.x),
+    y: shiftedHead.y + offsets.head.y + offsets.face.y,
   };
   afterHead?.(headCenter);
 
@@ -227,7 +245,7 @@ export function renderCritterSprites(config: {
     ctx,
     img,
     spriteIndex: getSpriteIndex(team, "helmet"),
-    center: rig.head.center,
+    center: withPartOffset(rig.head.center, "helmet"),
     offset: offsets.helmet,
     facing,
   });
