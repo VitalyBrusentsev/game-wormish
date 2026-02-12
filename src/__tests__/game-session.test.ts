@@ -369,6 +369,24 @@ describe("GameSession mobile command facade", () => {
     expect(moved).toBe(true);
     expect(worm.x).toBeGreaterThan(beforeX);
   });
+
+  it("can apply AI movement smoothing for assisted fixed movement steps", () => {
+    const session = new GameSession(480, 280, { random: createRng(18), now: createNow(0, 30) });
+    session.terrain.applyHeightMap(session.terrain.heightMap.map(() => 205));
+    const worm = session.activeWorm;
+    worm.x = 180;
+    worm.y = 185;
+    worm.onGround = true;
+    worm.vx = 0;
+    worm.vy = 0;
+
+    const smoothingSpy = vi.spyOn(worm, "queueMovementSmoothing");
+    const moved = session.recordMovementStepCommand(1, 140, false, { movementSmoothingMode: "ai" });
+
+    expect(moved).toBe(true);
+    expect(smoothingSpy).toHaveBeenCalledTimes(1);
+    expect(smoothingSpy).toHaveBeenCalledWith("ai", expect.any(Object), 140);
+  });
 });
 
 describe("GameSession AI pre-shot visuals", () => {

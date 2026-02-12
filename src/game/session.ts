@@ -1401,7 +1401,12 @@ export class GameSession {
     return true;
   }
 
-  recordMovementStepCommand(move: -1 | 0 | 1, dtMs: number, jump = false): boolean {
+  recordMovementStepCommand(
+    move: -1 | 0 | 1,
+    dtMs: number,
+    jump = false,
+    options?: { movementSmoothingMode?: WormMovementSmoothingMode }
+  ): boolean {
     if (!this.isLocalTurnActive()) return false;
     if (this.state.phase !== "aim") return false;
     const normalizedDtMs = Math.max(0, Math.round(dtMs));
@@ -1412,12 +1417,17 @@ export class GameSession {
       jump,
       dtMs: normalizedDtMs,
       atMs: this.turnTimestampMs(),
-    });
+    }, { movementSmoothingMode: options?.movementSmoothingMode ?? "none" });
     return true;
   }
 
-  private recordCommand(command: TurnCommand) {
-    const finalized = this.applyCommand(command, { movementSmoothingMode: "none" });
+  private recordCommand(
+    command: TurnCommand,
+    options?: { movementSmoothingMode?: MovementSmoothingMode }
+  ) {
+    const finalized = this.applyCommand(command, {
+      movementSmoothingMode: options?.movementSmoothingMode ?? "none",
+    });
     if (!finalized) return;
     this.turnLog.commands.push(finalized);
     gameEvents.emit("turn.command.recorded", {

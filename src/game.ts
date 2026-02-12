@@ -778,7 +778,8 @@ export class Game {
       const moved = this.session.recordMovementStepCommand(
         direction,
         MOBILE_ASSIST_MOVE_STEP_MS,
-        movement.jumpRequested
+        movement.jumpRequested,
+        { movementSmoothingMode: "ai" }
       );
       movement.jumpRequested = false;
       if (!moved) {
