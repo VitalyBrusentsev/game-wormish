@@ -205,6 +205,8 @@ const MOBILE_ASSIST_STUCK_STEPS = 3;
 const MOBILE_WORM_TOUCH_RADIUS_PX = 44;
 const MOBILE_AIM_BUTTON_OFFSET_PX = 56;
 const MOBILE_AIM_LINE_MAX_PX = 180;
+const MOBILE_DEFAULT_AIM_DISTANCE_PX = 140;
+const MOBILE_DEFAULT_AIM_ANGLE_UP_DEG = 30;
 
 type MobileMovementAssistState = {
   destinationX: number;
@@ -639,8 +641,9 @@ export class Game {
     this.mobileAimZoomLocked = true;
     this.mobileAimButtonVisible = false;
     this.mobileWeaponPickerOpen = false;
-    const aim = this.session.getRenderAimInfo();
-    this.mobileAimTarget = { x: aim.targetX, y: aim.targetY };
+    const defaultTarget = this.getMobileDefaultAimTarget();
+    this.mobileAimTarget = defaultTarget;
+    this.session.setAimTargetCommand(defaultTarget.x, defaultTarget.y);
   }
 
   private handleMobileCancel() {
@@ -697,6 +700,17 @@ export class Game {
     if (this.mobileAimMode !== "aim") return;
     this.mobileAimTarget = { x: worldX, y: worldY };
     this.session.setAimTargetCommand(worldX, worldY);
+  }
+
+  private getMobileDefaultAimTarget() {
+    const worm = this.activeWorm;
+    const facing: -1 | 1 = worm.facing < 0 ? -1 : 1;
+    const upAngle = (MOBILE_DEFAULT_AIM_ANGLE_UP_DEG * Math.PI) / 180;
+    const angle = facing < 0 ? -Math.PI + upAngle : -upAngle;
+    return {
+      x: worm.x + Math.cos(angle) * MOBILE_DEFAULT_AIM_DISTANCE_PX,
+      y: worm.y + Math.sin(angle) * MOBILE_DEFAULT_AIM_DISTANCE_PX,
+    };
   }
 
   private handleMobileMovementDragStart(worldX: number, _worldY: number) {
