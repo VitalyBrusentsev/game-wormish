@@ -237,6 +237,10 @@ Start menu dialog
   background-position: 100% 50%;
 }
 
+.menu-button--new-game .menu-button__icon {
+  background-position: 50% 50%;
+}
+
 
 
 /*

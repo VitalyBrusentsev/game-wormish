@@ -4,6 +4,7 @@ import { Input, drawArrow, drawCircle, drawCrosshair, drawText } from "./utils";
 import type { Worm } from "./entities";
 import { HelpOverlay } from "./ui/help-overlay";
 import { StartMenuOverlay } from "./ui/start-menu-overlay";
+import { MatchResultOverlay } from "./ui/match-result-overlay";
 import { NetworkMatchDialog, PLAYER_NAME_STORAGE_KEY } from "./ui/network-match-dialog";
 import { gameEvents } from "./events/game-events";
 import { DamageFloaters } from "./ui/damage-floaters";
@@ -12,7 +13,6 @@ import { TurnCountdownOverlay } from "./ui/turn-countdown";
 import {
   renderAimHelpers,
   renderBackground,
-  renderGameOver,
   renderHUD,
   type AimInfo,
 } from "./rendering/game-rendering";
@@ -207,6 +207,7 @@ const MOBILE_AIM_BUTTON_OFFSET_PX = 56;
 const MOBILE_AIM_LINE_MAX_PX = 180;
 const MOBILE_DEFAULT_AIM_DISTANCE_PX = 140;
 const MOBILE_DEFAULT_AIM_ANGLE_UP_DEG = 30;
+const MATCH_RESULT_DIALOG_DELAY_MS = 1000;
 
 type MobileMovementAssistState = {
   destinationX: number;
@@ -226,6 +227,7 @@ export class Game {
 
   private helpOverlay: HelpOverlay;
   private startMenu: StartMenuOverlay;
+  private matchResultDialog: MatchResultOverlay;
   private networkDialog: NetworkMatchDialog;
   private helpOpenedFromMenu = false;
   private startMenuOpenedAtMs: number | null = null;
@@ -292,6 +294,7 @@ export class Game {
   private mobileMovementGhostX: number | null = null;
   private mobileDraggingMovement = false;
   private mobileMovementAssist: MobileMovementAssistState | null = null;
+  private matchResultDialogTimerId: number | null = null;
 
   constructor(width: number, height: number, options?: GameOptions) {
     this.width = width;
@@ -404,6 +407,21 @@ export class Game {
         this.updateCursor();
       },
     });
+
+    this.matchResultDialog = new MatchResultOverlay({
+      onNewGame: () => {
+        this.hideMatchResultDialog();
+        this.restartMatchFromGameOver();
+        this.canvas.focus();
+        this.updateCursor();
+      },
+      onBack: () => {
+        this.returnToStartModeFromGameOver();
+        this.canvas.focus();
+        this.updateCursor();
+      },
+    });
+
     if (!initialMenuDismissed) {
       this.showStartMenu("start", false);
     }
@@ -551,7 +569,12 @@ export class Game {
   }
 
   private hasBlockingOverlay() {
-    return this.helpOverlay.isVisible() || this.startMenu.isVisible() || this.networkDialog.isVisible();
+    return (
+      this.helpOverlay.isVisible() ||
+      this.startMenu.isVisible() ||
+      this.matchResultDialog.isVisible() ||
+      this.networkDialog.isVisible()
+    );
   }
 
   private isActiveTeamLocallyControlled() {
@@ -868,6 +891,31 @@ export class Game {
     this.resetMobileTransientState();
   }
 
+  private restartMatchFromGameOver() {
+    this.clearMatchResultDialogTimer();
+    const snapshot = this.networkState.getSnapshot();
+    if (snapshot.mode === "local") {
+      this.restartSinglePlayerMatch();
+      return;
+    }
+    if (snapshot.mode === "network-host") {
+      this.restartNetworkMatchAsHost();
+      return;
+    }
+    this.sendNetworkMessage({ type: "match_restart_request", payload: {} });
+  }
+
+  private returnToStartModeFromGameOver() {
+    this.clearMatchResultDialogTimer();
+    this.hideMatchResultDialog();
+    if (this.networkState.getSnapshot().mode !== "local") {
+      this.cancelNetworkSetup();
+    }
+    this.restartSinglePlayerMatch();
+    initialMenuDismissed = false;
+    this.showStartMenu("start", false);
+  }
+
   setTurnController(teamId: TeamId, controller: TurnDriver) {
     this.turnControllers.set(teamId, controller);
     this.session.setTurnControllers(this.turnControllers);
@@ -914,6 +962,40 @@ export class Game {
       return this.getSinglePlayerTeamLabels();
     }
     return getNetworkTeamNames(snapshot);
+  }
+
+  private getAliveWormCount(teamId: TeamId) {
+    const team = this.session.teams.find((entry) => entry.id === teamId);
+    if (!team) return 0;
+    return team.worms.reduce((count, worm) => count + (worm.alive ? 1 : 0), 0);
+  }
+
+  private showMatchResultDialog(winner: TeamId | "Nobody") {
+    const teamLabels = this.getDisplayedTeamLabels(this.networkState.getSnapshot());
+    const winnerLabel =
+      winner === "Nobody" ? "Nobody" : cleanPlayerName(teamLabels?.[winner] ?? null) ?? winner;
+    const wormsLeft = winner === "Nobody" ? 0 : this.getAliveWormCount(winner);
+    this.matchResultDialog.show({ winnerLabel, wormsLeft });
+  }
+
+  private scheduleMatchResultDialog(winner: TeamId | "Nobody") {
+    this.clearMatchResultDialogTimer();
+    this.matchResultDialogTimerId = window.setTimeout(() => {
+      this.matchResultDialogTimerId = null;
+      if (this.session.state.phase !== "gameover") return;
+      this.showMatchResultDialog(winner);
+      this.updateCursor();
+    }, MATCH_RESULT_DIALOG_DELAY_MS);
+  }
+
+  private clearMatchResultDialogTimer() {
+    if (this.matchResultDialogTimerId === null) return;
+    window.clearTimeout(this.matchResultDialogTimerId);
+    this.matchResultDialogTimerId = null;
+  }
+
+  private hideMatchResultDialog() {
+    this.matchResultDialog.hide();
   }
 
   mount(parent: HTMLElement) {
@@ -968,7 +1050,9 @@ export class Game {
     this.eventAbort.abort();
     this.sound.dispose();
     this.cancelNetworkSetup();
+    this.clearMatchResultDialogTimer();
     this.startMenu.dispose();
+    this.matchResultDialog.dispose();
     this.networkDialog.dispose();
     this.helpOverlay.dispose();
     this.disposeMobileControllers();
@@ -1643,6 +1727,16 @@ export class Game {
 
     const escapePressed = this.input.pressed("Escape");
 
+    if (this.matchResultDialog.isVisible()) {
+      if (escapePressed) {
+        this.input.consumeKey("Escape");
+        this.returnToStartModeFromGameOver();
+        this.canvas.focus();
+        this.updateCursor();
+      }
+      return;
+    }
+
     if (this.startMenu.isVisible()) {
       if (escapePressed && initialMenuDismissed) {
         this.startMenu.requestClose("escape");
@@ -1661,15 +1755,9 @@ export class Game {
     }
 
     if (this.input.pressed("KeyR") && this.session.state.phase === "gameover") {
-      const snapshot = this.networkState.getSnapshot();
       this.input.consumeKey("KeyR");
-      if (snapshot.mode === "local") {
-        this.restartSinglePlayerMatch();
-      } else if (snapshot.mode === "network-host") {
-        this.restartNetworkMatchAsHost();
-      } else {
-        this.sendNetworkMessage({ type: "match_restart_request", payload: {} });
-      }
+      this.hideMatchResultDialog();
+      this.restartMatchFromGameOver();
       this.updateCursor();
       return;
     }
@@ -1759,7 +1847,24 @@ export class Game {
       { signal }
     );
 
-    gameEvents.on("match.restarted", () => this.resetCameraShake(), { signal });
+    gameEvents.on(
+      "match.restarted",
+      () => {
+        this.clearMatchResultDialogTimer();
+        this.hideMatchResultDialog();
+        this.resetCameraShake();
+        this.updateCursor();
+      },
+      { signal }
+    );
+
+    gameEvents.on(
+      "match.gameover",
+      (event) => {
+        this.scheduleMatchResultDialog(event.winner);
+      },
+      { signal }
+    );
 
     gameEvents.on(
       "turn.command.recorded",
@@ -2009,6 +2114,7 @@ export class Game {
     if (
       this.helpOverlay.isVisible() ||
       this.startMenu.isVisible() ||
+      this.matchResultDialog.isVisible() ||
       this.session.state.phase === "gameover"
     ) {
       this.canvas.style.cursor = "default";
@@ -2279,6 +2385,7 @@ export class Game {
     const overlaysBlocking =
       this.helpOverlay.isVisible() ||
       this.startMenu.isVisible() ||
+      this.matchResultDialog.isVisible() ||
       this.networkDialog.isVisible();
     if (!overlaysBlocking) {
       this.turnCountdown.render(ctx, this.session, now, this.width, this.height);
@@ -2294,14 +2401,6 @@ export class Game {
       projectiles: this.session.projectiles,
       showRadar: initialMenuDismissed,
       ...(this.isMobileProfile() ? { maxWidthPx: Math.floor(this.width * 0.5) } : {}),
-    });
-
-    renderGameOver({
-      ctx,
-      width: this.width,
-      height: this.height,
-      message: displayMessage,
-      isGameOver: this.session.state.phase === "gameover",
     });
 
     renderNetworkLogHUD(ctx, this.width, this.height, this.networkState);
@@ -2331,6 +2430,7 @@ export class Game {
     const overlaysBlocking =
       this.helpOverlay.isVisible() ||
       this.startMenu.isVisible() ||
+      this.matchResultDialog.isVisible() ||
       this.networkDialog.isVisible();
     const networkSnapshot = this.networkState.getSnapshot();
     const waitingForSync =

@@ -2268,7 +2268,7 @@ export class GameSession {
     if (!redAlive || !blueAlive) {
       this.state.phase = "gameover";
       const winner: TeamId | "Nobody" = redAlive ? "Red" : blueAlive ? "Blue" : "Nobody";
-      this.message = `${winner} wins! Press R to restart.`;
+      this.message = `${winner} wins!`;
       gameEvents.emit("match.gameover", {
         source: "local-sim",
         winner,
