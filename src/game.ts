@@ -2146,6 +2146,22 @@ export class Game {
     ctx.restore();
   }
 
+  private renderWorldWater(ctx: CanvasRenderingContext2D) {
+    const worldViewport = this.getWorldViewportSize();
+    const worldBottom = this.cameraY + worldViewport.height + this.cameraPadding / this.worldZoom;
+    const waterTopY = this.session.height - 30;
+    const fillHeight = Math.max(40, worldBottom - waterTopY + 120);
+    const terrain = this.session.terrain;
+    const padX = Math.max(200, terrain.width * 0.1);
+    const x = terrain.worldLeft - padX;
+    const w = terrain.worldRight - terrain.worldLeft + padX * 2;
+
+    ctx.save();
+    ctx.fillStyle = COLORS.water;
+    ctx.fillRect(x, waterTopY, w, fillHeight);
+    ctx.restore();
+  }
+
   render() {
     const now = nowMs();
     const networkSnapshot = this.networkState.getSnapshot();
@@ -2161,7 +2177,7 @@ export class Game {
     // renderBackground fills rect from 0,0 to width,height. 
     // If we have vertical camera, we probably want the sky to stay fixed or parallax?
     // For now, let's just draw it covering the viewport.
-    renderBackground(ctx, this.width, this.height, this.cameraPadding);
+    renderBackground(ctx, this.width, this.height, this.cameraPadding, false);
     ctx.restore();
 
     ctx.save();
@@ -2169,6 +2185,7 @@ export class Game {
     ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
     ctx.scale(this.worldZoom, this.worldZoom);
     ctx.translate(-this.cameraX, -this.cameraY);
+    this.renderWorldWater(ctx);
     this.session.terrain.render(ctx);
 
     for (const particle of this.session.particles) particle.render(ctx);

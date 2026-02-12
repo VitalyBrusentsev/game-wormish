@@ -22,7 +22,8 @@ export function renderBackground(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
-  padding = 0
+  padding = 0,
+  drawWater = true
 ) {
   const left = -padding;
   const top = -padding;
@@ -34,9 +35,11 @@ export function renderBackground(
   ctx.fillStyle = g;
   ctx.fillRect(left, top, drawWidth, drawHeight);
 
-  ctx.fillStyle = COLORS.water;
-  const waterH = 30;
-  ctx.fillRect(left, height - waterH, drawWidth, waterH + padding);
+  if (drawWater) {
+    ctx.fillStyle = COLORS.water;
+    const waterH = 30;
+    ctx.fillRect(left, height - waterH, drawWidth, waterH + padding);
+  }
 }
 
 export type RenderHudOptions = {
