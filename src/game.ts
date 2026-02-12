@@ -353,12 +353,13 @@ export class Game {
       },
       onCancel: () => {
         this.cancelNetworkSetup();
+        this.restoreStartMenuAfterNetworkDialog();
       },
       onClose: (reason) => {
         if (reason === "escape") {
           this.input.consumeKey("Escape");
         }
-        this.hideStartMenu();
+        this.restoreStartMenuAfterNetworkDialog();
         this.canvas.focus();
         this.updateCursor();
       },
@@ -1684,6 +1685,16 @@ export class Game {
     }
     this.startMenuOpenedAtMs = null;
     this.startMenu.hide();
+  }
+
+  private restoreStartMenuAfterNetworkDialog() {
+    if (initialMenuDismissed) return;
+    window.setTimeout(() => {
+      if (initialMenuDismissed) return;
+      if (this.networkDialog.isVisible()) return;
+      this.showStartMenu("start", false);
+      this.updateCursor();
+    }, 0);
   }
 
   private handleHelpClosed(pausedFor: number, reason: "manual" | "escape") {
