@@ -462,6 +462,7 @@ export class Game {
   private refreshControlProfile() {
     const nextProfile = detectControlProfile();
     this.controlProfile = nextProfile;
+    this.updateCanvasInterpolation();
     this.applyWorldZoom(this.getDesiredWorldZoom());
 
     if (nextProfile === "mobile-portrait") {
@@ -472,6 +473,13 @@ export class Game {
       this.canvas.style.touchAction = "";
       this.resetMobileTransientState();
     }
+  }
+
+  private updateCanvasInterpolation() {
+    const mobileProfile = this.isMobileProfile();
+    this.canvas.classList.toggle("canvas--mobile-smooth", mobileProfile);
+    this.ctx.imageSmoothingEnabled = mobileProfile;
+    this.ctx.imageSmoothingQuality = mobileProfile ? "high" : "low";
   }
 
   private ensureMobileControllers() {

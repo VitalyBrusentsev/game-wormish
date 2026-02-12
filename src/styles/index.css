@@ -24,6 +24,10 @@ canvas {
   image-rendering: pixelated;
 }
 
+canvas.canvas--mobile-smooth {
+  image-rendering: auto;
+}
+
 /* Ensure no focus outline when canvas is focused for keyboard */
 canvas:focus {
   outline: none;

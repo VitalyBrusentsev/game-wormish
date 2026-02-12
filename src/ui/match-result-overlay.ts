@@ -18,8 +18,8 @@ export type MatchResultState = {
 };
 
 const formatSubtitle = (wormsLeft: number) => {
-  if (wormsLeft === 1) return "1 worm";
-  return `${wormsLeft} worms left`;
+  if (wormsLeft === 1) return "1 worm is still alive!";
+  return `${wormsLeft} worms are still alive!`;
 };
 
 export class MatchResultOverlay {
