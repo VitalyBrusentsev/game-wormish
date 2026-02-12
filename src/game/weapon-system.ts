@@ -14,6 +14,14 @@ export type AimContext = {
   activeWorm: Worm;
   cameraOffsetX?: number;
   cameraOffsetY?: number;
+  zoom?: number;
+};
+
+export type AimFromTargetContext = {
+  state: GameState;
+  activeWorm: Worm;
+  targetX: number;
+  targetY: number;
 };
 
 export type FireContext = {
@@ -43,12 +51,27 @@ export function computeAimInfo({
   activeWorm,
   cameraOffsetX,
   cameraOffsetY,
+  zoom,
 }: AimContext): AimInfo {
-  const aimWorm = activeWorm;
-  const pointerX = input.mouseX - (cameraOffsetX ?? 0);
-  const pointerY = input.mouseY - (cameraOffsetY ?? 0);
-  let dx = pointerX - aimWorm.x;
-  let dy = pointerY - aimWorm.y;
+  const normalizedZoom = Math.max(0.01, zoom ?? 1);
+  const pointerX = (input.mouseX - (cameraOffsetX ?? 0)) / normalizedZoom;
+  const pointerY = (input.mouseY - (cameraOffsetY ?? 0)) / normalizedZoom;
+  return computeAimFromTarget({
+    state,
+    activeWorm,
+    targetX: pointerX,
+    targetY: pointerY,
+  });
+}
+
+export function computeAimFromTarget({
+  state,
+  activeWorm,
+  targetX,
+  targetY,
+}: AimFromTargetContext): AimInfo {
+  let dx = targetX - activeWorm.x;
+  let dy = targetY - activeWorm.y;
   if (state.weapon === WeaponType.Rifle || state.weapon === WeaponType.Uzi) {
     const len = Math.hypot(dx, dy) || 1;
     const r =
@@ -58,10 +81,15 @@ export function computeAimInfo({
       dy = (dy / len) * r;
     }
   }
-  const targetX = aimWorm.x + dx;
-  const targetY = aimWorm.y + dy;
-  const angle = computeAimAngleFromTarget({ weapon: state.weapon, worm: aimWorm, targetX, targetY });
-  return { targetX, targetY, angle };
+  const clampedTargetX = activeWorm.x + dx;
+  const clampedTargetY = activeWorm.y + dy;
+  const angle = computeAimAngleFromTarget({
+    weapon: state.weapon,
+    worm: activeWorm,
+    targetX: clampedTargetX,
+    targetY: clampedTargetY,
+  });
+  return { targetX: clampedTargetX, targetY: clampedTargetY, angle };
 }
 
 export function computeAimAngleFromTarget(config: {

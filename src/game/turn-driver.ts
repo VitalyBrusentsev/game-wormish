@@ -15,7 +15,7 @@ export interface TurnContext {
 export interface TurnDriverUpdateOptions {
   allowInput: boolean;
   input: Input;
-  camera: { offsetX: number; offsetY: number };
+  camera: { offsetX: number; offsetY: number; zoom: number };
 }
 
 export interface TurnDriver {
