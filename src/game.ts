@@ -1,6 +1,6 @@
 import type { TeamId, PredictedPoint } from "./definitions";
 import { GAMEPLAY, WeaponType, nowMs, COLORS, WORLD, clamp } from "./definitions";
-import { Input, drawArrow, drawCircle, drawText } from "./utils";
+import { Input, drawArrow, drawCircle, drawCrosshair, drawText } from "./utils";
 import type { Worm } from "./entities";
 import { HelpOverlay } from "./ui/help-overlay";
 import { StartMenuOverlay } from "./ui/start-menu-overlay";
@@ -197,12 +197,14 @@ const computeUziVisuals = (params: {
   return { angle: params.baseAimAngle + shakeRad, recoilKick01 };
 };
 
-const MOBILE_WORLD_ZOOM = 0.84;
+const MOBILE_WORLD_ZOOM = 0.8;
+const MOBILE_AIM_STAGE_ZOOM_MULTIPLIER = 0.7;
 const MOBILE_GHOST_REACH_PX = 8;
 const MOBILE_ASSIST_MOVE_STEP_MS = 120;
 const MOBILE_ASSIST_STUCK_STEPS = 3;
 const MOBILE_WORM_TOUCH_RADIUS_PX = 44;
 const MOBILE_AIM_BUTTON_OFFSET_PX = 56;
+const MOBILE_AIM_LINE_MAX_PX = 180;
 
 type MobileMovementAssistState = {
   destinationX: number;
@@ -281,8 +283,10 @@ export class Game {
   private mobileControls: MobileControlsOverlay | null = null;
   private mobileGestures: MobileGestureController | null = null;
   private mobileAimMode: MobileAimMode = "idle";
+  private mobileAimZoomLocked = false;
   private mobileWeaponPickerOpen = false;
   private mobileAimButtonVisible = false;
+  private mobileAimTarget: { x: number; y: number } | null = null;
   private mobileMovementGhostX: number | null = null;
   private mobileDraggingMovement = false;
   private mobileMovementAssist: MobileMovementAssistState | null = null;
@@ -437,12 +441,7 @@ export class Game {
   private refreshControlProfile() {
     const nextProfile = detectControlProfile();
     this.controlProfile = nextProfile;
-    this.worldZoom = nextProfile === "mobile-portrait" ? MOBILE_WORLD_ZOOM : 1;
-
-    this.cameraX = this.clampCameraX(this.cameraX);
-    this.cameraTargetX = this.clampCameraX(this.cameraTargetX);
-    this.cameraY = this.clampCameraY(this.cameraY);
-    this.cameraTargetY = this.clampCameraY(this.cameraTargetY);
+    this.applyWorldZoom(this.getDesiredWorldZoom());
 
     if (nextProfile === "mobile-portrait") {
       this.ensureMobileControllers();
@@ -471,7 +470,7 @@ export class Game {
 
     if (!this.mobileGestures) {
       this.mobileGestures = new MobileGestureController(this.canvas, {
-        isEnabled: () => this.controlProfile === "mobile-portrait" && this.canUseMobileControls(),
+        isEnabled: () => this.canUseMobilePanning(),
         isAimGestureActive: () => this.mobileAimMode === "aim",
         screenToWorld: (screenX, screenY) => this.screenToWorld(screenX, screenY),
         canStartWormInteraction: (worldX, worldY) =>
@@ -495,8 +494,10 @@ export class Game {
 
   private resetMobileTransientState() {
     this.mobileAimMode = "idle";
+    this.mobileAimZoomLocked = false;
     this.mobileWeaponPickerOpen = false;
     this.mobileAimButtonVisible = false;
+    this.mobileAimTarget = null;
     this.mobileDraggingMovement = false;
     this.mobileMovementGhostX = null;
     this.mobileMovementAssist = null;
@@ -504,6 +505,40 @@ export class Game {
 
   private isMobileProfile() {
     return this.controlProfile === "mobile-portrait";
+  }
+
+  private getDesiredWorldZoom() {
+    const baseZoom = this.isMobileProfile() ? MOBILE_WORLD_ZOOM : 1;
+    if (!this.isMobileProfile()) return baseZoom;
+    if (this.mobileAimZoomLocked || this.mobileAimMode === "aim" || this.mobileAimMode === "charge") {
+      return baseZoom * MOBILE_AIM_STAGE_ZOOM_MULTIPLIER;
+    }
+    return baseZoom;
+  }
+
+  private applyWorldZoom(nextZoomRaw: number) {
+    const nextZoom = clamp(nextZoomRaw, 0.35, 2);
+    if (Math.abs(nextZoom - this.worldZoom) < 1e-6) return;
+
+    const prevViewport = this.getWorldViewportSize();
+    const cameraCenterX = this.cameraX + prevViewport.width / 2;
+    const cameraCenterY = this.cameraY + prevViewport.height / 2;
+    const targetCenterX = this.cameraTargetX + prevViewport.width / 2;
+    const targetCenterY = this.cameraTargetY + prevViewport.height / 2;
+
+    this.worldZoom = nextZoom;
+    const nextViewport = this.getWorldViewportSize();
+    const bounds = this.getCameraBounds();
+    this.cameraX = clamp(cameraCenterX - nextViewport.width / 2, bounds.minX, bounds.maxX);
+    this.cameraY = clamp(cameraCenterY - nextViewport.height / 2, bounds.minY, bounds.maxY);
+    this.cameraTargetX = clamp(targetCenterX - nextViewport.width / 2, bounds.minX, bounds.maxX);
+    this.cameraTargetY = clamp(targetCenterY - nextViewport.height / 2, bounds.minY, bounds.maxY);
+    this.cameraVelocityX = 0;
+    this.cameraVelocityY = 0;
+  }
+
+  private updateWorldZoomForMobileStage() {
+    this.applyWorldZoom(this.getDesiredWorldZoom());
   }
 
   private getWorldViewportSize() {
@@ -521,10 +556,15 @@ export class Game {
     return this.turnControllers.get(this.activeTeam.id)?.type === "local";
   }
 
-  private canUseMobileControls() {
+  private canUseMobilePanning() {
     if (!this.isMobileProfile()) return false;
     if (this.hasBlockingOverlay()) return false;
     if (!initialMenuDismissed) return false;
+    return true;
+  }
+
+  private canUseMobileControls() {
+    if (!this.canUseMobilePanning()) return false;
     if (!this.isActiveTeamLocallyControlled()) return false;
     if (!this.session.isLocalTurnActive()) return false;
     if (this.session.state.phase !== "aim") return false;
@@ -596,8 +636,11 @@ export class Game {
     if (!this.canUseMobileControls()) return;
     if (this.mobileAimMode !== "idle") return;
     this.mobileAimMode = "aim";
+    this.mobileAimZoomLocked = true;
     this.mobileAimButtonVisible = false;
     this.mobileWeaponPickerOpen = false;
+    const aim = this.session.getRenderAimInfo();
+    this.mobileAimTarget = { x: aim.targetX, y: aim.targetY };
   }
 
   private handleMobileCancel() {
@@ -609,8 +652,10 @@ export class Game {
     }
     if (this.mobileAimMode === "aim") {
       this.mobileAimMode = "idle";
+      this.mobileAimZoomLocked = false;
       this.mobileAimButtonVisible = false;
       this.mobileWeaponPickerOpen = false;
+      this.mobileAimTarget = null;
     }
   }
 
@@ -628,6 +673,7 @@ export class Game {
       if (this.session.fireCurrentWeaponCommand({ instantPower01: 1 })) {
         this.mobileAimMode = "idle";
         this.mobileAimButtonVisible = false;
+        this.mobileAimTarget = null;
       }
       return;
     }
@@ -635,6 +681,7 @@ export class Game {
       if (this.session.fireCurrentWeaponCommand()) {
         this.mobileAimMode = "idle";
         this.mobileAimButtonVisible = false;
+        this.mobileAimTarget = null;
       }
     }
   }
@@ -648,6 +695,7 @@ export class Game {
   private handleMobileAimGesture(worldX: number, worldY: number) {
     if (!this.canUseMobileControls()) return;
     if (this.mobileAimMode !== "aim") return;
+    this.mobileAimTarget = { x: worldX, y: worldY };
     this.session.setAimTargetCommand(worldX, worldY);
   }
 
@@ -761,11 +809,21 @@ export class Game {
       this.mobileAimMode = "idle";
       this.mobileAimButtonVisible = false;
       this.mobileWeaponPickerOpen = false;
+      this.mobileAimTarget = null;
       this.stopMobileMovementAssist(false);
     }
 
     if (this.mobileAimMode === "charge" && !this.session.state.charging) {
       this.mobileAimMode = this.session.state.phase === "aim" ? "aim" : "idle";
+    }
+
+    if (this.mobileAimMode === "aim" || this.mobileAimMode === "charge") {
+      if (!this.mobileAimTarget) {
+        const aim = this.session.getRenderAimInfo();
+        this.mobileAimTarget = { x: aim.targetX, y: aim.targetY };
+      }
+    } else {
+      this.mobileAimTarget = null;
     }
 
     const canUse = this.canUseMobileControls();
@@ -1916,6 +1974,15 @@ export class Game {
     const turnStartMs = this.session.state.turnStartMs;
     if (turnStartMs === this.lastTurnStartMs) return;
     this.lastTurnStartMs = turnStartMs;
+    if (this.isMobileProfile()) {
+      this.mobileAimMode = "idle";
+      this.mobileAimZoomLocked = false;
+      this.mobileAimButtonVisible = false;
+      this.mobileWeaponPickerOpen = false;
+      this.mobileAimTarget = null;
+      this.stopMobileMovementAssist(true);
+      this.updateWorldZoomForMobileStage();
+    }
     this.focusCameraOnActiveWorm();
   }
 
@@ -2037,6 +2104,34 @@ export class Game {
     ctx.restore();
   }
 
+  private renderMobileAimDragCrosshair(ctx: CanvasRenderingContext2D, aim: AimInfo) {
+    if (!this.isMobileProfile()) return;
+    if (this.mobileAimMode !== "aim" && this.mobileAimMode !== "charge") return;
+    if (this.session.state.phase !== "aim") return;
+    const worm = this.activeWorm;
+    if (!worm.alive) return;
+
+    const target = { x: aim.targetX, y: aim.targetY };
+    const dx = target.x - worm.x;
+    const dy = target.y - worm.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const clampedLen = Math.min(len, MOBILE_AIM_LINE_MAX_PX);
+    const ex = worm.x + (dx / len) * clampedLen;
+    const ey = worm.y + (dy / len) * clampedLen;
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 228, 145, 0.9)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(worm.x, worm.y);
+    ctx.lineTo(ex, ey);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    drawCrosshair(ctx, ex, ey, 10, "#ffe891", 2);
+    ctx.restore();
+  }
+
   render() {
     const now = nowMs();
     const networkSnapshot = this.networkState.getSnapshot();
@@ -2108,6 +2203,7 @@ export class Game {
 
     this.damageFloaters.render(ctx, this.session, now);
     this.activeWormArrow.render(ctx, this.session, now);
+    this.renderMobileAimDragCrosshair(ctx, aim);
     this.renderMobileMovementGhost(ctx);
 
     renderAimHelpers({
@@ -2116,6 +2212,7 @@ export class Game {
       activeWorm: this.activeWorm,
       aim,
       predictedPath: this.predictPath(),
+      showDesktopAssist: !this.isMobileProfile(),
     });
     ctx.restore();
 
@@ -2211,6 +2308,7 @@ export class Game {
       networkSnapshot.mode !== "local" &&
       (networkSnapshot.connection.lifecycle !== "connected" || waitingForSync);
     this.updateTurnFocus();
+    this.updateWorldZoomForMobileStage();
     const followingProjectile = this.updatePassiveProjectileFocus();
     this.updateCamera(
       dt,
@@ -2229,6 +2327,7 @@ export class Game {
     }
     this.session.updateActiveTurnDriver(dt, {
       allowInput: !overlaysBlocking && !waitingForSync,
+      allowLocalInput: !this.isMobileProfile(),
       input: this.input,
       camera: { offsetX: worldCameraOffsetX, offsetY: worldCameraOffsetY, zoom: this.worldZoom },
     });

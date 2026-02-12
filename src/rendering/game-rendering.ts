@@ -319,6 +319,7 @@ export type RenderAimHelpersOptions = {
   activeWorm: Worm;
   aim: AimInfo;
   predictedPath: PredictedPoint[];
+  showDesktopAssist?: boolean;
 };
 
 export function renderAimHelpers({
@@ -327,6 +328,7 @@ export function renderAimHelpers({
   activeWorm,
   aim,
   predictedPath,
+  showDesktopAssist = true,
 }: RenderAimHelpersOptions) {
   if (state.phase !== "aim") return;
 
@@ -337,7 +339,7 @@ export function renderAimHelpers({
     ctx.restore();
   }
 
-  if (state.weapon === WeaponType.Rifle || state.weapon === WeaponType.Uzi) {
+  if (showDesktopAssist && (state.weapon === WeaponType.Rifle || state.weapon === WeaponType.Uzi)) {
     const chSize = 8;
     const crossCol = "#ffd84d";
     drawCrosshair(ctx, aim.targetX, aim.targetY, chSize, crossCol, 2);
@@ -374,7 +376,7 @@ export function renderAimHelpers({
           facing: (activeWorm.facing < 0 ? -1 : 1) as -1 | 1,
         }).muzzle;
 
-  if (state.weapon === WeaponType.Uzi) {
+  if (showDesktopAssist && state.weapon === WeaponType.Uzi) {
     const maxLen = 400;
     const ex = muzzle.x + Math.cos(aim.angle) * maxLen;
     const ey = muzzle.y + Math.sin(aim.angle) * maxLen;
