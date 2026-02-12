@@ -48,6 +48,7 @@ export interface WormSnapshot {
   facing: number;
   onGround: boolean;
   age: number;
+  preferredWeapon: WeaponType;
 }
 
 export interface TeamSnapshot {
@@ -409,12 +410,12 @@ export class GameSession {
 
     this.turnIndex = initial ? 0 : this.turnIndex + 1;
     this.wind = this.randomRange(-WORLD.windMax, WORLD.windMax);
-    this.state.startTurn(this.now(), WeaponType.Bazooka);
     this.message = initial ? "Welcome! Eliminate the other team!" : null;
     this.uziBurst = null;
 
     if (initial) this.teamManager.resetActiveWormIndex();
     else this.teamManager.advanceToNextTeam();
+    this.state.startTurn(this.now(), this.getTurnStartWeapon());
     this.snapWormMovementSmoothing();
     this.aim = this.createDefaultAim();
     this.clearAiPreShotVisual();
@@ -839,6 +840,7 @@ export class GameSession {
           facing: worm.facing,
           onGround: worm.onGround,
           age: worm.age,
+          preferredWeapon: worm.preferredWeapon,
         })),
       })),
       state: {
@@ -871,6 +873,7 @@ export class GameSession {
           facing: worm.facing,
           onGround: worm.onGround,
           age: worm.age,
+          preferredWeapon: worm.preferredWeapon,
         })),
       })),
       state: {
@@ -912,6 +915,7 @@ export class GameSession {
           facing: worm.facing,
           onGround: worm.onGround,
           age: worm.age,
+          preferredWeapon: worm.preferredWeapon,
         })),
       })),
       state: {
@@ -1024,6 +1028,7 @@ export class GameSession {
         worm.facing = wormData.facing;
         worm.onGround = wormData.onGround;
         worm.age = wormData.age;
+        worm.preferredWeapon = wormData.preferredWeapon ?? WeaponType.Bazooka;
         team.worms.push(worm);
       }
       return team;
@@ -1463,6 +1468,7 @@ export class GameSession {
     switch (command.type) {
       case "set-weapon": {
         this.state.setWeapon(command.weapon);
+        this.activeWorm.preferredWeapon = command.weapon;
         return command;
       }
       case "aim": {
@@ -1509,6 +1515,7 @@ export class GameSession {
     if (this.state.phase !== "aim") return null;
     this.clearAiPreShotVisual();
     this.state.setWeapon(command.weapon);
+    this.activeWorm.preferredWeapon = command.weapon;
     this.aim = command.aim;
     const worm = this.activeWorm;
     worm.facing = command.aim.targetX < worm.x ? -1 : 1;
@@ -1539,6 +1546,14 @@ export class GameSession {
       targetY,
       angle: computeAimAngleFromTarget({ weapon: this.state.weapon, worm, targetX, targetY }),
     };
+  }
+
+  private getTurnStartWeapon(): WeaponType {
+    const driver = this.turnControllers.get(this.activeTeam.id);
+    if (driver?.type === "ai") {
+      return WeaponType.Bazooka;
+    }
+    return this.activeWorm.preferredWeapon;
   }
 
   private computeAimFromInput(
