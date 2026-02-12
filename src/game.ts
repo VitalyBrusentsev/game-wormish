@@ -476,10 +476,9 @@ export class Game {
   }
 
   private updateCanvasInterpolation() {
-    const mobileProfile = this.isMobileProfile();
-    this.canvas.classList.toggle("canvas--mobile-smooth", mobileProfile);
-    this.ctx.imageSmoothingEnabled = mobileProfile;
-    this.ctx.imageSmoothingQuality = mobileProfile ? "high" : "low";
+    this.canvas.classList.remove("canvas--mobile-smooth");
+    this.ctx.imageSmoothingEnabled = true;
+    this.ctx.imageSmoothingQuality = "high";
   }
 
   private ensureMobileControllers() {
