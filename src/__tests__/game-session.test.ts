@@ -1,6 +1,15 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { GAMEPLAY, WeaponType } from "../definitions";
 import { GameSession } from "../game/session";
+import type { TurnContext, TurnDriver, TurnDriverUpdateOptions } from "../game/turn-driver";
+
+class StubTurnDriver implements TurnDriver {
+  constructor(readonly type: "local" | "ai") {}
+
+  beginTurn(_context: TurnContext): void {}
+
+  update(_context: TurnContext, _dt: number, _options: TurnDriverUpdateOptions): void {}
+}
 
 interface CanvasContextMocks {
   clearRect: ReturnType<typeof vi.fn>;
@@ -204,6 +213,41 @@ describe("GameSession team setup", () => {
 
     session.restart({ teamOrder: ["Red", "Blue"] });
     expect(session.teams.map((team) => team.id)).toEqual(["Red", "Blue"]);
+  });
+
+  it("restores each local worm's selected weapon when its turn returns", () => {
+    const session = new GameSession(320, 240, { random: createRng(23), now: createNow(0, 1000) });
+
+    expect(session.state.weapon).toBe(WeaponType.Bazooka);
+
+    session.setWeaponCommand(WeaponType.HandGrenade);
+    session.nextTurn();
+    expect(session.state.weapon).toBe(WeaponType.Bazooka);
+
+    session.debugSelectWorm("Blue", GAMEPLAY.teamSize - 1);
+    session.nextTurn();
+    expect(session.state.weapon).toBe(WeaponType.HandGrenade);
+  });
+
+  it("keeps AI turns starting on bazooka while local worms retain their own weapon", () => {
+    const session = new GameSession(320, 240, { random: createRng(24), now: createNow(0, 1000) });
+
+    session.setTurnControllers(
+      new Map([
+        ["Red", new StubTurnDriver("local")],
+        ["Blue", new StubTurnDriver("ai")],
+      ])
+    );
+
+    session.setWeaponCommand(WeaponType.Rifle);
+    session.nextTurn();
+    expect(session.activeTeam.id).toBe("Blue");
+    expect(session.state.weapon).toBe(WeaponType.Bazooka);
+
+    session.debugSelectWorm("Blue", GAMEPLAY.teamSize - 1);
+    session.nextTurn();
+    expect(session.activeTeam.id).toBe("Red");
+    expect(session.state.weapon).toBe(WeaponType.Rifle);
   });
 });
 
