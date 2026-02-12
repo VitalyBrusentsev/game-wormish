@@ -10,6 +10,11 @@ import {
   type AiShotDebug,
   type ShotCandidate,
 } from "./shot-scoring";
+import {
+  didMovementGetStuck,
+  isForwardProgressBlocked,
+  MIN_FORWARD_PROGRESS_PX,
+} from "../movement/stuck-detection";
 
 export type ResolvedAiSettings = {
   personality: AiPersonality;
@@ -37,7 +42,6 @@ const STUCK_ESCAPE_THRESHOLD = 3;
 const STUCK_ESCAPE_STEPS = 3;
 const MAX_STUCK_STEPS = 12;
 const BLOCKED_ADVANCE_THRESHOLD = 3;
-const MIN_FORWARD_PROGRESS_PX = 6;
 const MAX_MOVE_STEPS = 64;
 const MAX_MOVE_STEPS_COMMANDO = 96;
 const COMMANDO_UZI_SCORE_MIN = 0;
@@ -382,8 +386,7 @@ const simulateMove = (worm: Worm, session: GameSession, step: AiMoveStep): { stu
     first = false;
   }
 
-  const moved = Math.hypot(worm.x - beforeX, worm.y - beforeY);
-  return { stuck: moved < 1.5 };
+  return { stuck: didMovementGetStuck({ x: beforeX, y: beforeY }, { x: worm.x, y: worm.y }) };
 };
 
 const cloneWormForSim = (worm: Worm): Worm => {
@@ -515,10 +518,9 @@ export const planMovement = (params: {
     const from = { x: plannedShooter.x, y: plannedShooter.y };
     const res = simulateMove(plannedShooter, session, { move, dtMs, jump });
     const to = { x: plannedShooter.x, y: plannedShooter.y };
-    const forwardProgress = (to.x - from.x) * towardTarget;
     const blockedAdvance =
       move === towardTarget &&
-      (res.stuck || forwardProgress < MIN_FORWARD_PROGRESS_PX);
+      (res.stuck || isForwardProgressBlocked(from, to, towardTarget, MIN_FORWARD_PROGRESS_PX));
     steps.push({ move, dtMs, jump, from, to, stuck: res.stuck });
     usedMs += dtMs;
 
@@ -531,7 +533,10 @@ export const planMovement = (params: {
         sawRepeatedStuck = true;
         break;
       }
-    } else if (move === towardTarget && forwardProgress >= MIN_FORWARD_PROGRESS_PX) {
+    } else if (
+      move === towardTarget &&
+      !isForwardProgressBlocked(from, to, towardTarget, MIN_FORWARD_PROGRESS_PX)
+    ) {
       blockedAdvanceSteps = 0;
     }
     if (res.stuck) {

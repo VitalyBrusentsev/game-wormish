@@ -14,8 +14,9 @@ export interface TurnContext {
 
 export interface TurnDriverUpdateOptions {
   allowInput: boolean;
+  allowLocalInput?: boolean;
   input: Input;
-  camera: { offsetX: number; offsetY: number };
+  camera: { offsetX: number; offsetY: number; zoom: number };
 }
 
 export interface TurnDriver {
@@ -41,6 +42,7 @@ export class LocalTurnController implements TurnDriver {
   ) {
     if (!this.acceptingInput) return;
     if (!options.allowInput) return;
+    if (options.allowLocalInput === false) return;
     if (!context.session.isLocalTurnActive()) return;
     context.session.handleInput(options.input, dt, options.camera);
   }

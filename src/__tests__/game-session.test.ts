@@ -319,6 +319,58 @@ describe("GameSession turn logging", () => {
   });
 });
 
+describe("GameSession mobile command facade", () => {
+  it("fires rifle instantly without requiring charge", () => {
+    const session = new GameSession(360, 260, { random: createRng(12), now: createNow(0, 40) });
+    const shooter = session.activeWorm;
+    session.terrain.applyHeightMap(session.terrain.heightMap.map(() => 190));
+    shooter.x = 120;
+    shooter.y = 170;
+
+    const setWeaponOk = session.setWeaponCommand(WeaponType.Rifle);
+    expect(setWeaponOk).toBe(true);
+    const aimed = session.setAimTargetCommand(shooter.x + 80, shooter.y - 10);
+    expect(aimed).toBe(true);
+
+    const fired = session.fireCurrentWeaponCommand({ instantPower01: 1 });
+    expect(fired).toBe(true);
+    expect(session.state.phase).toBe("projectile");
+    expect(session.projectiles.length).toBeGreaterThan(0);
+  });
+
+  it("requires charge for bazooka fire and then fires once charged", () => {
+    const session = new GameSession(360, 260, { random: createRng(14), now: createNow(0, 35) });
+    const shooter = session.activeWorm;
+    session.terrain.applyHeightMap(session.terrain.heightMap.map(() => 190));
+    shooter.x = 140;
+    shooter.y = 170;
+
+    expect(session.setWeaponCommand(WeaponType.Bazooka)).toBe(true);
+    expect(session.fireCurrentWeaponCommand()).toBe(false);
+    expect(session.startChargeCommand()).toBe(true);
+    expect(session.state.charging).toBe(true);
+    expect(session.fireCurrentWeaponCommand()).toBe(true);
+    expect(session.state.phase).toBe("projectile");
+    expect(session.state.charging).toBe(false);
+  });
+
+  it("records fixed movement steps while in aim phase", () => {
+    const session = new GameSession(480, 280, { random: createRng(16), now: createNow(0, 30) });
+    session.terrain.applyHeightMap(session.terrain.heightMap.map(() => 205));
+    const worm = session.activeWorm;
+    worm.x = 180;
+    worm.y = 185;
+    worm.onGround = true;
+    worm.vx = 0;
+    worm.vy = 0;
+
+    const beforeX = worm.x;
+    const moved = session.recordMovementStepCommand(1, 140, false);
+    expect(moved).toBe(true);
+    expect(worm.x).toBeGreaterThan(beforeX);
+  });
+});
+
 describe("GameSession AI pre-shot visuals", () => {
   const normalizeAngle = (angle: number): number => {
     let normalized = (angle + Math.PI) % (Math.PI * 2);

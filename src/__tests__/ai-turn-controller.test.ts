@@ -45,7 +45,7 @@ describe("AiTurnController", () => {
     const options: TurnDriverUpdateOptions = {
       allowInput: true,
       input: {} as TurnDriverUpdateOptions["input"],
-      camera: { offsetX: 0, offsetY: 0 },
+      camera: { offsetX: 0, offsetY: 0, zoom: 1 },
     };
 
     controller.beginTurn(context);

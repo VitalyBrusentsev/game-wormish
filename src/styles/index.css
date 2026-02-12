@@ -580,3 +580,159 @@ Help dialog
     align-items: flex-start;
   }
 }
+
+/*
+=========================
+Mobile gameplay controls
+=========================
+*/
+
+.mobile-controls-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  pointer-events: none;
+  display: none;
+}
+
+.mobile-controls-layer--visible {
+  display: block;
+}
+
+.mobile-weapon-dock {
+  position: absolute;
+  left: 10px;
+  top: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.mobile-weapon-dock--hidden {
+  display: none;
+}
+
+.mobile-weapon-button {
+  min-width: 132px;
+  min-height: 58px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: linear-gradient(160deg, rgba(12, 22, 44, 0.88), rgba(24, 36, 66, 0.9));
+  color: #f6fbff;
+  font: 700 14px "Fredoka", "Trebuchet MS", system-ui, sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+}
+
+.mobile-weapon-button:disabled {
+  opacity: 0.5;
+}
+
+.mobile-weapon-icon {
+  width: 54px;
+  height: 40px;
+  image-rendering: auto;
+}
+
+.mobile-weapon-label {
+  padding-left: 8px;
+}
+
+.mobile-weapon-menu {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mobile-weapon-menu--open {
+  display: flex;
+}
+
+.mobile-weapon-item {
+  min-width: 132px;
+  min-height: 42px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: linear-gradient(170deg, rgba(18, 30, 54, 0.9), rgba(30, 48, 82, 0.9));
+  color: #f4fbff;
+  font: 700 13px "Fredoka", "Trebuchet MS", system-ui, sans-serif;
+  text-align: left;
+  padding: 0 12px;
+}
+
+.mobile-weapon-item--active {
+  border-color: rgba(255, 236, 145, 0.8);
+  box-shadow: 0 0 0 1px rgba(255, 236, 145, 0.35);
+}
+
+.mobile-aim-button {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 84px;
+  min-height: 44px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  background: linear-gradient(160deg, rgba(20, 34, 62, 0.9), rgba(42, 62, 102, 0.92));
+  color: #f8fbff;
+  font: 700 14px "Fredoka", "Trebuchet MS", system-ui, sans-serif;
+  pointer-events: auto;
+  display: none;
+}
+
+.mobile-aim-button--visible {
+  display: block;
+}
+
+.mobile-action-dock {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: none;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.mobile-action-dock--visible {
+  display: flex;
+}
+
+.mobile-action-button {
+  min-width: 108px;
+  min-height: 50px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #f8fbff;
+  font: 700 15px "Fredoka", "Trebuchet MS", system-ui, sans-serif;
+}
+
+.mobile-action-button--secondary {
+  background: linear-gradient(160deg, rgba(28, 34, 46, 0.88), rgba(48, 57, 72, 0.9));
+}
+
+.mobile-action-button--primary {
+  background: linear-gradient(160deg, rgba(220, 104, 56, 0.92), rgba(194, 66, 36, 0.92));
+}
+
+.mobile-jump-button {
+  position: absolute;
+  right: 12px;
+  bottom: 20px;
+  min-width: 94px;
+  min-height: 52px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: linear-gradient(160deg, rgba(27, 83, 101, 0.9), rgba(23, 123, 142, 0.94));
+  color: #f8fbff;
+  font: 700 15px "Fredoka", "Trebuchet MS", system-ui, sans-serif;
+  pointer-events: auto;
+  display: none;
+}
+
+.mobile-jump-button--visible {
+  display: block;
+}

@@ -14,6 +14,7 @@ import { TeamManager, type Team } from "./team-manager";
 import type { AimInfo } from "../rendering/game-rendering";
 import {
   computeAimInfo,
+  computeAimFromTarget,
   computeAimAngleFromTarget,
   fireWeapon,
   predictTrajectory,
@@ -456,7 +457,7 @@ export class GameSession {
   handleInput(
     input: Input,
     dt: number,
-    camera: { offsetX: number; offsetY: number }
+    camera: { offsetX: number; offsetY: number; zoom: number }
   ) {
     if (!this.isLocalTurnActive()) return;
     const timeLeftMs = this.state.timeLeftMs(this.now(), GAMEPLAY.turnTimeMs);
@@ -1349,6 +1350,72 @@ export class GameSession {
     this.recordCommand({ type: "cancel-charge", atMs: this.turnTimestampMs() });
   }
 
+  setWeaponCommand(weapon: WeaponType): boolean {
+    if (!this.isLocalTurnActive()) return false;
+    if (this.state.phase !== "aim") return false;
+    const atMs = this.turnTimestampMs();
+    this.recordWeaponChange(weapon, atMs);
+    return true;
+  }
+
+  setAimTargetCommand(targetX: number, targetY: number): boolean {
+    if (!this.isLocalTurnActive()) return false;
+    if (this.state.phase !== "aim") return false;
+    const aim = computeAimFromTarget({
+      state: this.state,
+      activeWorm: this.activeWorm,
+      targetX,
+      targetY,
+    });
+    this.recordAim(aim, this.turnTimestampMs());
+    return true;
+  }
+
+  startChargeCommand(): boolean {
+    if (!this.isLocalTurnActive()) return false;
+    if (this.state.phase !== "aim") return false;
+    if (this.state.charging) return false;
+    this.recordStartCharge(this.turnTimestampMs());
+    return true;
+  }
+
+  fireCurrentWeaponCommand(options?: { instantPower01?: number }): boolean {
+    if (!this.isLocalTurnActive()) return false;
+    if (this.state.phase !== "aim") return false;
+    const weapon = this.state.weapon;
+    const atMs = this.turnTimestampMs();
+    if (weapon === WeaponType.Rifle || weapon === WeaponType.Uzi) {
+      this.recordCommand({
+        type: "fire-charged-weapon",
+        weapon,
+        power: clamp(options?.instantPower01 ?? 1, 0, 1),
+        aim: { ...this.aim },
+        atMs,
+        projectileIds: [],
+      });
+      return true;
+    }
+    if (!this.state.charging) return false;
+    const power01 = this.state.getCharge01(this.state.turnStartMs + atMs);
+    this.recordFireChargedWeapon(power01, this.aim, atMs);
+    return true;
+  }
+
+  recordMovementStepCommand(move: -1 | 0 | 1, dtMs: number, jump = false): boolean {
+    if (!this.isLocalTurnActive()) return false;
+    if (this.state.phase !== "aim") return false;
+    const normalizedDtMs = Math.max(0, Math.round(dtMs));
+    if (normalizedDtMs === 0 && move === 0 && !jump) return false;
+    this.recordCommand({
+      type: "move",
+      move,
+      jump,
+      dtMs: normalizedDtMs,
+      atMs: this.turnTimestampMs(),
+    });
+    return true;
+  }
+
   private recordCommand(command: TurnCommand) {
     const finalized = this.applyCommand(command, { movementSmoothingMode: "none" });
     if (!finalized) return;
@@ -1466,7 +1533,7 @@ export class GameSession {
 
   private computeAimFromInput(
     input: Input,
-    camera: { offsetX: number; offsetY: number }
+    camera: { offsetX: number; offsetY: number; zoom: number }
   ): AimInfo {
     return computeAimInfo({
       input,
@@ -1474,6 +1541,7 @@ export class GameSession {
       activeWorm: this.activeWorm,
       cameraOffsetX: camera.offsetX,
       cameraOffsetY: camera.offsetY,
+      zoom: camera.zoom,
     });
   }
 
