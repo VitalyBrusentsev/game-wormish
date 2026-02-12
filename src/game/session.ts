@@ -121,7 +121,6 @@ type TurnLog = {
 };
 
 type UziBurst = {
-  origin: { x: number; y: number };
   facing: -1 | 1;
   aimAngle: number;
   seedBase: number;
@@ -131,7 +130,6 @@ type UziBurst = {
 };
 
 export type UziBurstSnapshot = {
-  origin: { x: number; y: number };
   facing: -1 | 1;
   aimAngle: number;
   seedBase: number;
@@ -666,7 +664,6 @@ export class GameSession {
     const burst = this.uziBurst;
     if (!burst) return null;
     return {
-      origin: { ...burst.origin },
       facing: burst.facing,
       aimAngle: burst.aimAngle,
       seedBase: burst.seedBase,
@@ -1779,8 +1776,9 @@ export class GameSession {
     atMs: number;
   }) {
     const angle = config.burst.aimAngle + this.uziBloomOffsetRad(config.burst.seedBase, config.shotIndex);
+    const shooter = this.activeWorm;
     const muzzle = computeWeaponRig({
-      center: { x: config.burst.origin.x, y: config.burst.origin.y },
+      center: { x: shooter.x, y: shooter.y },
       weapon: WeaponType.Uzi,
       aimAngle: angle,
       facing: config.burst.facing,
@@ -1847,7 +1845,6 @@ export class GameSession {
       const seedBase = this.turnIndex * 100_000 + Math.round(atMs);
       const facing = (this.activeWorm.facing < 0 ? -1 : 1) as -1 | 1;
       this.uziBurst = {
-        origin: { x: this.activeWorm.x, y: this.activeWorm.y },
         facing,
         aimAngle: aim.angle,
         seedBase,

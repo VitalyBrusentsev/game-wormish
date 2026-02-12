@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { WeaponType } from "../definitions";
+import { GAMEPLAY, WeaponType } from "../definitions";
 import { GameSession } from "../game/session";
 
 interface CanvasContextMocks {
@@ -273,6 +273,49 @@ describe("GameSession turn logging", () => {
 
     expect(resolution.commandCount).toBe(log.commands.length);
     expect(resolution.projectileEventCount).toBe(log.projectileEvents.length);
+  });
+
+  it("spawns Uzi burst shots from the shooter's updated position", () => {
+    let now = 1000;
+    const session = new GameSession(320, 240, { random: createRng(29), now: () => now });
+    const sessionAny = session as any;
+    const worm = session.activeWorm;
+    const aim = { angle: 0, targetX: worm.x + 120, targetY: worm.y };
+
+    sessionAny.recordCommand({
+      type: "fire-charged-weapon",
+      weapon: WeaponType.Uzi,
+      power: 1,
+      aim,
+      atMs: 0,
+      projectileIds: [],
+    });
+
+    const log = sessionAny.turnLog as {
+      projectileEvents: Array<{
+        type: string;
+        position: { x: number; y: number };
+      }>;
+    };
+    const spawnEvents = () =>
+      log.projectileEvents.filter(
+        (event): event is { type: "projectile-spawned"; position: { x: number; y: number } } =>
+          event.type === "projectile-spawned"
+      );
+    expect(spawnEvents().length).toBeGreaterThan(0);
+
+    worm.x += 50;
+    worm.y -= 30;
+
+    now += 1000 / GAMEPLAY.uzi.shotsPerSecond + 1;
+    session.update(0);
+
+    const spawned = spawnEvents();
+    expect(spawned.length).toBeGreaterThan(1);
+    const first = spawned[0]!.position;
+    const second = spawned[1]!.position;
+    expect(second.x - first.x).toBeGreaterThan(40);
+    expect(second.y - first.y).toBeLessThan(-20);
   });
 });
 
