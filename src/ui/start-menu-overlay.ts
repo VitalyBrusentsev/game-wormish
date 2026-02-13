@@ -1,11 +1,13 @@
 import { type CloseReason, CommandDialog } from "./dialog";
+import type { MenuIconId } from "./menu-icons";
 
 type MenuMode = "start" | "pause";
+type StartMenuIconId = Extract<MenuIconId, "help" | "start" | "online">;
 
 type MenuItem = {
-  id: "help" | "start" | "friends";
+  id: "help" | "start" | "online";
   label: string;
-
+  icon: StartMenuIconId;
   enabled: boolean;
   action: "help" | "start" | "restart" | "network" | null;
 };
@@ -88,7 +90,7 @@ export class StartMenuOverlay {
       label.textContent = item.label;
 
       const icon = document.createElement("div");
-      icon.className = "menu-button__icon";
+      icon.className = `menu-button__icon menu-button__icon--${item.icon}`;
 
       button.appendChild(label);
       button.appendChild(icon);
@@ -135,21 +137,21 @@ export class StartMenuOverlay {
       {
         id: "help",
         label: "Help",
-
+        icon: "help",
         enabled: true,
         action: "help",
       },
       {
         id: "start",
         label: startLabel,
-
+        icon: "start",
         enabled: true,
         action: this.mode === "start" ? "start" : "restart",
       },
       {
-        id: "friends",
+        id: "online",
         label: "Play With Friends",
-
+        icon: "online",
         enabled: true,
         action: "network",
       },

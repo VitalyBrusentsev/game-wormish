@@ -1,10 +1,11 @@
 import { CommandDialog } from "./dialog";
+import type { MenuIconId } from "./menu-icons";
 
 type MatchResultItem = {
   id: "new-game" | "back";
   label: string;
   onClick: () => void;
-  showIcon: boolean;
+  icon: Extract<MenuIconId, "start" | "back">;
 };
 
 export type MatchResultCallbacks = {
@@ -72,11 +73,9 @@ export class MatchResultOverlay {
       label.textContent = item.label;
 
       button.appendChild(label);
-      if (item.showIcon) {
-        const icon = document.createElement("div");
-        icon.className = "menu-button__icon";
-        button.appendChild(icon);
-      }
+      const icon = document.createElement("div");
+      icon.className = `menu-button__icon menu-button__icon--${item.icon}`;
+      button.appendChild(icon);
       button.addEventListener("click", () => {
         this.dialog.hide();
         item.onClick();
@@ -93,13 +92,13 @@ export class MatchResultOverlay {
       {
         id: "new-game",
         label: "New Game",
-        showIcon: true,
+        icon: "start",
         onClick: () => this.callbacks.onNewGame(),
       },
       {
         id: "back",
         label: "Back",
-        showIcon: false,
+        icon: "back",
         onClick: () => this.callbacks.onBack(),
       },
     ];

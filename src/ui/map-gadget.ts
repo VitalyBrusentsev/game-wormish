@@ -3,6 +3,7 @@ import { clamp, COLORS } from "../definitions";
 import type { Projectile, Terrain } from "../entities";
 import type { Team } from "../game/team-manager";
 import { drawRoundedRect } from "../utils";
+import { drawMenuIconSprite } from "./menu-icons";
 
 export const MAP_GADGET_WIDTH_PX = 240;
 
@@ -36,6 +37,10 @@ const HUD_TO_GADGET_GAP_PX = 10;
 
 const FRAME_PAD_PX = 10;
 const FRAME_RADIUS_PX = 14;
+const SETTINGS_BUTTON_SIZE_PX = 46;
+const SETTINGS_BUTTON_GAP_PX = 10;
+const SETTINGS_ICON_WIDTH_PX = 26;
+const SETTINGS_ICON_HEIGHT_PX = SETTINGS_ICON_WIDTH_PX * (132 / 160);
 
 const MAP_BG = "rgba(5,6,8,0.72)";
 const MAP_GROUND = COLORS.dirtDark;
@@ -414,6 +419,34 @@ function drawProjectileDot(
   ctx.restore();
 }
 
+function drawSettingsIconUnderMap(ctx: CanvasRenderingContext2D, layout: Layout) {
+  const x = layout.x + (layout.outerWidth - SETTINGS_BUTTON_SIZE_PX) * 0.5;
+  const y = layout.y + layout.outerHeight + SETTINGS_BUTTON_GAP_PX;
+
+  ctx.save();
+  drawRoundedRect(ctx, x, y, SETTINGS_BUTTON_SIZE_PX, SETTINGS_BUTTON_SIZE_PX, 12);
+  const bg = ctx.createLinearGradient(x, y, x, y + SETTINGS_BUTTON_SIZE_PX);
+  bg.addColorStop(0, "rgba(72, 78, 88, 0.92)");
+  bg.addColorStop(1, "rgba(34, 38, 44, 0.95)");
+  ctx.fillStyle = bg;
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.22)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  const iconX = x + (SETTINGS_BUTTON_SIZE_PX - SETTINGS_ICON_WIDTH_PX) * 0.5;
+  const iconY = y + (SETTINGS_BUTTON_SIZE_PX - SETTINGS_ICON_HEIGHT_PX) * 0.5;
+  drawMenuIconSprite({
+    ctx,
+    icon: "settings",
+    x: iconX,
+    y: iconY,
+    width: SETTINGS_ICON_WIDTH_PX,
+    height: SETTINGS_ICON_HEIGHT_PX,
+  });
+  ctx.restore();
+}
+
 export function renderMapGadget({
   ctx,
   viewportWidth,
@@ -447,5 +480,6 @@ export function renderMapGadget({
   }
   drawSquadDots(ctx, layout, terrain, teams, radar);
   if (projectiles.length > 0) drawProjectileDot(ctx, layout, terrain, projectiles, radar);
+  drawSettingsIconUnderMap(ctx, layout);
   ctx.restore();
 }

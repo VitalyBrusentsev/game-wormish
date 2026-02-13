@@ -219,28 +219,31 @@ Start menu dialog
   min-width: 80px;
 
   background-image: url("../assets/menu_icons.png");
-  /* 300% width locks the horizontal steps. auto height preserves aspect ratio. */
-  background-size: 300% auto;
+  /* Five horizontal frames in menu_icons.png. */
+  background-size: 500% auto;
   background-repeat: no-repeat;
   filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.4));
 }
 
-.menu-button--help .menu-button__icon {
+.menu-button__icon--help {
   background-position: 0% 50%;
 }
 
-.menu-button--start .menu-button__icon {
+.menu-button__icon--start {
+  background-position: 25% 50%;
+}
+
+.menu-button__icon--online {
   background-position: 50% 50%;
 }
 
-.menu-button--friends .menu-button__icon {
+.menu-button__icon--settings {
+  background-position: 75% 50%;
+}
+
+.menu-button__icon--back {
   background-position: 100% 50%;
 }
-
-.menu-button--new-game .menu-button__icon {
-  background-position: 50% 50%;
-}
-
 
 
 /*
