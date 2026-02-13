@@ -22,6 +22,7 @@ export class Worm {
   onGround: boolean;
   name: string;
   age: number;
+  preferredWeapon: WeaponType;
   private saluteStartMs: number | null = null;
   private saluteUntilMs = 0;
   private static readonly saluteTimeScale = 1;
@@ -40,6 +41,7 @@ export class Worm {
     this.onGround = false;
     this.name = name;
     this.age = 0;
+    this.preferredWeapon = WeaponType.Bazooka;
     this.visualAnimator = new WormVisualAnimator(this.x, this.y);
   }
 
