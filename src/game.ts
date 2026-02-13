@@ -1,6 +1,6 @@
 import type { TeamId, PredictedPoint } from "./definitions";
 import { GAMEPLAY, WeaponType, nowMs, COLORS, WORLD, clamp } from "./definitions";
-import { Input, drawArrow, drawCircle, drawCrosshair, drawText } from "./utils";
+import { Input, drawArrow, drawCircle, drawCrosshair, drawRoundedRect, drawText } from "./utils";
 import type { Worm } from "./entities";
 import { HelpOverlay } from "./ui/help-overlay";
 import { StartMenuOverlay } from "./ui/start-menu-overlay";
@@ -18,6 +18,7 @@ import {
 } from "./rendering/game-rendering";
 import { renderNetworkLogHUD } from "./ui/network-log-hud";
 import { renderMapGadget } from "./ui/map-gadget";
+import { drawMenuIconSprite } from "./ui/menu-icons";
 import type { Team } from "./game/team-manager";
 import {
   GameSession,
@@ -208,6 +209,17 @@ const MOBILE_AIM_LINE_MAX_PX = 180;
 const MOBILE_DEFAULT_AIM_DISTANCE_PX = 140;
 const MOBILE_DEFAULT_AIM_ANGLE_UP_DEG = 30;
 const MATCH_RESULT_DIALOG_DELAY_MS = 1000;
+const SETTINGS_BUTTON_SIZE_PX = 48;
+const SETTINGS_BUTTON_PADDING_PX = 14;
+const SETTINGS_ICON_WIDTH_PX = 28;
+const SETTINGS_ICON_HEIGHT_PX = SETTINGS_ICON_WIDTH_PX * (132 / 160);
+
+type Rect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
 type MobileMovementAssistState = {
   destinationX: number;
@@ -265,6 +277,19 @@ export class Game {
   private lastTimeMs = 0;
 
   private readonly pointerDownFocusHandler = () => this.canvas.focus();
+  private readonly pointerDownSettingsHandler = (event: PointerEvent) => {
+    if (!event.isPrimary) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (!this.isSettingsButtonVisible()) return;
+
+    const pointer = this.clientToCanvasPoint(event.clientX, event.clientY);
+    if (!pointer) return;
+    if (!this.isPointInsideRect(pointer.x, pointer.y, this.getSettingsButtonScreenBounds())) return;
+
+    this.openPauseMenu();
+    event.preventDefault();
+    event.stopPropagation();
+  };
   private readonly mouseDownFocusHandler = () => this.canvas.focus();
   private readonly touchStartFocusHandler = () => this.canvas.focus();
 
@@ -620,6 +645,47 @@ export class Game {
       x: (worldX - this.cameraX) * this.worldZoom + this.cameraOffsetX,
       y: (worldY - this.cameraY) * this.worldZoom + this.cameraOffsetY,
     };
+  }
+
+  private clientToCanvasPoint(clientX: number, clientY: number) {
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      x: (clientX - rect.left) * (this.canvas.width / rect.width),
+      y: (clientY - rect.top) * (this.canvas.height / rect.height),
+    };
+  }
+
+  private isPointInsideRect(x: number, y: number, rect: Rect) {
+    return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
+  }
+
+  private isSettingsButtonVisible() {
+    return initialMenuDismissed && !this.hasBlockingOverlay();
+  }
+
+  private getSettingsButtonLayoutBounds(): Rect {
+    return {
+      x: this.width - SETTINGS_BUTTON_PADDING_PX - SETTINGS_BUTTON_SIZE_PX,
+      y: this.height - SETTINGS_BUTTON_PADDING_PX - SETTINGS_BUTTON_SIZE_PX,
+      width: SETTINGS_BUTTON_SIZE_PX,
+      height: SETTINGS_BUTTON_SIZE_PX,
+    };
+  }
+
+  private getSettingsButtonScreenBounds(): Rect {
+    const layout = this.getSettingsButtonLayoutBounds();
+    return {
+      x: layout.x + this.cameraOffsetX,
+      y: layout.y + this.cameraOffsetY,
+      width: layout.width,
+      height: layout.height,
+    };
+  }
+
+  private openPauseMenu() {
+    this.showStartMenu(initialMenuDismissed ? "pause" : "start", initialMenuDismissed);
+    this.updateCursor();
   }
 
   private panCameraByScreenDelta(deltaScreenX: number, deltaScreenY: number) {
@@ -1010,6 +1076,7 @@ export class Game {
     parent.appendChild(this.canvas);
     this.canvas.tabIndex = 0;
     this.canvas.focus();
+    this.canvas.addEventListener("pointerdown", this.pointerDownSettingsHandler, { capture: true });
     this.canvas.addEventListener("pointerdown", this.pointerDownFocusHandler);
     this.canvas.addEventListener("mousedown", this.mouseDownFocusHandler);
     this.canvas.addEventListener("touchstart", this.touchStartFocusHandler);
@@ -1066,6 +1133,7 @@ export class Game {
     this.disposeMobileControllers();
     this.input.detach();
     this.canvas.style.touchAction = "";
+    this.canvas.removeEventListener("pointerdown", this.pointerDownSettingsHandler, { capture: true });
     this.canvas.removeEventListener("pointerdown", this.pointerDownFocusHandler);
     this.canvas.removeEventListener("mousedown", this.mouseDownFocusHandler);
     this.canvas.removeEventListener("touchstart", this.touchStartFocusHandler);
@@ -1781,8 +1849,7 @@ export class Game {
     }
 
     if (escapePressed) {
-      this.showStartMenu(initialMenuDismissed ? "pause" : "start", initialMenuDismissed);
-      this.updateCursor();
+      this.openPauseMenu();
       return;
     }
 
@@ -2287,6 +2354,34 @@ export class Game {
     ctx.restore();
   }
 
+  private renderSettingsButton(ctx: CanvasRenderingContext2D) {
+    if (!this.isSettingsButtonVisible()) return;
+
+    const bounds = this.getSettingsButtonLayoutBounds();
+    ctx.save();
+    drawRoundedRect(ctx, bounds.x, bounds.y, bounds.width, bounds.height, 12);
+    const bg = ctx.createLinearGradient(bounds.x, bounds.y, bounds.x, bounds.y + bounds.height);
+    bg.addColorStop(0, "rgba(72, 78, 88, 0.92)");
+    bg.addColorStop(1, "rgba(34, 38, 44, 0.95)");
+    ctx.fillStyle = bg;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.22)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    const iconX = bounds.x + (bounds.width - SETTINGS_ICON_WIDTH_PX) * 0.5;
+    const iconY = bounds.y + (bounds.height - SETTINGS_ICON_HEIGHT_PX) * 0.5;
+    drawMenuIconSprite({
+      ctx,
+      icon: "settings",
+      x: iconX,
+      y: iconY,
+      width: SETTINGS_ICON_WIDTH_PX,
+      height: SETTINGS_ICON_HEIGHT_PX,
+    });
+    ctx.restore();
+  }
+
   render() {
     const now = nowMs();
     const networkSnapshot = this.networkState.getSnapshot();
@@ -2423,8 +2518,10 @@ export class Game {
 
     renderNetworkLogHUD(ctx, this.width, this.height, this.networkState);
 
+    this.renderSettingsButton(ctx);
+
     const fpsText = `FPS: ${Math.round(this.fps)}`;
-    drawText(ctx, fpsText, this.width - 12, this.height - 12, COLORS.white, 12, "right", "bottom");
+    drawText(ctx, fpsText, 12, this.height - 12, COLORS.white, 12, "left", "bottom");
     ctx.restore();
   }
 
