@@ -174,4 +174,28 @@ describe("RoomManager connection state handling", () => {
     expect(stateChanges[stateChanges.length - 1]).toBe(ConnectionState.IDLE);
     expect(registryClientMock.closeRoom).toHaveBeenCalledWith("ROOM", "token");
   });
+
+  it("skips registry close after connection is established", async () => {
+    stateManager.setState(ConnectionState.CONNECTED);
+
+    await roomManager.closeRoom();
+
+    expect(registryClientMock.closeRoom).not.toHaveBeenCalled();
+  });
+
+  it("skips registry close for guests", async () => {
+    stateManager.setRoomInfo({
+      code: "ROOM",
+      hostUserName: "host",
+      guestUserName: "guest",
+      role: "guest",
+      token: "guest-token",
+      expiresAt: Date.now() + 1000,
+    });
+    stateManager.setState(ConnectionState.CONNECTING);
+
+    await roomManager.closeRoom();
+
+    expect(registryClientMock.closeRoom).not.toHaveBeenCalled();
+  });
 });

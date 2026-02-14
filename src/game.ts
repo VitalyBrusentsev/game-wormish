@@ -238,6 +238,8 @@ const SETTINGS_BUTTON_SIZE_PX = 48;
 const SETTINGS_BUTTON_PADDING_PX = 14;
 const SETTINGS_ICON_WIDTH_PX = 28;
 const SETTINGS_ICON_HEIGHT_PX = SETTINGS_ICON_WIDTH_PX * (132 / 160);
+const SETTINGS_GHOST_CLICK_SUPPRESSION_MS = 650;
+const SETTINGS_GHOST_CLICK_RADIUS_PX = 36;
 const NETWORK_TEARDOWN_TIMEOUT_MS = 3000;
 
 type Rect = {
@@ -316,9 +318,19 @@ export class Game {
     if (!pointer) return;
     if (!this.isPointInsideRect(pointer.x, pointer.y, this.getSettingsButtonScreenBounds())) return;
 
+    if (event.pointerType !== "mouse") {
+      this.armSettingsGhostClickSuppression(event.clientX, event.clientY);
+    }
     this.openPauseMenu();
     event.preventDefault();
     event.stopPropagation();
+  };
+  private readonly globalClickSuppressionHandler = (event: MouseEvent) => {
+    if (!this.shouldSuppressSettingsGhostClick(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    this.clearSettingsGhostClickSuppression();
   };
   private readonly mouseDownFocusHandler = () => this.canvas.focus();
   private readonly touchStartFocusHandler = () => this.canvas.focus();
@@ -350,6 +362,8 @@ export class Game {
   private mobileDraggingMovement = false;
   private mobileMovementAssist: MobileMovementAssistState | null = null;
   private matchResultDialogTimerId: number | null = null;
+  private settingsGhostClickUntilMs = 0;
+  private settingsGhostClickClientPoint: { x: number; y: number } | null = null;
 
   constructor(width: number, height: number, options?: GameOptions) {
     this.width = width;
@@ -719,6 +733,28 @@ export class Game {
   private openPauseMenu() {
     this.showStartMenu(initialMenuDismissed ? "pause" : "start", initialMenuDismissed);
     this.updateCursor();
+  }
+
+  private armSettingsGhostClickSuppression(clientX: number, clientY: number) {
+    this.settingsGhostClickUntilMs = nowMs() + SETTINGS_GHOST_CLICK_SUPPRESSION_MS;
+    this.settingsGhostClickClientPoint = { x: clientX, y: clientY };
+  }
+
+  private clearSettingsGhostClickSuppression() {
+    this.settingsGhostClickUntilMs = 0;
+    this.settingsGhostClickClientPoint = null;
+  }
+
+  private shouldSuppressSettingsGhostClick(event: MouseEvent) {
+    if (this.settingsGhostClickUntilMs <= 0 || this.settingsGhostClickClientPoint === null) return false;
+    if (nowMs() > this.settingsGhostClickUntilMs) {
+      this.clearSettingsGhostClickSuppression();
+      return false;
+    }
+    const point = this.settingsGhostClickClientPoint;
+    const dx = event.clientX - point.x;
+    const dy = event.clientY - point.y;
+    return dx * dx + dy * dy <= SETTINGS_GHOST_CLICK_RADIUS_PX * SETTINGS_GHOST_CLICK_RADIUS_PX;
   }
 
   private panCameraByScreenDelta(deltaScreenX: number, deltaScreenY: number) {
@@ -1136,6 +1172,10 @@ export class Game {
     parent.appendChild(this.canvas);
     this.canvas.tabIndex = 0;
     this.canvas.focus();
+    window.addEventListener("click", this.globalClickSuppressionHandler, {
+      capture: true,
+      signal: this.eventAbort.signal,
+    });
     this.canvas.addEventListener("pointerdown", this.pointerDownSettingsHandler, { capture: true });
     this.canvas.addEventListener("pointerdown", this.pointerDownFocusHandler);
     this.canvas.addEventListener("mousedown", this.mouseDownFocusHandler);

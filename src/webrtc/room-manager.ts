@@ -474,11 +474,12 @@ export class RoomManager implements IRoomManager {
    */
   async closeRoom(): Promise<void> {
     const roomInfo = this.stateManager.getRoomInfo();
-    if (roomInfo) {
+    const connectionState = this.stateManager.getState();
+    if (roomInfo && this.shouldCloseRegistryRoom(roomInfo, connectionState)) {
       try {
         await this.registryClient.closeRoom(roomInfo.code, roomInfo.token);
-      } catch (error) {
-        console.error("Failed to close room:", error);
+      } catch {
+        // Room close is best-effort during setup and may fail if already expired.
       }
     }
 
@@ -550,5 +551,17 @@ export class RoomManager implements IRoomManager {
 
   private emitDebug(event: DebugEvent): void {
     this.debugCallbacks.forEach((cb) => cb(event));
+  }
+
+  private shouldCloseRegistryRoom(roomInfo: RoomInfo, connectionState: ConnectionState): boolean {
+    if (roomInfo.role !== "host") {
+      return false;
+    }
+
+    return (
+      connectionState === ConnectionState.CREATING
+      || connectionState === ConnectionState.CREATED
+      || connectionState === ConnectionState.CONNECTING
+    );
   }
 }
