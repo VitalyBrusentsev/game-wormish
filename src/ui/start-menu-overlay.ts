@@ -19,6 +19,9 @@ export type StartMenuCallbacks = {
   onStart: () => void;
   onRestart: () => void;
   onNetworkMatch: () => void;
+  getAudioToggles: () => { soundOn: boolean; musicOn: boolean };
+  onToggleSound: (enabled: boolean) => void;
+  onToggleMusic: (enabled: boolean) => void;
   onClose: (reason: CloseReason) => void;
 };
 
@@ -27,6 +30,7 @@ export class StartMenuOverlay {
   private readonly callbacks: StartMenuCallbacks;
   private mode: MenuMode = "start";
   private closeable = true;
+  private audioToggles = { soundOn: true, musicOn: true };
 
   constructor(callbacks: StartMenuCallbacks) {
     this.callbacks = callbacks;
@@ -36,6 +40,7 @@ export class StartMenuOverlay {
   show(mode: MenuMode = this.mode, closeable = true) {
     this.mode = mode;
     this.closeable = closeable;
+    this.audioToggles = this.callbacks.getAudioToggles();
     this.dialog.show({
       title: "Worm Command Center",
       subtitle: "Time to wreak havoc and have some fun!",
@@ -72,8 +77,6 @@ export class StartMenuOverlay {
     const container = document.createElement("div");
     container.className = "menu-dialog";
 
-
-
     const list = document.createElement("div");
     list.className = "menu-options";
 
@@ -94,18 +97,66 @@ export class StartMenuOverlay {
 
       button.appendChild(label);
       button.appendChild(icon);
-
-
       button.addEventListener("click", () => this.triggerAction(item.action));
 
       list.appendChild(button);
     }
 
     container.appendChild(list);
-
-
+    container.appendChild(this.buildAudioToggleRow());
 
     return container;
+  }
+
+  private buildAudioToggleRow() {
+    const audioRow = document.createElement("div");
+    audioRow.className = "menu-audio-row";
+
+    const soundButton = document.createElement("button");
+    soundButton.type = "button";
+    soundButton.className = "menu-audio-toggle";
+
+    const separator = document.createElement("span");
+    separator.className = "menu-audio-separator";
+    separator.textContent = "|";
+
+    const musicButton = document.createElement("button");
+    musicButton.type = "button";
+    musicButton.className = "menu-audio-toggle";
+
+    const refreshSound = () => {
+      this.updateAudioToggleButton(soundButton, "Sound", this.audioToggles.soundOn);
+    };
+    const refreshMusic = () => {
+      this.updateAudioToggleButton(musicButton, "Music", this.audioToggles.musicOn);
+    };
+
+    refreshSound();
+    refreshMusic();
+
+    soundButton.addEventListener("click", () => {
+      this.audioToggles.soundOn = !this.audioToggles.soundOn;
+      refreshSound();
+      this.callbacks.onToggleSound(this.audioToggles.soundOn);
+    });
+
+    musicButton.addEventListener("click", () => {
+      this.audioToggles.musicOn = !this.audioToggles.musicOn;
+      refreshMusic();
+      this.callbacks.onToggleMusic(this.audioToggles.musicOn);
+    });
+
+    audioRow.appendChild(soundButton);
+    audioRow.appendChild(separator);
+    audioRow.appendChild(musicButton);
+    return audioRow;
+  }
+
+  private updateAudioToggleButton(button: HTMLButtonElement, label: string, enabled: boolean) {
+    button.textContent = `${label}: ${enabled ? "On" : "Off"}`;
+    button.classList.toggle("menu-audio-toggle--on", enabled);
+    button.classList.toggle("menu-audio-toggle--off", !enabled);
+    button.setAttribute("aria-pressed", enabled ? "true" : "false");
   }
 
   private triggerAction(action: MenuAction) {
@@ -131,8 +182,6 @@ export class StartMenuOverlay {
 
   private getItems(): MenuItem[] {
     const startLabel = this.mode === "start" ? "Start" : "Restart Mission";
-
-
     return [
       {
         id: "help",

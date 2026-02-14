@@ -242,6 +242,8 @@ const SETTINGS_ICON_HEIGHT_PX = SETTINGS_ICON_WIDTH_PX * (132 / 160);
 const SETTINGS_GHOST_CLICK_SUPPRESSION_MS = 650;
 const SETTINGS_GHOST_CLICK_RADIUS_PX = 36;
 const NETWORK_TEARDOWN_TIMEOUT_MS = 3000;
+const DEFAULT_MENU_SFX_LEVEL = 0.9;
+const DEFAULT_MENU_MUSIC_LEVEL = 0.6;
 
 type Rect = {
   x: number;
@@ -347,6 +349,8 @@ export class Game {
   private readonly activeWormArrow = new ActiveWormArrow();
   private readonly turnCountdown = new TurnCountdownOverlay();
   private readonly sound = new SoundSystem();
+  private lastMenuSfxLevel = DEFAULT_MENU_SFX_LEVEL;
+  private lastMenuMusicLevel = DEFAULT_MENU_MUSIC_LEVEL;
 
   private readonly turnControllers = new Map<TeamId, TurnDriver>();
   private readonly singlePlayer: ResolvedSinglePlayerConfig;
@@ -393,6 +397,7 @@ export class Game {
 
     this.input = new Input();
     this.input.attach(this.canvas);
+    this.sound.setLevels({ music: 0 });
 
     this.networkState = new NetworkSessionState();
 
@@ -480,6 +485,9 @@ export class Game {
         this.hideStartMenu();
         this.networkDialog.show("host");
       },
+      getAudioToggles: () => this.getMenuAudioToggles(),
+      onToggleSound: (enabled) => this.setMenuSoundEnabled(enabled),
+      onToggleMusic: (enabled) => this.setMenuMusicEnabled(enabled),
       onClose: (reason) => {
         if (reason === "escape") {
           this.input.consumeKey("Escape");
@@ -1311,6 +1319,46 @@ export class Game {
 
   setSoundLevels(levels: Partial<SoundLevels>) {
     this.sound.setLevels(levels);
+  }
+
+  private getMenuAudioToggles() {
+    const snapshot = this.sound.getSnapshot();
+    return {
+      soundOn: snapshot.enabled && snapshot.levels.sfx > 0,
+      musicOn: snapshot.enabled && snapshot.levels.music > 0,
+    };
+  }
+
+  private setMenuSoundEnabled(enabled: boolean) {
+    const snapshot = this.sound.getSnapshot();
+    if (enabled) {
+      this.sound.setEnabled(true);
+      const nextLevel = this.lastMenuSfxLevel > 0 ? this.lastMenuSfxLevel : DEFAULT_MENU_SFX_LEVEL;
+      this.sound.setLevels({ sfx: nextLevel });
+      void this.sound.unlock().catch(() => { });
+      return;
+    }
+
+    if (snapshot.levels.sfx > 0) {
+      this.lastMenuSfxLevel = snapshot.levels.sfx;
+    }
+    this.sound.setLevels({ sfx: 0 });
+  }
+
+  private setMenuMusicEnabled(enabled: boolean) {
+    const snapshot = this.sound.getSnapshot();
+    if (enabled) {
+      this.sound.setEnabled(true);
+      const nextLevel = this.lastMenuMusicLevel > 0 ? this.lastMenuMusicLevel : DEFAULT_MENU_MUSIC_LEVEL;
+      this.sound.setLevels({ music: nextLevel });
+      void this.sound.unlock().catch(() => { });
+      return;
+    }
+
+    if (snapshot.levels.music > 0) {
+      this.lastMenuMusicLevel = snapshot.levels.music;
+    }
+    this.sound.setLevels({ music: 0 });
   }
 
   onNetworkStateChange(callback: (state: NetworkSessionState) => void) {
