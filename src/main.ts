@@ -11,10 +11,23 @@ function main(): void {
   let game: Game | null = null;
   let resizeScheduled = false;
 
+  const readViewportSize = () => {
+    const viewport = window.visualViewport;
+    if (viewport) {
+      return {
+        width: Math.max(1, Math.round(viewport.width)),
+        height: Math.max(1, Math.round(viewport.height)),
+      };
+    }
+    return {
+      width: Math.max(1, window.innerWidth | 0),
+      height: Math.max(1, window.innerHeight | 0),
+    };
+  };
+
   const applyResize = () => {
     resizeScheduled = false;
-    const width = window.innerWidth | 0;
-    const height = window.innerHeight | 0;
+    const { width, height } = readViewportSize();
     if (!game) {
       const newGame = new Game(width, height, {
         singlePlayer: SINGLE_PLAYER_CONFIG,
@@ -35,6 +48,8 @@ function main(): void {
   };
 
   window.addEventListener("resize", scheduleResize);
+  window.visualViewport?.addEventListener("resize", scheduleResize);
+  window.visualViewport?.addEventListener("scroll", scheduleResize);
   applyResize();
 }
 

@@ -27,8 +27,8 @@ export class MobileGestureController {
   private downAtMs = 0;
   private startX = 0;
   private startY = 0;
-  private lastX = 0;
-  private lastY = 0;
+  private lastCanvasX = 0;
+  private lastCanvasY = 0;
   private startWorldX = 0;
   private startWorldY = 0;
 
@@ -42,9 +42,10 @@ export class MobileGestureController {
     this.downAtMs = performance.now();
     this.startX = event.clientX;
     this.startY = event.clientY;
-    this.lastX = event.clientX;
-    this.lastY = event.clientY;
-    const startWorld = this.callbacks.screenToWorld(event.clientX, event.clientY);
+    const startCanvas = this.toCanvasPoint(event.clientX, event.clientY);
+    this.lastCanvasX = startCanvas.x;
+    this.lastCanvasY = startCanvas.y;
+    const startWorld = this.callbacks.screenToWorld(startCanvas.x, startCanvas.y);
     this.startWorldX = startWorld.x;
     this.startWorldY = startWorld.y;
 
@@ -65,11 +66,12 @@ export class MobileGestureController {
     if (!this.callbacks.isEnabled()) return;
     if (event.pointerId !== this.activePointerId) return;
 
-    const dx = event.clientX - this.lastX;
-    const dy = event.clientY - this.lastY;
-    this.lastX = event.clientX;
-    this.lastY = event.clientY;
-    const world = this.callbacks.screenToWorld(event.clientX, event.clientY);
+    const canvasPoint = this.toCanvasPoint(event.clientX, event.clientY);
+    const dx = canvasPoint.x - this.lastCanvasX;
+    const dy = canvasPoint.y - this.lastCanvasY;
+    this.lastCanvasX = canvasPoint.x;
+    this.lastCanvasY = canvasPoint.y;
+    const world = this.callbacks.screenToWorld(canvasPoint.x, canvasPoint.y);
 
     if (this.mode === "aim") {
       this.callbacks.onAimGesture(world.x, world.y);
@@ -103,7 +105,8 @@ export class MobileGestureController {
   private readonly handlePointerUp = (event: PointerEvent) => {
     if (!this.callbacks.isEnabled()) return;
     if (event.pointerId !== this.activePointerId) return;
-    const world = this.callbacks.screenToWorld(event.clientX, event.clientY);
+    const canvasPoint = this.toCanvasPoint(event.clientX, event.clientY);
+    const world = this.callbacks.screenToWorld(canvasPoint.x, canvasPoint.y);
     const moveDist = Math.hypot(event.clientX - this.startX, event.clientY - this.startY);
     const elapsedMs = performance.now() - this.downAtMs;
 
@@ -146,6 +149,17 @@ export class MobileGestureController {
     if (this.activePointerId !== null) {
       this.cleanupPointer(this.activePointerId);
     }
+  }
+
+  private toCanvasPoint(clientX: number, clientY: number): WorldPoint {
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return { x: clientX, y: clientY };
+    }
+    return {
+      x: (clientX - rect.left) * (this.canvas.width / rect.width),
+      y: (clientY - rect.top) * (this.canvas.height / rect.height),
+    };
   }
 
   private cleanupPointer(pointerId: number) {

@@ -13,9 +13,21 @@ function hasCoarsePointer(): boolean {
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
 }
 
+function isPortraitOrientation(): boolean {
+  if (typeof window === "undefined") return false;
+  if (typeof window.matchMedia === "function") {
+    try {
+      return window.matchMedia("(orientation: portrait)").matches;
+    } catch {
+      // ignore and fallback
+    }
+  }
+  return window.innerHeight >= window.innerWidth;
+}
+
 export function detectControlProfile(): ControlProfile {
   if (typeof window === "undefined") return "desktop";
   const coarse = hasCoarsePointer();
-  const portrait = window.innerHeight >= window.innerWidth;
+  const portrait = isPortraitOrientation();
   return coarse && portrait ? "mobile-portrait" : "desktop";
 }

@@ -17,7 +17,10 @@ describe("detectControlProfile", () => {
       innerWidth: 390,
       innerHeight: 844,
       matchMedia: (query: string) => ({
-        matches: query === "(pointer: coarse)" || query === "(any-pointer: coarse)",
+        matches:
+          query === "(pointer: coarse)" ||
+          query === "(any-pointer: coarse)" ||
+          query === "(orientation: portrait)",
       }),
     });
 
@@ -29,9 +32,27 @@ describe("detectControlProfile", () => {
     vi.stubGlobal("window", {
       innerWidth: 1024,
       innerHeight: 600,
-      matchMedia: (_query: string) => ({ matches: true }),
+      matchMedia: (query: string) => ({
+        matches: query === "(pointer: coarse)" || query === "(any-pointer: coarse)",
+      }),
     });
 
     expect(detectControlProfile()).toBe("desktop");
+  });
+
+  it("keeps mobile profile with portrait media query during transient viewport shrink", () => {
+    vi.stubGlobal("navigator", { maxTouchPoints: 1 });
+    vi.stubGlobal("window", {
+      innerWidth: 390,
+      innerHeight: 320,
+      matchMedia: (query: string) => ({
+        matches:
+          query === "(pointer: coarse)" ||
+          query === "(any-pointer: coarse)" ||
+          query === "(orientation: portrait)",
+      }),
+    });
+
+    expect(detectControlProfile()).toBe("mobile-portrait");
   });
 });

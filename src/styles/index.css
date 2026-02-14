@@ -20,7 +20,9 @@ body {
 canvas {
   display: block;
   width: 100vw;
+  width: 100dvw;
   height: 100vh;
+  height: 100dvh;
   image-rendering: auto;
 }
 
