@@ -1,6 +1,6 @@
 import type { TeamId, PredictedPoint } from "./definitions";
 import { GAMEPLAY, WeaponType, nowMs, COLORS, WORLD, clamp } from "./definitions";
-import { Input, drawArrow, drawCircle, drawCrosshair, drawRoundedRect, drawText } from "./utils";
+import { Input, drawArrow, drawCrosshair, drawRoundedRect, drawText } from "./utils";
 import type { Worm } from "./entities";
 import { HelpOverlay } from "./ui/help-overlay";
 import { StartMenuOverlay } from "./ui/start-menu-overlay";
@@ -257,6 +257,12 @@ type MobileMovementAssistState = {
   jumpRequested: boolean;
 };
 
+type MobileMovementGhostSprite = {
+  canvas: HTMLCanvasElement;
+  anchorX: number;
+  anchorY: number;
+};
+
 export class Game {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
@@ -360,6 +366,7 @@ export class Game {
   private mobileAimButtonVisible = false;
   private mobileAimTarget: { x: number; y: number } | null = null;
   private mobileMovementGhostX: number | null = null;
+  private mobileMovementGhostSprite: MobileMovementGhostSprite | null = null;
   private mobileDraggingMovement = false;
   private mobileMovementAssist: MobileMovementAssistState | null = null;
   private matchResultDialogTimerId: number | null = null;
@@ -601,6 +608,7 @@ export class Game {
     this.mobileAimTarget = null;
     this.mobileDraggingMovement = false;
     this.mobileMovementGhostX = null;
+    this.mobileMovementGhostSprite = null;
     this.mobileMovementAssist = null;
   }
 
@@ -897,6 +905,7 @@ export class Game {
     this.mobileDraggingMovement = true;
     this.mobileAimButtonVisible = false;
     this.mobileWeaponPickerOpen = false;
+    this.captureMobileMovementGhostSprite();
     this.mobileMovementGhostX = clamp(worldX, this.session.terrain.worldLeft, this.session.terrain.worldRight);
   }
 
@@ -911,6 +920,7 @@ export class Game {
     const destinationX = clamp(worldX, this.session.terrain.worldLeft, this.session.terrain.worldRight);
     if (Math.abs(destinationX - this.activeWorm.x) <= MOBILE_GHOST_REACH_PX) {
       this.mobileMovementGhostX = null;
+      this.mobileMovementGhostSprite = null;
       return;
     }
     this.mobileMovementAssist = {
@@ -926,7 +936,40 @@ export class Game {
   private stopMobileMovementAssist(clearGhost: boolean) {
     this.mobileMovementAssist = null;
     this.mobileDraggingMovement = false;
-    if (clearGhost) this.mobileMovementGhostX = null;
+    if (clearGhost) {
+      this.mobileMovementGhostX = null;
+      this.mobileMovementGhostSprite = null;
+    }
+  }
+
+  private captureMobileMovementGhostSprite() {
+    const worm = this.activeWorm;
+    if (!worm.alive) {
+      this.mobileMovementGhostSprite = null;
+      return;
+    }
+
+    const spriteSize = Math.max(112, Math.ceil(worm.radius * 8));
+    const spriteCanvas = this.canvas.ownerDocument.createElement("canvas");
+    spriteCanvas.width = spriteSize;
+    spriteCanvas.height = spriteSize;
+    const spriteCtx = spriteCanvas.getContext("2d");
+    if (!spriteCtx) {
+      this.mobileMovementGhostSprite = null;
+      return;
+    }
+
+    const anchorX = spriteSize * 0.5;
+    const anchorY = Math.round(spriteSize * 0.58);
+    const clipTop = Math.max(0, Math.floor(anchorY - 44));
+    spriteCtx.save();
+    spriteCtx.beginPath();
+    spriteCtx.rect(0, clipTop, spriteSize, spriteSize - clipTop);
+    spriteCtx.clip();
+    spriteCtx.translate(anchorX - worm.x, anchorY - worm.y);
+    worm.render(spriteCtx, false, null);
+    spriteCtx.restore();
+    this.mobileMovementGhostSprite = { canvas: spriteCanvas, anchorX, anchorY };
   }
 
   private updateMobileMovementAssist(dt: number) {
@@ -2477,11 +2520,14 @@ export class Game {
     return this.session.getRenderAimInfo();
   }
 
-  private getTerrainSurfaceY(worldX: number) {
+  private getTerrainSurfaceY(worldX: number, radius: number) {
     const terrain = this.session.terrain;
     const idx = clamp(Math.round(worldX - terrain.worldLeft), 0, terrain.heightMap.length - 1);
     const topSolidY = terrain.heightMap[idx] ?? terrain.height;
-    return topSolidY - this.activeWorm.radius;
+    const approxY = topSolidY - radius;
+    if (!terrain.circleCollides(worldX, approxY, radius)) return approxY;
+    const resolved = terrain.resolveCircle(worldX, approxY, radius, Math.max(24, radius + 18));
+    return resolved.y;
   }
 
   private renderMobileMovementGhost(ctx: CanvasRenderingContext2D) {
@@ -2491,28 +2537,55 @@ export class Game {
     if (this.session.state.phase !== "aim") return;
     const worm = this.activeWorm;
     if (!worm.alive) return;
-    const ghostY = this.getTerrainSurfaceY(ghostX);
-    const toward = ghostX < worm.x ? -1 : 1;
-    const direction = (toward < 0 ? -1 : 1) as -1 | 1;
-    const ringCol = this.mobileMovementAssist
+    const wormSurfaceY = this.getTerrainSurfaceY(worm.x, worm.radius);
+    const verticalOffset = worm.y - wormSurfaceY;
+    const ghostY = this.getTerrainSurfaceY(ghostX, worm.radius) + verticalOffset;
+    const markerCol = this.mobileMovementAssist
       ? "rgba(150, 255, 200, 0.95)"
       : "rgba(255, 250, 170, 0.95)";
-    ctx.save();
-    ctx.globalAlpha = 0.9;
-    ctx.strokeStyle = ringCol;
-    ctx.lineWidth = 2;
-    drawCircle(ctx, ghostX, ghostY, worm.radius * 0.92);
-    ctx.stroke();
-    drawArrow(
-      ctx,
-      worm.x,
-      worm.y - worm.radius * 1.8,
-      direction < 0 ? Math.PI : 0,
-      Math.max(24, Math.min(140, Math.abs(ghostX - worm.x))),
-      ringCol,
-      3
-    );
-    ctx.restore();
+
+    const ghostSprite = this.mobileMovementGhostSprite;
+    if (ghostSprite) {
+      ctx.save();
+      ctx.globalAlpha = this.mobileMovementAssist ? 0.58 : 0.5;
+      ctx.drawImage(
+        ghostSprite.canvas,
+        ghostX - ghostSprite.anchorX,
+        ghostY - ghostSprite.anchorY
+      );
+      ctx.restore();
+    } else {
+      const bodyW = worm.radius * 2.2;
+      const bodyH = worm.radius * 2.4;
+      ctx.save();
+      ctx.globalAlpha = 0.42;
+      ctx.fillStyle = markerCol;
+      drawRoundedRect(
+        ctx,
+        ghostX - bodyW * 0.5,
+        ghostY - bodyH * 0.85,
+        bodyW,
+        bodyH,
+        bodyW * 0.35
+      );
+      ctx.fill();
+      ctx.restore();
+    }
+
+    const dx = ghostX - worm.x;
+    const dy = ghostY - worm.y;
+    const length = Math.hypot(dx, dy);
+    if (length > 1e-6) {
+      drawArrow(
+        ctx,
+        worm.x,
+        worm.y,
+        Math.atan2(dy, dx),
+        length,
+        markerCol,
+        3
+      );
+    }
   }
 
   private renderMobileAimDragCrosshair(ctx: CanvasRenderingContext2D, aim: AimInfo) {
