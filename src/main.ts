@@ -14,9 +14,13 @@ function main(): void {
   const readViewportSize = () => {
     const viewport = window.visualViewport;
     if (viewport) {
+      const scale =
+        Number.isFinite(viewport.scale) && viewport.scale > 0
+          ? viewport.scale
+          : 1;
       return {
-        width: Math.max(1, Math.round(viewport.width)),
-        height: Math.max(1, Math.round(viewport.height)),
+        width: Math.max(1, Math.round(viewport.width * scale)),
+        height: Math.max(1, Math.round(viewport.height * scale)),
       };
     }
     return {

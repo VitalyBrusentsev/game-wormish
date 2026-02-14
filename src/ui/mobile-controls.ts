@@ -31,6 +31,27 @@ const WEAPON_ORDER: readonly WeaponType[] = [
   WeaponType.Uzi,
 ];
 
+function bindPress(button: HTMLButtonElement, onPress: () => void) {
+  let skipClickOnce = false;
+  button.addEventListener("pointerdown", (event) => {
+    if (!event.isPrimary) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    skipClickOnce = true;
+    if (event.pointerType !== "mouse") {
+      event.preventDefault();
+    }
+    onPress();
+  });
+  button.addEventListener("click", (event) => {
+    if (skipClickOnce) {
+      skipClickOnce = false;
+      event.preventDefault();
+      return;
+    }
+    onPress();
+  });
+}
+
 function isChargeWeapon(weapon: WeaponType): boolean {
   return weapon === WeaponType.Bazooka || weapon === WeaponType.HandGrenade;
 }
@@ -76,7 +97,7 @@ export class MobileControlsOverlay {
     this.weaponButton = document.createElement("button");
     this.weaponButton.type = "button";
     this.weaponButton.className = "mobile-weapon-button";
-    this.weaponButton.addEventListener("click", () => this.callbacks.onToggleWeaponPicker());
+    bindPress(this.weaponButton, () => this.callbacks.onToggleWeaponPicker());
 
     this.weaponIcon = document.createElement("canvas");
     this.weaponIcon.className = "mobile-weapon-icon";
@@ -95,7 +116,7 @@ export class MobileControlsOverlay {
       button.type = "button";
       button.className = "mobile-weapon-item";
       button.textContent = weaponShortName(weapon);
-      button.addEventListener("click", () => this.callbacks.onSelectWeapon(weapon));
+      bindPress(button, () => this.callbacks.onSelectWeapon(weapon));
       this.weaponButtons.set(weapon, button);
       this.weaponMenu.appendChild(button);
     }
@@ -106,7 +127,7 @@ export class MobileControlsOverlay {
     this.aimButton.type = "button";
     this.aimButton.className = "mobile-aim-button";
     this.aimButton.textContent = "Aim";
-    this.aimButton.addEventListener("click", () => this.callbacks.onAimButton());
+    bindPress(this.aimButton, () => this.callbacks.onAimButton());
 
     this.actionDock = document.createElement("div");
     this.actionDock.className = "mobile-action-dock";
@@ -115,13 +136,13 @@ export class MobileControlsOverlay {
     this.cancelButton.type = "button";
     this.cancelButton.className = "mobile-action-button mobile-action-button--secondary";
     this.cancelButton.textContent = "Cancel";
-    this.cancelButton.addEventListener("click", () => this.callbacks.onCancel());
+    bindPress(this.cancelButton, () => this.callbacks.onCancel());
 
     this.primaryButton = document.createElement("button");
     this.primaryButton.type = "button";
     this.primaryButton.className = "mobile-action-button mobile-action-button--primary";
     this.primaryButton.textContent = "Fire";
-    this.primaryButton.addEventListener("click", () => this.callbacks.onPrimary());
+    bindPress(this.primaryButton, () => this.callbacks.onPrimary());
 
     this.actionDock.append(this.cancelButton, this.primaryButton);
 
@@ -129,7 +150,7 @@ export class MobileControlsOverlay {
     this.jumpButton.type = "button";
     this.jumpButton.className = "mobile-jump-button";
     this.jumpButton.textContent = "Jump";
-    this.jumpButton.addEventListener("click", () => this.callbacks.onJump());
+    bindPress(this.jumpButton, () => this.callbacks.onJump());
 
     this.root.append(this.weaponDock, this.aimButton, this.actionDock, this.jumpButton);
   }

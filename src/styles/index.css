@@ -312,7 +312,7 @@ Network match dialog
   box-sizing: border-box;
   background: rgba(20, 30, 60, 0.6);
   color: #f4f6ff;
-  font-size: 15px;
+  font-size: 16px;
   transition: all 120ms ease;
 }
 
@@ -620,6 +620,14 @@ Mobile gameplay controls
 
 .mobile-weapon-dock--hidden {
   display: none;
+}
+
+.mobile-weapon-button,
+.mobile-weapon-item,
+.mobile-aim-button,
+.mobile-action-button,
+.mobile-jump-button {
+  touch-action: manipulation;
 }
 
 .mobile-weapon-button {
