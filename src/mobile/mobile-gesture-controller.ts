@@ -2,7 +2,7 @@ type WorldPoint = { x: number; y: number };
 
 export type MobileGestureCallbacks = {
   isEnabled: () => boolean;
-  isAimGestureActive: () => boolean;
+  canStartAimGesture: (canvasX: number, canvasY: number) => boolean;
   screenToWorld: (screenX: number, screenY: number) => WorldPoint;
   canStartWormInteraction: (worldX: number, worldY: number) => boolean;
   onTap: (worldX: number, worldY: number) => void;
@@ -49,7 +49,7 @@ export class MobileGestureController {
     this.startWorldX = startWorld.x;
     this.startWorldY = startWorld.y;
 
-    if (this.callbacks.isAimGestureActive()) {
+    if (this.callbacks.canStartAimGesture(startCanvas.x, startCanvas.y)) {
       this.mode = "aim";
       this.callbacks.onAimGesture(startWorld.x, startWorld.y);
     } else if (this.callbacks.canStartWormInteraction(startWorld.x, startWorld.y)) {

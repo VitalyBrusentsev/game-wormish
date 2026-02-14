@@ -229,6 +229,7 @@ const MOBILE_GHOST_REACH_PX = 8;
 const MOBILE_ASSIST_MOVE_STEP_MS = 120;
 const MOBILE_ASSIST_STUCK_STEPS = 3;
 const MOBILE_WORM_TOUCH_RADIUS_PX = 44;
+const MOBILE_AIM_GESTURE_ZONE_RADIUS_PX = 56;
 const MOBILE_AIM_BUTTON_OFFSET_PX = 56;
 const MOBILE_AIM_LINE_MAX_PX = 180;
 const MOBILE_DEFAULT_AIM_DISTANCE_PX = 140;
@@ -571,7 +572,7 @@ export class Game {
     if (!this.mobileGestures) {
       this.mobileGestures = new MobileGestureController(this.canvas, {
         isEnabled: () => this.canUseMobilePanning(),
-        isAimGestureActive: () => this.mobileAimMode === "aim",
+        canStartAimGesture: (canvasX, canvasY) => this.canStartMobileAimGesture(canvasX, canvasY),
         screenToWorld: (screenX, screenY) => this.screenToWorld(screenX, screenY),
         canStartWormInteraction: (worldX, worldY) =>
           this.mobileAimMode === "idle" && this.canStartWormInteraction(worldX, worldY),
@@ -778,6 +779,17 @@ export class Game {
     const maxR = Math.max(MOBILE_WORM_TOUCH_RADIUS_PX, active.radius * 2.8);
     const dist = Math.hypot(worldX - active.x, worldY - active.y);
     return dist <= maxR;
+  }
+
+  private canStartMobileAimGesture(canvasX: number, canvasY: number) {
+    if (!this.canUseMobileControls()) return false;
+    if (this.mobileAimMode !== "aim") return false;
+    const aim = this.session.getRenderAimInfo();
+    const anchorWorld = this.getMobileAimAnchorWorldPoint(aim);
+    const anchor = this.worldToScreen(anchorWorld.x, anchorWorld.y);
+    const dx = canvasX - anchor.x;
+    const dy = canvasY - anchor.y;
+    return dx * dx + dy * dy <= MOBILE_AIM_GESTURE_ZONE_RADIUS_PX * MOBILE_AIM_GESTURE_ZONE_RADIUS_PX;
   }
 
   private handleMobileTap(worldX: number, worldY: number) {
@@ -2510,13 +2522,7 @@ export class Game {
     const worm = this.activeWorm;
     if (!worm.alive) return;
 
-    const target = { x: aim.targetX, y: aim.targetY };
-    const dx = target.x - worm.x;
-    const dy = target.y - worm.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const clampedLen = Math.min(len, MOBILE_AIM_LINE_MAX_PX);
-    const ex = worm.x + (dx / len) * clampedLen;
-    const ey = worm.y + (dy / len) * clampedLen;
+    const target = this.getMobileAimAnchorWorldPoint(aim);
 
     ctx.save();
     ctx.strokeStyle = "rgba(255, 228, 145, 0.9)";
@@ -2524,11 +2530,26 @@ export class Game {
     ctx.setLineDash([6, 4]);
     ctx.beginPath();
     ctx.moveTo(worm.x, worm.y);
-    ctx.lineTo(ex, ey);
+    ctx.lineTo(target.x, target.y);
     ctx.stroke();
     ctx.setLineDash([]);
-    drawCrosshair(ctx, ex, ey, 10, "#ffe891", 2);
+    drawCrosshair(ctx, target.x, target.y, 10, "#ffe891", 2);
     ctx.restore();
+  }
+
+  private getMobileAimAnchorWorldPoint(aim: AimInfo) {
+    const worm = this.activeWorm;
+    const dx = aim.targetX - worm.x;
+    const dy = aim.targetY - worm.y;
+    const len = Math.hypot(dx, dy);
+    if (len <= MOBILE_AIM_LINE_MAX_PX || len <= 1e-6) {
+      return { x: aim.targetX, y: aim.targetY };
+    }
+    const scale = MOBILE_AIM_LINE_MAX_PX / len;
+    return {
+      x: worm.x + dx * scale,
+      y: worm.y + dy * scale,
+    };
   }
 
   private renderWorldWater(ctx: CanvasRenderingContext2D) {

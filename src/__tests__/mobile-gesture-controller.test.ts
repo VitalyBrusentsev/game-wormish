@@ -59,7 +59,7 @@ describe("MobileGestureController", () => {
 
     const controller = new MobileGestureController(canvas as unknown as HTMLCanvasElement, {
       isEnabled: () => true,
-      isAimGestureActive: () => false,
+      canStartAimGesture: () => false,
       screenToWorld,
       canStartWormInteraction: () => false,
       onTap: () => { },
@@ -76,6 +76,65 @@ describe("MobileGestureController", () => {
 
     expect(screenToWorld).toHaveBeenCalledWith(100, 50);
     expect(screenToWorld).toHaveBeenCalledWith(120, 60);
+    expect(onPan).toHaveBeenCalledWith(20, 10);
+
+    controller.dispose();
+  });
+
+  it("routes drags that start in the aim zone to aiming", () => {
+    const canvas = new FakeCanvas();
+    const onAimGesture = vi.fn();
+    const onPan = vi.fn();
+    const screenToWorld = vi.fn((x: number, y: number) => ({ x, y }));
+
+    const controller = new MobileGestureController(canvas as unknown as HTMLCanvasElement, {
+      isEnabled: () => true,
+      canStartAimGesture: (canvasX, canvasY) => Math.hypot(canvasX - 100, canvasY - 50) <= 30,
+      screenToWorld,
+      canStartWormInteraction: () => false,
+      onTap: () => { },
+      onPan,
+      onMovementDragStart: () => { },
+      onMovementDrag: () => { },
+      onMovementDragEnd: () => { },
+      onAimGesture,
+    });
+
+    canvas.dispatchEvent(createPointerEvent("pointerdown", 1, 60, 45));
+    canvas.dispatchEvent(createPointerEvent("pointermove", 1, 70, 50));
+    canvas.dispatchEvent(createPointerEvent("pointerup", 1, 70, 50));
+
+    expect(onAimGesture).toHaveBeenNthCalledWith(1, 100, 50);
+    expect(onAimGesture).toHaveBeenNthCalledWith(2, 120, 60);
+    expect(onPan).not.toHaveBeenCalled();
+
+    controller.dispose();
+  });
+
+  it("routes drags outside the aim zone to panning", () => {
+    const canvas = new FakeCanvas();
+    const onAimGesture = vi.fn();
+    const onPan = vi.fn();
+    const screenToWorld = vi.fn((x: number, y: number) => ({ x, y }));
+
+    const controller = new MobileGestureController(canvas as unknown as HTMLCanvasElement, {
+      isEnabled: () => true,
+      canStartAimGesture: () => false,
+      screenToWorld,
+      canStartWormInteraction: () => false,
+      onTap: () => { },
+      onPan,
+      onMovementDragStart: () => { },
+      onMovementDrag: () => { },
+      onMovementDragEnd: () => { },
+      onAimGesture,
+    });
+
+    canvas.dispatchEvent(createPointerEvent("pointerdown", 1, 20, 20));
+    canvas.dispatchEvent(createPointerEvent("pointermove", 1, 30, 25));
+    canvas.dispatchEvent(createPointerEvent("pointerup", 1, 30, 25));
+
+    expect(onAimGesture).not.toHaveBeenCalled();
     expect(onPan).toHaveBeenCalledWith(20, 10);
 
     controller.dispose();
