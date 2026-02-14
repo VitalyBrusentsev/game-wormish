@@ -303,6 +303,7 @@ export class GameSession {
     dt: number,
     options: TurnDriverUpdateOptions
   ) {
+    this.updateLocalAimPhaseTimeout();
     if (!this.currentTurnDriver || !this.currentTurnContext) return;
     this.currentTurnDriver.update(this.currentTurnContext, dt, options);
   }
@@ -484,11 +485,6 @@ export class GameSession {
     camera: { offsetX: number; offsetY: number; zoom: number }
   ) {
     if (!this.isLocalTurnActive()) return;
-    const timeLeftMs = this.state.timeLeftMs(this.now(), GAMEPLAY.turnTimeMs);
-    if (timeLeftMs <= 0 && this.state.phase === "aim") {
-      this.endAimPhaseWithoutShot();
-      return;
-    }
 
     const atMs = this.turnTimestampMs();
 
@@ -2300,6 +2296,15 @@ export class GameSession {
     this.clearAiPreShotVisual();
     this.state.shotFired();
     this.message = null;
+  }
+
+  private updateLocalAimPhaseTimeout() {
+    if (this.simulationPaused) return;
+    if (!this.isLocalTurnActive()) return;
+    if (this.state.phase !== "aim") return;
+    const timeLeftMs = this.state.timeLeftMs(this.now(), GAMEPLAY.turnTimeMs);
+    if (timeLeftMs > 0) return;
+    this.endAimPhaseWithoutShot();
   }
 
   private checkVictory() {

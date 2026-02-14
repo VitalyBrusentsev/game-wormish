@@ -560,4 +560,53 @@ describe("GameSession AI pre-shot visuals", () => {
       vi.useRealTimers();
     }
   });
+
+  it("expires the local aim phase while input is blocked if simulation keeps running", () => {
+    let now = 1000;
+    const session = new GameSession(320, 240, {
+      random: createRng(91),
+      now: () => now,
+    });
+    const controllers = new Map(
+      session.teams.map((team) => [
+        team.id,
+        new StubTurnDriver(team.id === session.activeTeam.id ? "local" : "ai"),
+      ] as const)
+    );
+    session.setTurnControllers(controllers);
+
+    now = session.state.turnStartMs + GAMEPLAY.turnTimeMs + 1;
+    session.updateActiveTurnDriver(1 / 60, {
+      allowInput: false,
+      input: {} as TurnDriverUpdateOptions["input"],
+      camera: { offsetX: 0, offsetY: 0, zoom: 1 },
+    });
+
+    expect(session.state.phase).toBe("post");
+  });
+
+  it("does not expire the local aim phase while simulation is paused", () => {
+    let now = 1000;
+    const session = new GameSession(320, 240, {
+      random: createRng(92),
+      now: () => now,
+    });
+    const controllers = new Map(
+      session.teams.map((team) => [
+        team.id,
+        new StubTurnDriver(team.id === session.activeTeam.id ? "local" : "ai"),
+      ] as const)
+    );
+    session.setTurnControllers(controllers);
+    session.setSimulationPaused(true);
+
+    now = session.state.turnStartMs + GAMEPLAY.turnTimeMs + 1;
+    session.updateActiveTurnDriver(1 / 60, {
+      allowInput: false,
+      input: {} as TurnDriverUpdateOptions["input"],
+      camera: { offsetX: 0, offsetY: 0, zoom: 1 },
+    });
+
+    expect(session.state.phase).toBe("aim");
+  });
 });

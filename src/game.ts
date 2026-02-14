@@ -103,6 +103,31 @@ const getNetworkTeamNames = (snapshot: NetworkSessionStateSnapshot) => {
 
 type NetworkMicroStatus = { text: string; color: string; opponentSide: "left" | "right" };
 
+export type FrameSimulationPolicy = {
+  waitingForSync: boolean;
+  networkPaused: boolean;
+  simulationPaused: boolean;
+};
+
+export const computeFrameSimulationPolicy = (
+  snapshot: NetworkSessionStateSnapshot,
+  overlaysBlocking: boolean
+): FrameSimulationPolicy => {
+  const waitingForSync =
+    snapshot.mode !== "local" &&
+    snapshot.bridge.waitingForRemoteSnapshot;
+  const networkPaused =
+    snapshot.mode !== "local" &&
+    (snapshot.connection.lifecycle !== "connected" || waitingForSync);
+  const overlayPausesSimulation = overlaysBlocking && snapshot.mode === "local";
+
+  return {
+    waitingForSync,
+    networkPaused,
+    simulationPaused: overlayPausesSimulation || networkPaused,
+  };
+};
+
 const getNetworkMicroStatus = (snapshot: NetworkSessionStateSnapshot): NetworkMicroStatus | null => {
   if (snapshot.mode === "local") return null;
 
@@ -213,6 +238,7 @@ const SETTINGS_BUTTON_SIZE_PX = 48;
 const SETTINGS_BUTTON_PADDING_PX = 14;
 const SETTINGS_ICON_WIDTH_PX = 28;
 const SETTINGS_ICON_HEIGHT_PX = SETTINGS_ICON_WIDTH_PX * (132 / 160);
+const NETWORK_TEARDOWN_TIMEOUT_MS = 3000;
 
 type Rect = {
   x: number;
@@ -242,7 +268,9 @@ export class Game {
   private matchResultDialog: MatchResultOverlay;
   private networkDialog: NetworkMatchDialog;
   private helpOpenedFromMenu = false;
+  private helpOverlayPausesSimulation = false;
   private startMenuOpenedAtMs: number | null = null;
+  private startMenuPausesSimulation = false;
 
   private readonly networkState: NetworkSessionState;
   private webrtcClient: WebRTCRegistryClient | null = null;
@@ -250,6 +278,8 @@ export class Game {
   private readonly registryUrl: string;
   private connectionStartRequested = false;
   private hasReceivedMatchInit = false;
+  private networkClientGeneration = 0;
+  private restartMissionTask: Promise<void> | null = null;
 
   private readonly cameraPadding = 48;
   private cameraOffsetX = 0;
@@ -417,9 +447,12 @@ export class Game {
       onRestart: () => {
         this.hideStartMenu();
         initialMenuDismissed = true;
-        this.restartSinglePlayerMatch();
-        this.canvas.focus();
-        this.updateCursor();
+        void this.restartMissionFromPauseMenu()
+          .catch(() => { })
+          .finally(() => {
+            this.canvas.focus();
+            this.updateCursor();
+          });
       },
       onNetworkMatch: () => {
         this.hideStartMenu();
@@ -965,6 +998,33 @@ export class Game {
     this.resetMobileTransientState();
   }
 
+  private restartMissionFromPauseMenu(): Promise<void> {
+    if (this.restartMissionTask) {
+      return this.restartMissionTask;
+    }
+
+    const task = (async () => {
+      if (this.networkState.getSnapshot().mode !== "local") {
+        await this.teardownNetworkSession(true);
+      }
+      this.restartSinglePlayerMatch();
+    })();
+    this.restartMissionTask = task;
+    void task.then(
+      () => {
+        if (this.restartMissionTask === task) {
+          this.restartMissionTask = null;
+        }
+      },
+      () => {
+        if (this.restartMissionTask === task) {
+          this.restartMissionTask = null;
+        }
+      }
+    );
+    return task;
+  }
+
   private restartMatchFromGameOver() {
     this.clearMatchResultDialogTimer();
     const snapshot = this.networkState.getSnapshot();
@@ -1340,6 +1400,61 @@ export class Game {
     this.sendNetworkMessage(message);
   }
 
+  private setActiveWebRTCClient(client: WebRTCRegistryClient): number {
+    const previousClient = this.webrtcClient;
+    this.webrtcClient = client;
+    this.networkClientGeneration += 1;
+    if (previousClient && previousClient !== client) {
+      void this.closeWebRTCClient(previousClient);
+    }
+    return this.networkClientGeneration;
+  }
+
+  private isActiveWebRTCClient(client: WebRTCRegistryClient, generation: number): boolean {
+    return this.webrtcClient === client && this.networkClientGeneration === generation;
+  }
+
+  private async closeWebRTCClient(client: WebRTCRegistryClient | null): Promise<void> {
+    if (!client) return;
+    const closePromise = client.closeRoom().catch(() => undefined);
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<void>((resolve) => {
+      timeoutId = globalThis.setTimeout(resolve, NETWORK_TEARDOWN_TIMEOUT_MS);
+    });
+
+    await Promise.race([closePromise, timeoutPromise]);
+    if (timeoutId !== null) {
+      globalThis.clearTimeout(timeoutId);
+    }
+  }
+
+  private resetNetworkSessionToLocal() {
+    this.connectionStartRequested = false;
+    this.hasReceivedMatchInit = false;
+    this.networkState.setMode("local");
+    this.networkState.resetNetworkOnlyState();
+    this.singlePlayerName = this.readSinglePlayerNameFromStorage();
+    this.initializeTurnControllers();
+    this.notifyNetworkStateChange();
+  }
+
+  private async teardownNetworkSession(awaitClose: boolean): Promise<void> {
+    const client = this.webrtcClient;
+    if (client) {
+      this.webrtcClient = null;
+      this.networkClientGeneration += 1;
+    }
+
+    this.resetNetworkSessionToLocal();
+
+    if (awaitClose) {
+      await this.closeWebRTCClient(client);
+      return;
+    }
+
+    void this.closeWebRTCClient(client);
+  }
+
   async createHostRoom(config: { registryUrl: string; playerName: string }): Promise<void> {
     this.networkState.setMode("network-host");
     this.networkState.setPlayerNames(config.playerName);
@@ -1349,16 +1464,22 @@ export class Game {
     this.startNetworkMatchAsHost();
 
     const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
-    this.webrtcClient = new WebRTCRegistryClient({
+    const client = new WebRTCRegistryClient({
       registryApiUrl: config.registryUrl,
       iceServers,
     });
+    const clientGeneration = this.setActiveWebRTCClient(client);
 
-    this.setupWebRTCCallbacks();
+    this.setupWebRTCCallbacks(client, clientGeneration);
 
     try {
-      await this.webrtcClient.createRoom(config.playerName);
-      const roomInfo = this.webrtcClient.getRoomInfo();
+      await client.createRoom(config.playerName);
+      if (!this.isActiveWebRTCClient(client, clientGeneration)) {
+        void this.closeWebRTCClient(client);
+        return;
+      }
+
+      const roomInfo = client.getRoomInfo();
       if (roomInfo) {
         this.networkState.updateRegistryInfo({
           code: roomInfo.code,
@@ -1369,8 +1490,14 @@ export class Game {
         });
         this.notifyNetworkStateChange();
       }
-      await this.startConnection();
+
+      await this.startConnection(client, clientGeneration);
     } catch (error) {
+      if (!this.isActiveWebRTCClient(client, clientGeneration)) {
+        void this.closeWebRTCClient(client);
+        return;
+      }
+
       const message = error instanceof Error ? error.message : String(error);
       this.networkState.reportConnectionError(message);
       this.notifyNetworkStateChange();
@@ -1391,16 +1518,22 @@ export class Game {
     this.hasReceivedMatchInit = false;
 
     const iceServers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
-    this.webrtcClient = new WebRTCRegistryClient({
+    const client = new WebRTCRegistryClient({
       registryApiUrl: config.registryUrl,
       iceServers,
     });
+    const clientGeneration = this.setActiveWebRTCClient(client);
 
-    this.setupWebRTCCallbacks();
+    this.setupWebRTCCallbacks(client, clientGeneration);
 
     try {
-      await this.webrtcClient.joinRoom(config.roomCode, config.joinCode, config.playerName);
-      const roomInfo = this.webrtcClient.getRoomInfo();
+      await client.joinRoom(config.roomCode, config.joinCode, config.playerName);
+      if (!this.isActiveWebRTCClient(client, clientGeneration)) {
+        void this.closeWebRTCClient(client);
+        return;
+      }
+
+      const roomInfo = client.getRoomInfo();
       if (roomInfo) {
         this.networkState.updateRegistryInfo({
           code: roomInfo.code,
@@ -1414,8 +1547,14 @@ export class Game {
         }
         this.notifyNetworkStateChange();
       }
-      await this.startConnection();
+
+      await this.startConnection(client, clientGeneration);
     } catch (error) {
+      if (!this.isActiveWebRTCClient(client, clientGeneration)) {
+        void this.closeWebRTCClient(client);
+        return;
+      }
+
       const message = error instanceof Error ? error.message : String(error);
       this.networkState.reportConnectionError(message);
       this.notifyNetworkStateChange();
@@ -1449,15 +1588,21 @@ export class Game {
     }
   }
 
-  async startConnection(): Promise<void> {
-    if (!this.webrtcClient) {
+  async startConnection(
+    client: WebRTCRegistryClient | null = this.webrtcClient,
+    clientGeneration = this.networkClientGeneration
+  ): Promise<void> {
+    if (!client) {
       throw new Error("No WebRTC client initialized");
+    }
+    if (!this.isActiveWebRTCClient(client, clientGeneration)) {
+      return;
     }
     if (this.connectionStartRequested) {
       return;
     }
 
-    const currentState = this.webrtcClient.getConnectionState();
+    const currentState = client.getConnectionState();
     if (currentState === ConnectionState.CONNECTING || currentState === ConnectionState.CONNECTED) {
       this.connectionStartRequested = true;
       return;
@@ -1466,8 +1611,11 @@ export class Game {
     this.connectionStartRequested = true;
 
     try {
-      await this.webrtcClient.startConnection();
+      await client.startConnection();
     } catch (error) {
+      if (!this.isActiveWebRTCClient(client, clientGeneration)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : String(error);
       this.networkState.reportConnectionError(message);
       this.connectionStartRequested = false;
@@ -1477,27 +1625,18 @@ export class Game {
   }
 
   cancelNetworkSetup(): void {
-    if (this.webrtcClient) {
-      this.webrtcClient.closeRoom().catch(() => { });
-      this.webrtcClient = null;
-    }
-    this.connectionStartRequested = false;
-    this.hasReceivedMatchInit = false;
-    this.networkState.setMode("local");
-    this.networkState.resetNetworkOnlyState();
-    this.singlePlayerName = this.readSinglePlayerNameFromStorage();
-    this.initializeTurnControllers();
-    this.notifyNetworkStateChange();
+    void this.teardownNetworkSession(false);
   }
 
-  private setupWebRTCCallbacks() {
-    if (!this.webrtcClient) return;
+  private setupWebRTCCallbacks(client: WebRTCRegistryClient, clientGeneration: number) {
+    if (!this.isActiveWebRTCClient(client, clientGeneration)) return;
 
-    this.webrtcClient.onStateChange((state: ConnectionState) => {
+    client.onStateChange((state: ConnectionState) => {
+      if (!this.isActiveWebRTCClient(client, clientGeneration)) return;
       const previousLifecycle = this.networkState.getSnapshot().connection.lifecycle;
       this.networkState.updateConnectionLifecycle(state as any, Date.now());
 
-      if (state === "connected" && previousLifecycle !== "connected") {
+      if (state === ConnectionState.CONNECTED && previousLifecycle !== ConnectionState.CONNECTED) {
         this.swapToNetworkControllers();
         this.sendPlayerHello();
         const snapshot = this.networkState.getSnapshot();
@@ -1513,7 +1652,8 @@ export class Game {
       this.notifyNetworkStateChange();
     });
 
-    this.webrtcClient.onMessage((message: NetworkMessage) => {
+    client.onMessage((message: NetworkMessage) => {
+      if (!this.isActiveWebRTCClient(client, clientGeneration)) return;
       this.networkState.appendNetworkMessageLog({ direction: "recv", message });
       if (message.type === "match_init") {
         this.handleMatchInit(message.payload.snapshot);
@@ -1541,12 +1681,14 @@ export class Game {
       }
     });
 
-    this.webrtcClient.onError((error: Error) => {
+    client.onError((error: Error) => {
+      if (!this.isActiveWebRTCClient(client, clientGeneration)) return;
       this.networkState.reportConnectionError(error.message);
       this.notifyNetworkStateChange();
     });
 
-    this.webrtcClient.onDebugEvent((_event) => {
+    client.onDebugEvent((_event) => {
+      if (!this.isActiveWebRTCClient(client, clientGeneration)) return;
       // Store debug events if needed for diagnostics
     });
   }
@@ -1731,7 +1873,10 @@ export class Game {
 
   private showHelp() {
     const opened = this.helpOverlay.show(nowMs());
-    if (opened && this.session.state.charging) {
+    if (!opened) return;
+
+    this.helpOverlayPausesSimulation = this.shouldPauseForOverlayTime();
+    if (this.session.state.charging) {
       this.session.cancelChargeCommand();
     }
   }
@@ -1746,19 +1891,21 @@ export class Game {
   ) {
     if (!this.startMenu.isVisible()) {
       this.startMenuOpenedAtMs = nowMs();
+      this.startMenuPausesSimulation = this.shouldPauseForOverlayTime();
     }
     this.startMenu.show(mode, closeable);
   }
 
   private hideStartMenu() {
     if (!this.startMenu.isVisible()) return;
-    if (this.startMenuOpenedAtMs !== null) {
+    if (this.startMenuOpenedAtMs !== null && this.startMenuPausesSimulation) {
       const pausedFor = nowMs() - this.startMenuOpenedAtMs;
       if (pausedFor > 0) {
         this.session.pauseFor(pausedFor);
       }
     }
     this.startMenuOpenedAtMs = null;
+    this.startMenuPausesSimulation = false;
     this.startMenu.hide();
   }
 
@@ -1778,15 +1925,21 @@ export class Game {
     }
     if (this.helpOpenedFromMenu) {
       this.helpOpenedFromMenu = false;
+      this.helpOverlayPausesSimulation = false;
       this.showStartMenu(this.startMenu.getMode(), initialMenuDismissed);
       this.updateCursor();
       return;
     }
-    if (pausedFor > 0) {
+    if (pausedFor > 0 && this.helpOverlayPausesSimulation) {
       this.session.pauseFor(pausedFor);
     }
+    this.helpOverlayPausesSimulation = false;
     this.canvas.focus();
     this.updateCursor();
+  }
+
+  private shouldPauseForOverlayTime() {
+    return this.networkState.getSnapshot().mode === "local";
   }
 
   private processInput() {
@@ -2542,20 +2695,10 @@ export class Game {
     dt = Math.min(dt, 1 / 20);
 
     this.processInput();
-    const overlaysBlocking =
-      this.helpOverlay.isVisible() ||
-      this.startMenu.isVisible() ||
-      this.matchResultDialog.isVisible() ||
-      this.networkDialog.isVisible();
+    const overlaysBlocking = this.hasBlockingOverlay();
     const networkSnapshot = this.networkState.getSnapshot();
-    const waitingForSync =
-      networkSnapshot.mode !== "local" &&
-      networkSnapshot.bridge.waitingForRemoteSnapshot;
-    const networkPaused =
-      networkSnapshot.mode !== "local" &&
-      (networkSnapshot.connection.lifecycle !== "connected" || waitingForSync);
-    const simulationPaused = overlaysBlocking || networkPaused;
-    this.session.setSimulationPaused(simulationPaused);
+    const simulationPolicy = computeFrameSimulationPolicy(networkSnapshot, overlaysBlocking);
+    this.session.setSimulationPaused(simulationPolicy.simulationPaused);
     this.updateTurnFocus();
     this.updateWorldZoomForMobileStage();
     const followingProjectile = this.updatePassiveProjectileFocus();
@@ -2571,21 +2714,21 @@ export class Game {
     this.sound.update();
     const worldCameraOffsetX = this.cameraOffsetX - this.cameraX * this.worldZoom;
     const worldCameraOffsetY = this.cameraOffsetY - this.cameraY * this.worldZoom;
-    if (networkPaused) {
+    if (simulationPolicy.networkPaused) {
       this.session.pauseFor(dt * 1000);
     }
     this.session.updateActiveTurnDriver(dt, {
-      allowInput: !overlaysBlocking && !waitingForSync,
+      allowInput: !overlaysBlocking && !simulationPolicy.waitingForSync,
       allowLocalInput: !this.isMobileProfile(),
       input: this.input,
       camera: { offsetX: worldCameraOffsetX, offsetY: worldCameraOffsetY, zoom: this.worldZoom },
     });
-    if (!networkPaused) {
+    if (!simulationPolicy.networkPaused) {
       this.updateMobileMovementAssist(dt);
     } else {
       this.stopMobileMovementAssist(false);
     }
-    if (!overlaysBlocking && !networkPaused) {
+    if (!simulationPolicy.simulationPaused) {
       this.session.update(dt);
     }
     this.flushPendingTurnEffects(false);

@@ -49,10 +49,11 @@ describe("RoomManager connection state handling", () => {
     dataChannel = {
       readyState: "open",
       label: "game-data",
-    } as RTCDataChannel;
+      close: vi.fn(),
+    } as unknown as RTCDataChannel;
 
     webRTCManagerMock = {
-      createPeerConnection: vi.fn().mockReturnValue({ remoteDescription: null }),
+      createPeerConnection: vi.fn().mockReturnValue({ remoteDescription: null, close: vi.fn() }),
       createOffer: vi.fn().mockResolvedValue({ type: "offer", sdp: "" }),
       setLocalDescription: vi.fn().mockResolvedValue(undefined),
       onIceCandidate: vi.fn(),
@@ -150,5 +151,27 @@ describe("RoomManager connection state handling", () => {
     }
 
     expect(stateChanges[stateChanges.length - 1]).toBe(ConnectionState.ERROR);
+  });
+
+  it("clears pending disconnect timers during teardown", async () => {
+    const stateChanges: ConnectionState[] = [];
+    roomManager.onStateChange((state) => stateChanges.push(state));
+
+    const handler = await startRoomManager();
+
+    vi.useFakeTimers();
+    dataChannel.readyState = "closed";
+    handler("disconnected");
+
+    await roomManager.closeRoom();
+    vi.advanceTimersByTime(3000);
+    vi.useRealTimers();
+
+    const disconnectedTransitions = stateChanges.filter(
+      (state) => state === ConnectionState.DISCONNECTED
+    );
+    expect(disconnectedTransitions).toHaveLength(0);
+    expect(stateChanges[stateChanges.length - 1]).toBe(ConnectionState.IDLE);
+    expect(registryClientMock.closeRoom).toHaveBeenCalledWith("ROOM", "token");
   });
 });
