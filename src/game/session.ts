@@ -190,6 +190,9 @@ export class GameSession {
   private uziBurst: UziBurst | null = null;
   private aiPreShotVisual: AiPreShotVisual | null = null;
   private grenadeSmokeCarry = new WeakMap<Projectile, number>();
+  private simulationPaused = false;
+  private simulationPauseStartedAtMs = 0;
+  private simulationPausedTotalMs = 0;
 
   constructor(
     width: number,
@@ -310,6 +313,26 @@ export class GameSession {
 
   isWaitingForRemoteResolution() {
     return this.waitingForRemoteResolution;
+  }
+
+  setSimulationPaused(paused: boolean) {
+    if (paused === this.simulationPaused) return;
+    const now = this.now();
+    if (paused) {
+      this.simulationPaused = true;
+      this.simulationPauseStartedAtMs = now;
+      return;
+    }
+    this.simulationPausedTotalMs += Math.max(0, now - this.simulationPauseStartedAtMs);
+    this.simulationPaused = false;
+    this.simulationPauseStartedAtMs = 0;
+  }
+
+  getSimulationTimeMs(): number {
+    if (this.simulationPaused) {
+      return Math.max(0, this.simulationPauseStartedAtMs - this.simulationPausedTotalMs);
+    }
+    return Math.max(0, this.now() - this.simulationPausedTotalMs);
   }
 
   get activeTeam(): Team {
@@ -803,6 +826,9 @@ export class GameSession {
       this.teamManager.setCurrentTeamIndex(this.random() < 0.5 ? 0 : 1);
     }
     this.pendingTurnResolution = null;
+    this.simulationPaused = false;
+    this.simulationPauseStartedAtMs = 0;
+    this.simulationPausedTotalMs = 0;
     this.projectileIds.clear();
     this.terminatedProjectiles.clear();
     this.nextProjectileId = 1;

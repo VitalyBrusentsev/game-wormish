@@ -1,4 +1,5 @@
 import { clamp, WeaponType } from "../definitions";
+import { track1Url } from "../assets";
 import { createNoiseBuffer, normalizeLevel } from "./audio-utils";
 import { createProjectileExplodedVoice, createProjectileLaunchVoice, type VoiceBlueprint } from "./sfx";
 
@@ -33,6 +34,9 @@ type ActiveVoice = {
 export class SoundSystem {
   private ctx: AudioContext | null = null;
   private noise: AudioBuffer | null = null;
+  private musicSource: AudioBufferSourceNode | null = null;
+  private musicLoadPromise: Promise<void> | null = null;
+  private musicLoadAbort: AbortController | null = null;
   private nodes:
     | {
         sfx: GainNode;
@@ -109,6 +113,7 @@ export class SoundSystem {
     if (ctx.state !== "running") {
       await ctx.resume();
     }
+    await this.ensureMusicLoop();
   }
 
   update() {
@@ -126,6 +131,21 @@ export class SoundSystem {
   }
 
   dispose() {
+    const musicSource = this.musicSource;
+    this.musicSource = null;
+    if (musicSource) {
+      try {
+        musicSource.stop();
+      } catch {}
+      try {
+        musicSource.disconnect();
+      } catch {}
+    }
+
+    this.musicLoadAbort?.abort();
+    this.musicLoadAbort = null;
+    this.musicLoadPromise = null;
+
     for (const voice of this.voices) {
       voice.cleanup();
     }
@@ -196,6 +216,50 @@ export class SoundSystem {
     this.noise = createNoiseBuffer(ctx, 1);
     this.syncLevels();
     return ctx;
+  }
+
+  private ensureMusicLoop() {
+    if (this.musicSource) return Promise.resolve();
+    if (this.musicLoadPromise) return this.musicLoadPromise;
+
+    const ctx = this.ctx;
+    const nodes = this.nodes;
+    if (!ctx || !nodes) return Promise.resolve();
+
+    const abortController = new AbortController();
+    this.musicLoadAbort = abortController;
+
+    const loadPromise = fetch(track1Url, { signal: abortController.signal })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to load background music: ${response.status}`);
+        }
+        return response.arrayBuffer();
+      })
+      .then((buffer) => ctx.decodeAudioData(buffer))
+      .then((buffer) => {
+        if (abortController.signal.aborted) return;
+        if (this.ctx !== ctx || !this.nodes || this.musicSource) return;
+
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.loop = true;
+        source.connect(this.nodes.music);
+        source.start();
+        this.musicSource = source;
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (this.musicLoadPromise === loadPromise) {
+          this.musicLoadPromise = null;
+        }
+        if (this.musicLoadAbort === abortController) {
+          this.musicLoadAbort = null;
+        }
+      });
+
+    this.musicLoadPromise = loadPromise;
+    return loadPromise;
   }
 
   private syncLevels() {

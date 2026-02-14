@@ -2554,6 +2554,8 @@ export class Game {
     const networkPaused =
       networkSnapshot.mode !== "local" &&
       (networkSnapshot.connection.lifecycle !== "connected" || waitingForSync);
+    const simulationPaused = overlaysBlocking || networkPaused;
+    this.session.setSimulationPaused(simulationPaused);
     this.updateTurnFocus();
     this.updateWorldZoomForMobileStage();
     const followingProjectile = this.updatePassiveProjectileFocus();

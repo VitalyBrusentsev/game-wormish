@@ -4,3 +4,5 @@ export const groundTiles: string[] = [
   new URL('./ground1.png', import.meta.url).toString(),
   new URL('./ground2.png', import.meta.url).toString(),
 ];
+
+export const track1Url = new URL('./track1.mp3', import.meta.url).toString();

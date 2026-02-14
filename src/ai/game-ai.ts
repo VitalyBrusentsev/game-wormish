@@ -1,4 +1,4 @@
-import { GAMEPLAY, WeaponType, clamp, distance, nowMs, type TeamId } from "../definitions";
+import { GAMEPLAY, WeaponType, clamp, distance, type TeamId } from "../definitions";
 import type { GameSession } from "../game/session";
 import { Worm } from "../entities";
 import { predictTrajectory } from "../game/weapon-system";
@@ -302,22 +302,36 @@ export const executeAiTurnPlan = (
   const expectedTurn = session.getTurnIndex();
   const expectedWorm = session.activeWorm;
   const movementTotalMs = plan.movedMs ?? 0;
-  const pauseStartAt = nowMs() + movementTotalMs;
-  const executeAt = pauseStartAt + plan.delayMs;
+  const executeDelayMs = movementTotalMs + plan.delayMs;
 
   const stillValid = () =>
     session.getTurnIndex() === expectedTurn &&
     session.activeWorm === expectedWorm &&
     session.state.phase === "aim";
 
+  const runAfterSimulationDelay = (delayMs: number, callback: () => void) => {
+    const startSimulationMs = session.getSimulationTimeMs();
+    const tick = () => {
+      if (!stillValid()) return;
+      const elapsedMs = session.getSimulationTimeMs() - startSimulationMs;
+      if (elapsedMs >= delayMs) {
+        callback();
+        return;
+      }
+      const remainingMs = Math.max(1, delayMs - elapsedMs);
+      setTimeout(tick, Math.min(remainingMs, 50));
+    };
+    tick();
+  };
+
   if (plan.moves && plan.moves.length > 0) {
     let offsetMs = 0;
     for (const step of plan.moves) {
       const scheduledAt = offsetMs;
-      setTimeout(() => {
+      runAfterSimulationDelay(scheduledAt, () => {
         if (!stillValid()) return;
         session.debugMove(step.move, step.dtMs, step.jump);
-      }, scheduledAt);
+      });
       offsetMs += step.dtMs;
     }
   }
@@ -329,12 +343,11 @@ export const executeAiTurnPlan = (
       weapon: plan.weapon,
       targetAngle: plan.angle,
       power01: plan.power,
-      durationMs: Math.max(0, executeAt - nowMs()),
+      durationMs: plan.delayMs,
     });
   };
 
-  const visualDelay = Math.max(0, pauseStartAt - nowMs());
-  setTimeout(beginPreShotVisuals, visualDelay);
+  runAfterSimulationDelay(movementTotalMs, beginPreShotVisuals);
 
   const fire = () => {
     if (!stillValid()) return;
@@ -379,8 +392,7 @@ export const executeAiTurnPlan = (
     session.debugShoot(shot.angle, shot.power);
   };
 
-  const delay = Math.max(0, executeAt - nowMs());
-  setTimeout(fire, delay);
+  runAfterSimulationDelay(executeDelayMs, fire);
   return plan;
 };
 

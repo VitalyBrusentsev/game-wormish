@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { GAMEPLAY, WeaponType } from "../definitions";
+import type { AiTurnPlan } from "../ai/game-ai";
+import { executeAiTurnPlan } from "../ai/game-ai";
 import { GameSession } from "../game/session";
 import type { TurnContext, TurnDriver, TurnDriverUpdateOptions } from "../game/turn-driver";
 
@@ -514,5 +516,48 @@ describe("GameSession AI pre-shot visuals", () => {
     session.clearAiPreShotVisual();
     const noPreviewPath = session.predictPath();
     expect(noPreviewPath).toHaveLength(0);
+  });
+
+  it("pauses AI fire scheduling while simulation is paused", async () => {
+    vi.useFakeTimers();
+    try {
+      let now = 1000;
+      const session = new GameSession(320, 240, {
+        random: createRng(88),
+        now: () => now,
+      });
+      const targetTeam = session.teams.find((team) => team.id !== session.activeTeam.id);
+      expect(targetTeam).toBeDefined();
+      const target = targetTeam!.worms[0]!;
+      const plan: AiTurnPlan = {
+        weapon: WeaponType.Rifle,
+        angle: 0,
+        power: 1,
+        delayMs: 220,
+        target,
+        score: 1,
+        cinematic: false,
+        personality: "Generalist",
+      };
+
+      session.setSimulationPaused(true);
+      executeAiTurnPlan(session, plan);
+
+      now += 1200;
+      await vi.advanceTimersByTimeAsync(1200);
+      expect(session.state.phase).toBe("aim");
+
+      session.setSimulationPaused(false);
+
+      now += 160;
+      await vi.advanceTimersByTimeAsync(160);
+      expect(session.state.phase).toBe("aim");
+
+      now += 160;
+      await vi.advanceTimersByTimeAsync(160);
+      expect(session.state.phase).toBe("projectile");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
