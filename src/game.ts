@@ -314,6 +314,8 @@ export class Game {
   private running = false;
   private frameHandle: number | null = null;
   private readonly frameCallback: FrameRequestCallback;
+  private pageLifecycleHidden = false;
+  private backgroundSuspendedAtMs: number | null = null;
 
   private lastTimeMs = 0;
 
@@ -343,6 +345,17 @@ export class Game {
   };
   private readonly mouseDownFocusHandler = () => this.canvas.focus();
   private readonly touchStartFocusHandler = () => this.canvas.focus();
+  private readonly visibilityChangeHandler = () => {
+    this.syncBackgroundSuspension();
+  };
+  private readonly pageHideHandler = () => {
+    this.pageLifecycleHidden = true;
+    this.syncBackgroundSuspension();
+  };
+  private readonly pageShowHandler = () => {
+    this.pageLifecycleHidden = false;
+    this.syncBackgroundSuspension();
+  };
 
   private readonly eventAbort = new AbortController();
   private readonly damageFloaters = new DamageFloaters();
@@ -1231,6 +1244,53 @@ export class Game {
     this.matchResultDialog.hide();
   }
 
+  private isPageBackgrounded() {
+    return this.pageLifecycleHidden || document.visibilityState === "hidden";
+  }
+
+  private cancelScheduledFrame() {
+    if (this.frameHandle === null) return;
+    cancelAnimationFrame(this.frameHandle);
+    this.frameHandle = null;
+  }
+
+  private syncBackgroundSuspension() {
+    if (this.isPageBackgrounded()) {
+      this.enterBackgroundSuspension();
+      return;
+    }
+    this.exitBackgroundSuspension();
+  }
+
+  private enterBackgroundSuspension() {
+    if (this.backgroundSuspendedAtMs !== null) return;
+    this.backgroundSuspendedAtMs = nowMs();
+    this.session.setSimulationPaused(true);
+    this.stopMobileMovementAssist(false);
+    this.cancelScheduledFrame();
+    this.lastTimeMs = 0;
+  }
+
+  private exitBackgroundSuspension() {
+    const suspendedAtMs = this.backgroundSuspendedAtMs;
+    if (suspendedAtMs === null) return;
+    this.backgroundSuspendedAtMs = null;
+
+    const networkSnapshot = this.networkState.getSnapshot();
+    if (networkSnapshot.mode === "local") {
+      const pausedForMs = Math.max(0, nowMs() - suspendedAtMs);
+      if (pausedForMs > 0) {
+        this.session.pauseFor(pausedForMs);
+      }
+    }
+
+    this.session.setSimulationPaused(false);
+    this.lastTimeMs = 0;
+    if (this.running && this.frameHandle === null) {
+      this.frameHandle = requestAnimationFrame(this.frameCallback);
+    }
+  }
+
   mount(parent: HTMLElement) {
     parent.appendChild(this.canvas);
     this.canvas.tabIndex = 0;
@@ -1243,10 +1303,20 @@ export class Game {
     this.canvas.addEventListener("pointerdown", this.pointerDownFocusHandler);
     this.canvas.addEventListener("mousedown", this.mouseDownFocusHandler);
     this.canvas.addEventListener("touchstart", this.touchStartFocusHandler);
+    document.addEventListener("visibilitychange", this.visibilityChangeHandler, {
+      signal: this.eventAbort.signal,
+    });
+    window.addEventListener("pagehide", this.pageHideHandler, {
+      signal: this.eventAbort.signal,
+    });
+    window.addEventListener("pageshow", this.pageShowHandler, {
+      signal: this.eventAbort.signal,
+    });
     this.sound.attachUnlockGestures(this.canvas, { signal: this.eventAbort.signal });
     if (this.isMobileProfile()) {
       this.ensureMobileControllers();
     }
+    this.syncBackgroundSuspension();
   }
 
   resize(width: number, height: number) {
@@ -1277,14 +1347,13 @@ export class Game {
     this.frameTimeSum = 0;
     this.fps = 0;
     this.frameHandle = requestAnimationFrame(this.frameCallback);
+    this.syncBackgroundSuspension();
   }
 
   dispose() {
-    if (this.frameHandle !== null) {
-      cancelAnimationFrame(this.frameHandle);
-      this.frameHandle = null;
-    }
+    this.cancelScheduledFrame();
     this.running = false;
+    this.backgroundSuspendedAtMs = null;
     this.eventAbort.abort();
     this.sound.dispose();
     this.cancelNetworkSetup();
@@ -2875,6 +2944,11 @@ export class Game {
   }
 
   frame(timeMs: number) {
+    this.frameHandle = null;
+    if (this.backgroundSuspendedAtMs !== null) {
+      this.lastTimeMs = 0;
+      return;
+    }
     if (!this.lastTimeMs) this.lastTimeMs = timeMs;
     let dt = (timeMs - this.lastTimeMs) / 1000;
     if (dt > 0) {
