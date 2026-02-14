@@ -57,6 +57,8 @@ export type RenderHudOptions = {
   wind: number;
   message: string | null;
   turnDurationMs: number;
+  timeLabelY?: number;
+  showChargeHint?: boolean;
 };
 
 const HUD_FONT_STACK =
@@ -103,6 +105,8 @@ export function renderHUD({
   wind,
   message,
   turnDurationMs,
+  timeLabelY,
+  showChargeHint = true,
 }: RenderHudOptions) {
   const padding = 10;
 
@@ -184,7 +188,7 @@ export function renderHUD({
 
   drawText(ctx, teamStr, centerX, topY, COLORS.white, 14, "center");
   drawText(ctx, weaponStr, centerX, topY + 16, COLORS.white, 14, "center");
-  drawText(ctx, clockStr, centerX, topY + 50, COLORS.white, 12, "center");
+  drawText(ctx, clockStr, centerX, timeLabelY ?? topY + 50, COLORS.white, 12, "center");
 
   const windDir = Math.sign(wind);
   const windMag01 = Math.min(1, Math.abs(wind) / WORLD.windMax);
@@ -194,7 +198,6 @@ export function renderHUD({
     const teamStrWidth = ctx.measureText(teamStr).width;
     const gapFromTeam = 18;
     const arrowY = topY + 8;
-    const labelY = topY + 18;
 
     if (windDir >= 0) {
       const startX = centerX + teamStrWidth / 2 + gapFromTeam;
@@ -202,7 +205,6 @@ export function renderHUD({
       const windLen = Math.max(0, Math.min(desiredWindLen, maxLen));
       if (windLen > 0) {
         drawWindsock(ctx, startX, arrowY, 1, windLen, windMag01, HUD_WINDSOCK_ORANGE);
-        drawText(ctx, "Wind", startX + windLen / 2, labelY, COLORS.white, 10, "center", "top", false);
       }
     } else {
       const startX = centerX - teamStrWidth / 2 - gapFromTeam;
@@ -210,7 +212,6 @@ export function renderHUD({
       const windLen = Math.max(0, Math.min(desiredWindLen, maxLen));
       if (windLen > 0) {
         drawWindsock(ctx, startX, arrowY, -1, windLen, windMag01, HUD_WINDSOCK_ORANGE);
-        drawText(ctx, "Wind", startX - windLen / 2, labelY, COLORS.white, 10, "center", "top", false);
       }
     }
   }
@@ -300,7 +301,9 @@ export function renderHUD({
     drawRoundedRect(ctx, x + 2, y + 2, (w - 4) * charge, h - 4, (h - 4) / 2);
     ctx.fillStyle = COLORS.power;
     ctx.fill();
-    drawText(ctx, "Hold and release to fire", width / 2, y - 18, COLORS.white, 14, "center");
+    if (showChargeHint) {
+      drawText(ctx, "Hold and release to fire", width / 2, y - 18, COLORS.white, 14, "center");
+    }
   }
 
   if (message && state.phase !== "gameover") {

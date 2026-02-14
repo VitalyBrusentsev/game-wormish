@@ -17,7 +17,7 @@ import {
   type AimInfo,
 } from "./rendering/game-rendering";
 import { renderNetworkLogHUD } from "./ui/network-log-hud";
-import { renderMapGadget } from "./ui/map-gadget";
+import { getMapGadgetBottomY, renderMapGadget } from "./ui/map-gadget";
 import { drawMenuIconSprite } from "./ui/menu-icons";
 import type { Team } from "./game/team-manager";
 import {
@@ -2743,6 +2743,7 @@ export class Game {
     this.activeWormArrow.render(ctx, this.session, now);
     this.renderMobileAimDragCrosshair(ctx, aim);
     this.renderMobileMovementGhost(ctx);
+    const isMobileProfile = this.isMobileProfile();
 
     renderAimHelpers({
       ctx,
@@ -2750,12 +2751,23 @@ export class Game {
       activeWorm: this.activeWorm,
       aim,
       predictedPath: this.predictPath(),
-      showDesktopAssist: !this.isMobileProfile(),
+      showDesktopAssist: !isMobileProfile,
     });
     ctx.restore();
 
     ctx.save();
     ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
+    const mobileMapMaxWidthPx = isMobileProfile ? Math.floor(this.width * 0.5) : undefined;
+    const timeLabelY = isMobileProfile
+      ? Math.min(
+          this.height - 12,
+          getMapGadgetBottomY({
+            viewportWidth: this.width,
+            terrain: this.session.terrain,
+            ...(mobileMapMaxWidthPx !== undefined ? { maxWidthPx: mobileMapMaxWidthPx } : {}),
+          }) + 16
+        )
+      : undefined;
     const displayTeamLabels = this.getDisplayedTeamLabels(networkSnapshot);
     const teamDisplayOrder =
       networkSnapshot.mode === "local" ? this.getSinglePlayerTeamOrder() : undefined;
@@ -2776,6 +2788,8 @@ export class Game {
         wind: this.session.wind,
         message: displayMessage,
         turnDurationMs: GAMEPLAY.turnTimeMs,
+        showChargeHint: !isMobileProfile,
+        ...(timeLabelY !== undefined ? { timeLabelY } : {}),
         ...(networkMicroStatus ? { networkMicroStatus } : {}),
         ...(teamLabels ? { teamLabels } : {}),
         ...(activeTeamLabel ? { activeTeamLabel } : {}),
@@ -2800,7 +2814,7 @@ export class Game {
       teams: this.teams,
       projectiles: this.session.projectiles,
       showRadar: initialMenuDismissed,
-      ...(this.isMobileProfile() ? { maxWidthPx: Math.floor(this.width * 0.5) } : {}),
+      ...(mobileMapMaxWidthPx !== undefined ? { maxWidthPx: mobileMapMaxWidthPx } : {}),
     });
 
     renderNetworkLogHUD(ctx, this.width, this.height, this.networkState);

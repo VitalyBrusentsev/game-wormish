@@ -18,6 +18,8 @@ type MapGadgetOptions = {
   maxWidthPx?: number;
 };
 
+type MapGadgetLayoutOptions = Pick<MapGadgetOptions, "viewportWidth" | "terrain" | "maxWidthPx">;
+
 type Layout = {
   x: number;
   y: number;
@@ -58,7 +60,7 @@ function getLayout({
   viewportWidth,
   terrain,
   maxWidthPx,
-}: Pick<MapGadgetOptions, "viewportWidth" | "terrain" | "maxWidthPx">): Layout {
+}: MapGadgetLayoutOptions): Layout {
   const worldWidth = Math.max(1, terrain.worldRight - terrain.worldLeft);
   const maxWidth = Math.max(80, Math.min(MAP_GADGET_WIDTH_PX, maxWidthPx ?? MAP_GADGET_WIDTH_PX));
   const scale = maxWidth / worldWidth;
@@ -83,6 +85,11 @@ function getLayout({
     mapHeight,
     scale,
   };
+}
+
+export function getMapGadgetBottomY(options: MapGadgetLayoutOptions): number {
+  const layout = getLayout(options);
+  return layout.y + layout.outerHeight;
 }
 
 function drawMetalFrame(ctx: CanvasRenderingContext2D, layout: Layout) {

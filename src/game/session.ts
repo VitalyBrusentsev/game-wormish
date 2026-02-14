@@ -434,7 +434,7 @@ export class GameSession {
 
     this.turnIndex = initial ? 0 : this.turnIndex + 1;
     this.wind = this.randomRange(-WORLD.windMax, WORLD.windMax);
-    this.message = initial ? "Welcome! Eliminate the other team!" : null;
+    this.message = null;
     this.uziBurst = null;
 
     if (initial) this.teamManager.resetActiveWormIndex();
