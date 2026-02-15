@@ -32,7 +32,11 @@ import {
 } from "./game/turn-driver";
 import { AiTurnController } from "./game/ai-turn-controller";
 import { assignAiTeamPersonalities } from "./ai/personality-assignment";
-import { NetworkSessionState, type NetworkSessionStateSnapshot } from "./network/session-state";
+import {
+  NetworkSessionState,
+  type NetworkLogSetting,
+  type NetworkSessionStateSnapshot,
+} from "./network/session-state";
 import type { TurnCommand } from "./game/network/turn-payload";
 import type {
   MatchInitMessage,
@@ -2032,14 +2036,17 @@ export class Game {
   }
 
   private deliverResolutionToController() {
-    const resolution = this.networkState.dequeueResolution();
-    if (!resolution) return;
-    const controller = this.turnControllers.get(resolution.actingTeamId);
-    if (controller && controller.type === "remote") {
-      (controller as RemoteTurnController).receiveResolution(resolution);
+    while (true) {
+      const resolution = this.networkState.dequeueResolution();
+      if (!resolution) return;
+      const controller = this.turnControllers.get(resolution.actingTeamId);
+      if (controller && controller.type === "remote") {
+        (controller as RemoteTurnController).receiveResolution(resolution);
+        continue;
+      }
+      this.networkState.enqueueResolution(resolution);
       return;
     }
-    this.networkState.enqueueResolution(resolution);
   }
 
   private deliverCommandToController(payload: TurnCommandMessage["payload"]) {
@@ -2063,6 +2070,14 @@ export class Game {
 
   get activeWorm(): Worm {
     return this.session.activeWorm;
+  }
+
+  setNetworkLogSetting(setting: NetworkLogSetting) {
+    this.networkState.setNetworkLogSetting(setting);
+  }
+
+  getNetworkLogSetting(): NetworkLogSetting {
+    return this.networkState.getNetworkLogSetting();
   }
 
   private get activeWormIndex() {
@@ -2589,7 +2604,7 @@ export class Game {
     this.canvas.style.cursor = "crosshair";
   }
 
-  private copyNetworkLogToClipboard() {
+  getNetworkLogText(): string {
     const snapshot = this.networkState.getSnapshot();
     const entries = snapshot.debug.recentMessages;
     const lines = entries.map((entry) => {
@@ -2600,7 +2615,11 @@ export class Game {
       snapshot.mode === "local"
         ? "Network log (local mode)"
         : `Network log (${snapshot.mode}, role=${snapshot.player.role})`;
-    const text = [header, ...lines].join("\n");
+    return [header, ...lines].join("\n");
+  }
+
+  private copyNetworkLogToClipboard() {
+    const text = this.getNetworkLogText();
 
     const clipboard = navigator.clipboard;
     if (clipboard?.writeText) {
@@ -2992,6 +3011,7 @@ export class Game {
     if (simulationPolicy.networkPaused) {
       this.session.pauseFor(dt * 1000);
     }
+    this.deliverResolutionToController();
     this.session.updateActiveTurnDriver(dt, {
       allowInput: !overlaysBlocking && !simulationPolicy.waitingForSync,
       allowLocalInput: !this.isMobileProfile(),

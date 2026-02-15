@@ -110,6 +110,55 @@ afterEach(() => {
 });
 
 describe("Network gameplay turn sync", () => {
+  it("propagates active-worm drowning as a normal turn resolution", () => {
+    const host = new GameSession(320, 240, { random: createRng(15), now: () => 1000 });
+    const guest = new GameSession(320, 240, { random: createRng(16), now: () => 9000 });
+
+    guest.loadMatchInitSnapshot(host.toMatchInitSnapshot());
+
+    const hostControllers = new Map<"Red" | "Blue", TurnDriver>();
+    hostControllers.set("Red", new LocalTurnController());
+    hostControllers.set("Blue", new RemoteTurnController());
+    host.setTurnControllers(hostControllers);
+
+    const guestControllers = new Map<"Red" | "Blue", TurnDriver>();
+    guestControllers.set("Red", new RemoteTurnController());
+    guestControllers.set("Blue", new LocalTurnController());
+    guest.setTurnControllers(guestControllers);
+
+    expect(host.activeTeam.id).toBe("Red");
+    expect(guest.activeTeam.id).toBe("Red");
+    expect(host.state.phase).toBe("aim");
+    expect(guest.state.phase).toBe("aim");
+
+    const drowned = host.activeWorm;
+    drowned.y = host.height + 20;
+    host.update(1 / 60);
+    guest.update(1 / 60);
+
+    expect(drowned.alive).toBe(false);
+    expect(host.state.phase).toBe("post");
+    expect(host.getTurnIndex()).toBe(0);
+    expect(guest.getTurnIndex()).toBe(0);
+
+    vi.advanceTimersByTime(410);
+
+    expect(host.getTurnIndex()).toBe(1);
+    expect(host.activeTeam.id).toBe("Blue");
+    expect(host.hasPendingTurnResolution()).toBe(true);
+
+    const resolution = host.consumeTurnResolution();
+    expect(resolution).not.toBeNull();
+    expect(resolution?.turnIndex).toBe(0);
+    expect(resolution?.result.turnIndex).toBe(1);
+
+    guest.applyTurnResolution(resolution!, { localizeTime: true });
+    expect(guest.getTurnIndex()).toBe(1);
+    expect(guest.activeTeam.id).toBe("Blue");
+    expect(guest.state.phase).toBe("aim");
+    expect(guest.isWaitingForRemoteResolution()).toBe(false);
+  });
+
   it("keeps passive peer from auto-advancing and resyncs on turn resolution", () => {
     const host = new GameSession(320, 240, { random: createRng(5), now: () => 1000 });
     const guest = new GameSession(320, 240, { random: createRng(9), now: () => 9000 });

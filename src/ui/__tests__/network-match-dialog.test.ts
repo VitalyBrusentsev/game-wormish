@@ -58,6 +58,7 @@ const buildSnapshot = (overrides: SnapshotOverride): NetworkSessionStateSnapshot
     },
     debug: {
       showLog: false,
+      logSetting: "all",
       recentMessages: [],
     },
   };

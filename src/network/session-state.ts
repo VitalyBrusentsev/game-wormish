@@ -51,6 +51,7 @@ export interface NetworkMatchBridgeState {
 }
 
 export type NetworkLogDirection = "send" | "recv";
+export type NetworkLogSetting = "all" | "turn-resolution";
 
 export interface NetworkLogEntry {
   atMs: number;
@@ -60,6 +61,7 @@ export interface NetworkLogEntry {
 
 export interface NetworkDebugState {
   showLog: boolean;
+  logSetting: NetworkLogSetting;
   recentMessages: NetworkLogEntry[];
 }
 
@@ -121,6 +123,7 @@ const createBridgeState = (): NetworkMatchBridgeState => ({
 
 const createDebugState = (): NetworkDebugState => ({
   showLog: false,
+  logSetting: "turn-resolution",
   recentMessages: [],
 });
 
@@ -171,6 +174,7 @@ export class NetworkSessionState {
       },
       debug: {
         showLog: this.state.debug.showLog,
+        logSetting: this.state.debug.logSetting,
         recentMessages: this.state.debug.recentMessages.map((entry) => ({ ...entry })),
       },
     };
@@ -315,7 +319,18 @@ export class NetworkSessionState {
     this.state.debug.showLog = !this.state.debug.showLog;
   }
 
+  setNetworkLogSetting(setting: NetworkLogSetting) {
+    this.state.debug.logSetting = setting;
+  }
+
+  getNetworkLogSetting(): NetworkLogSetting {
+    return this.state.debug.logSetting;
+  }
+
   appendNetworkMessageLog(entry: { direction: NetworkLogDirection; message: NetworkMessage }) {
+    if (!shouldLogNetworkMessage(entry.message, this.state.debug.logSetting)) {
+      return;
+    }
     const formatted = formatNetworkMessage(entry.message);
     let bytes = 0;
     try {
@@ -337,6 +352,15 @@ export class NetworkSessionState {
     }
   }
 }
+
+const shouldLogNetworkMessage = (
+  message: NetworkMessage,
+  setting: NetworkLogSetting
+): boolean => {
+  if (setting === "all") return true;
+  if (setting === "turn-resolution") return message.type === "turn_resolution";
+  return true;
+};
 
 const formatNetworkMessage = (message: NetworkMessage): string => {
   switch (message.type) {

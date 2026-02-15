@@ -37,6 +37,19 @@ Returns an object with both teams (arrays with team helpers attached).
 
 - Returns: `{ Red: DebugWorm[]; Blue: DebugWorm[] }`
 
+### `Game.networkLogSetting`
+Gets or sets network log filtering mode.
+
+- Type: `"all" | "turn-resolution"`
+- Default: `"turn-resolution"`
+- Example: `Game.networkLogSetting = "turn-resolution"`
+
+### `Game.networkLog`
+Returns the current formatted network log text (same content used by clipboard export).
+
+- Type: `string`
+- Example: `console.log(Game.networkLog)`
+
 ### `Game.getActiveWorm()`
 Returns a wrapper for the currently active worm, or `null` if unavailable.
 

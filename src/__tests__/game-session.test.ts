@@ -609,4 +609,35 @@ describe("GameSession AI pre-shot visuals", () => {
 
     expect(session.state.phase).toBe("aim");
   });
+
+  it("ends the turn when the active worm drowns during aim phase", async () => {
+    vi.useFakeTimers();
+    try {
+      let now = 1000;
+      const session = new GameSession(320, 240, {
+        random: createRng(93),
+        now: () => now,
+      });
+      const startingTeamId = session.activeTeam.id;
+      const nextTeamId = session.teams.find((team) => team.id !== startingTeamId)?.id;
+      expect(nextTeamId).toBeDefined();
+
+      const drowningWorm = session.activeWorm;
+      drowningWorm.y = session.height + 20;
+
+      session.update(1 / 60);
+
+      expect(drowningWorm.alive).toBe(false);
+      expect(session.state.phase).toBe("post");
+      expect(session.activeTeam.id).toBe(startingTeamId);
+
+      now += 400;
+      await vi.advanceTimersByTimeAsync(400);
+
+      expect(session.activeTeam.id).toBe(nextTeamId);
+      expect(session.state.phase).toBe("aim");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

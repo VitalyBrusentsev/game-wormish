@@ -28,7 +28,15 @@ export function renderNetworkLogHUD(
   ctx.lineWidth = 1;
   ctx.strokeRect(x, y, panelWidth, panelHeight);
 
-  drawText(ctx, "Network log (I)", x + padding, y + padding, COLORS.white, 12, "left");
+  drawText(
+    ctx,
+    `Network log (I) mode=${snapshot.debug.logSetting}`,
+    x + padding,
+    y + padding,
+    COLORS.white,
+    12,
+    "left"
+  );
 
   const lines = entries.slice(-(maxLines));
   for (let i = 0; i < lines.length; i++) {
@@ -50,4 +58,3 @@ export function renderNetworkLogHUD(
   }
   ctx.restore();
 }
-

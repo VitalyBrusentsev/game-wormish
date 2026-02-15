@@ -183,6 +183,7 @@ describe("NetworkSessionState", () => {
   it("keeps a rolling log of network messages", () => {
     const state = new NetworkSessionState();
     state.setMode("network-host");
+    state.setNetworkLogSetting("all");
 
     for (let i = 0; i < 55; i++) {
       state.appendNetworkMessageLog({
@@ -198,5 +199,31 @@ describe("NetworkSessionState", () => {
     expect(snapshot.debug.recentMessages).toHaveLength(50);
     expect(snapshot.debug.recentMessages[0]?.text).toContain("P5");
     expect(snapshot.debug.recentMessages[snapshot.debug.recentMessages.length - 1]?.text).toContain("P54");
+  });
+
+  it("can filter logs to turn-resolution messages only", () => {
+    const state = new NetworkSessionState();
+    state.setMode("network-host");
+    state.setNetworkLogSetting("turn-resolution");
+
+    state.appendNetworkMessageLog({
+      direction: "send",
+      message: {
+        type: "player_hello",
+        payload: { name: "Host", role: "host" },
+      },
+    });
+    state.appendNetworkMessageLog({
+      direction: "recv",
+      message: {
+        type: "turn_resolution",
+        payload: createTurnResolution(),
+      },
+    });
+
+    const snapshot = state.getSnapshot();
+    expect(snapshot.debug.logSetting).toBe("turn-resolution");
+    expect(snapshot.debug.recentMessages).toHaveLength(1);
+    expect(snapshot.debug.recentMessages[0]?.text).toContain("turn_resolution");
   });
 });

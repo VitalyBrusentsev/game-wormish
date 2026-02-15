@@ -664,8 +664,13 @@ export class GameSession {
     }
 
     if (this.isLocalTurnActive()) {
+      const activeWorm = this.activeWorm;
+      const activeWasAlive = activeWorm.alive;
       this.teamManager.killWormsBelow(this.height - 8);
       this.checkVictory();
+      if (this.state.phase === "aim" && activeWasAlive && !activeWorm.alive) {
+        this.endAimPhaseWithoutShot();
+      }
     }
   }
 

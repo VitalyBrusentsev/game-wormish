@@ -4,6 +4,7 @@ import { WeaponType, clamp } from "../definitions";
 import type { Worm } from "../entities";
 import type { GameAiSettings } from "../ai/types";
 import { playTurnWithGameAiForTeam, type AiTurnPlan } from "../ai/game-ai";
+import type { NetworkLogSetting } from "../network/session-state";
 import {
   getWormPersonality,
   normalizeAiPersonality,
@@ -38,6 +39,11 @@ const normalizeWeapon = (value: string | WeaponType): WeaponType | null => {
     default:
       return null;
   }
+};
+
+const normalizeNetworkLogSetting = (value: unknown): NetworkLogSetting | null => {
+  if (value === "all" || value === "turn-resolution") return value;
+  return null;
 };
 
 export class DebugWorm {
@@ -151,6 +157,8 @@ export type GameDebugApi = {
   getTeams: () => Record<TeamId, DebugTeam>;
   getActiveWorm: () => DebugWorm | null;
   selectWorm: (teamId: string | TeamId, index: number) => DebugWorm | null;
+  networkLogSetting: NetworkLogSetting;
+  networkLog: string;
 };
 
 export type DebugTeam = DebugWorm[] & {
@@ -176,42 +184,65 @@ const createEmptyDebugTeam = (teamId: TeamId): DebugTeam => {
   });
 };
 
-export const createGameDebugApi = (game: Game): GameDebugApi => ({
-  getTeam: (teamId) => {
-    const normalized = normalizeTeamId(teamId);
-    if (!normalized) return createEmptyDebugTeam(game.session.activeTeam.id);
-    const team = game.session.teams.find((entry) => entry.id === normalized);
-    if (!team) return createEmptyDebugTeam(normalized);
-    return createDebugTeam(game, team.id, team.worms);
-  },
-  getTeams: () => ({
-    Red: createDebugTeam(
-      game,
-      "Red",
-      game.session.teams.find((entry) => entry.id === "Red")?.worms ?? []
-    ),
-    Blue: createDebugTeam(
-      game,
-      "Blue",
-      game.session.teams.find((entry) => entry.id === "Blue")?.worms ?? []
-    ),
-  }),
-  getActiveWorm: () => {
-    const team = game.session.activeTeam;
-    if (!team) return null;
-    const worm = game.session.activeWorm;
-    const index = game.session.activeWormIndex;
-    return new DebugWorm(game, worm, team.id, index);
-  },
-  selectWorm: (teamId, index) => {
-    const normalized = normalizeTeamId(teamId);
-    if (!normalized) return null;
-    const team = game.session.teams.find((entry) => entry.id === normalized);
-    if (!team) return null;
-    const safeIndex = Math.max(0, Math.min(team.worms.length - 1, index));
-    const worm = team.worms[safeIndex];
-    if (!worm) return null;
-    game.session.debugSelectWorm(normalized, safeIndex);
-    return new DebugWorm(game, worm, normalized, safeIndex);
-  },
-});
+export const createGameDebugApi = (game: Game): GameDebugApi => {
+  const api = {
+    getTeam: (teamId: string | TeamId) => {
+      const normalized = normalizeTeamId(teamId);
+      if (!normalized) return createEmptyDebugTeam(game.session.activeTeam.id);
+      const team = game.session.teams.find((entry) => entry.id === normalized);
+      if (!team) return createEmptyDebugTeam(normalized);
+      return createDebugTeam(game, team.id, team.worms);
+    },
+    getTeams: () => ({
+      Red: createDebugTeam(
+        game,
+        "Red",
+        game.session.teams.find((entry) => entry.id === "Red")?.worms ?? []
+      ),
+      Blue: createDebugTeam(
+        game,
+        "Blue",
+        game.session.teams.find((entry) => entry.id === "Blue")?.worms ?? []
+      ),
+    }),
+    getActiveWorm: () => {
+      const team = game.session.activeTeam;
+      if (!team) return null;
+      const worm = game.session.activeWorm;
+      const index = game.session.activeWormIndex;
+      return new DebugWorm(game, worm, team.id, index);
+    },
+    selectWorm: (teamId: string | TeamId, index: number) => {
+      const normalized = normalizeTeamId(teamId);
+      if (!normalized) return null;
+      const team = game.session.teams.find((entry) => entry.id === normalized);
+      if (!team) return null;
+      const safeIndex = Math.max(0, Math.min(team.worms.length - 1, index));
+      const worm = team.worms[safeIndex];
+      if (!worm) return null;
+      game.session.debugSelectWorm(normalized, safeIndex);
+      return new DebugWorm(game, worm, normalized, safeIndex);
+    },
+    networkLogSetting: game.getNetworkLogSetting(),
+    networkLog: game.getNetworkLogText(),
+  } as GameDebugApi;
+
+  Object.defineProperty(api, "networkLogSetting", {
+    get: () => game.getNetworkLogSetting(),
+    set: (value: unknown) => {
+      const normalized = normalizeNetworkLogSetting(value);
+      if (!normalized) return;
+      game.setNetworkLogSetting(normalized);
+    },
+    enumerable: true,
+    configurable: false,
+  });
+
+  Object.defineProperty(api, "networkLog", {
+    get: () => game.getNetworkLogText(),
+    enumerable: true,
+    configurable: false,
+  });
+
+  return api;
+};
