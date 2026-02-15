@@ -565,12 +565,12 @@ export class Game {
     this.controlProfile = nextProfile;
     this.updateCanvasInterpolation();
     this.applyWorldZoom(this.getDesiredWorldZoom());
+    this.ensureMobileControllers();
 
     if (nextProfile === "mobile-portrait") {
-      this.ensureMobileControllers();
       this.canvas.style.touchAction = "none";
     } else {
-      this.disposeMobileControllers();
+      this.disposeMobileGestures();
       this.canvas.style.touchAction = "";
       this.resetMobileTransientState();
     }
@@ -597,6 +597,11 @@ export class Game {
       this.mobileControls.mount();
     }
 
+    if (!this.isMobileProfile()) {
+      this.disposeMobileGestures();
+      return;
+    }
+
     if (!this.mobileGestures) {
       this.mobileGestures = new MobileGestureController(this.canvas, {
         isEnabled: () => this.canUseMobilePanning(),
@@ -614,9 +619,13 @@ export class Game {
     }
   }
 
-  private disposeMobileControllers() {
+  private disposeMobileGestures() {
     this.mobileGestures?.dispose();
     this.mobileGestures = null;
+  }
+
+  private disposeMobileControllers() {
+    this.disposeMobileGestures();
     this.mobileControls?.dispose();
     this.mobileControls = null;
   }
@@ -699,7 +708,14 @@ export class Game {
   }
 
   private canUseMobileControls() {
+    if (!this.canUseWeaponSelector()) return false;
     if (!this.canUseMobilePanning()) return false;
+    return true;
+  }
+
+  private canUseWeaponSelector() {
+    if (this.hasBlockingOverlay()) return false;
+    if (!initialMenuDismissed) return false;
     if (!this.isActiveTeamLocallyControlled()) return false;
     if (!this.session.isLocalTurnActive()) return false;
     if (this.session.state.phase !== "aim") return false;
@@ -829,14 +845,14 @@ export class Game {
   }
 
   private handleMobileToggleWeaponPicker() {
-    if (!this.canUseMobileControls()) return;
-    if (this.mobileAimMode === "charge") return;
+    if (!this.canUseWeaponSelector()) return;
+    if (this.mobileAimMode === "charge" || this.session.state.charging) return;
     this.mobileWeaponPickerOpen = !this.mobileWeaponPickerOpen;
   }
 
   private handleMobileSelectWeapon(weapon: WeaponType) {
-    if (!this.canUseMobileControls()) return;
-    if (this.mobileAimMode === "charge") return;
+    if (!this.canUseWeaponSelector()) return;
+    if (this.mobileAimMode === "charge" || this.session.state.charging) return;
     this.session.setWeaponCommand(weapon);
     this.mobileWeaponPickerOpen = false;
   }
@@ -1047,21 +1063,6 @@ export class Game {
   private syncMobileControls() {
     if (!this.mobileControls) return;
 
-    if (!this.isMobileProfile()) {
-      this.mobileControls.setState({
-        visible: false,
-        weapon: this.session.state.weapon,
-        canSelectWeapon: false,
-        weaponPickerOpen: false,
-        mode: "idle",
-        showAimButton: false,
-        aimButtonX: 0,
-        aimButtonY: 0,
-        showJumpButton: false,
-      });
-      return;
-    }
-
     if (this.session.state.phase !== "aim") {
       this.mobileAimMode = "idle";
       this.mobileAimButtonVisible = false;
@@ -1083,9 +1084,15 @@ export class Game {
       this.mobileAimTarget = null;
     }
 
-    const canUse = this.canUseMobileControls();
-    const visible = canUse;
-    const showAimButton = canUse && this.mobileAimMode === "idle" && this.mobileAimButtonVisible;
+    const canUseMobile = this.canUseMobileControls();
+    const canUseWeaponSelector = this.canUseWeaponSelector();
+    const canSelectWeapon =
+      canUseWeaponSelector && this.mobileAimMode !== "charge" && !this.session.state.charging;
+    if (!canSelectWeapon) {
+      this.mobileWeaponPickerOpen = false;
+    }
+    const visible = canUseWeaponSelector || canUseMobile;
+    const showAimButton = canUseMobile && this.mobileAimMode === "idle" && this.mobileAimButtonVisible;
     const aimAnchor = this.worldToScreen(
       this.activeWorm.x,
       this.activeWorm.y - this.activeWorm.radius - MOBILE_AIM_BUTTON_OFFSET_PX
@@ -1094,13 +1101,13 @@ export class Game {
     this.mobileControls.setState({
       visible,
       weapon: this.session.state.weapon,
-      canSelectWeapon: canUse && this.mobileAimMode !== "charge",
-      weaponPickerOpen: canUse && this.mobileAimMode !== "charge" && this.mobileWeaponPickerOpen,
-      mode: canUse ? this.mobileAimMode : "idle",
+      canSelectWeapon,
+      weaponPickerOpen: canSelectWeapon && this.mobileWeaponPickerOpen,
+      mode: canUseMobile ? this.mobileAimMode : "idle",
       showAimButton,
       aimButtonX: aimAnchor.x,
       aimButtonY: aimAnchor.y,
-      showJumpButton: canUse && this.mobileMovementAssist !== null,
+      showJumpButton: canUseMobile && this.mobileMovementAssist !== null,
     });
   }
 
@@ -1313,9 +1320,7 @@ export class Game {
       signal: this.eventAbort.signal,
     });
     this.sound.attachUnlockGestures(this.canvas, { signal: this.eventAbort.signal });
-    if (this.isMobileProfile()) {
-      this.ensureMobileControllers();
-    }
+    this.ensureMobileControllers();
     this.syncBackgroundSuspension();
   }
 
