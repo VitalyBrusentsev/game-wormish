@@ -13,6 +13,7 @@ export type MobileControlsState = {
   aimButtonX: number;
   aimButtonY: number;
   showJumpButton: boolean;
+  topUiOffsetPx: number;
 };
 
 export type MobileControlsCallbacks = {
@@ -172,6 +173,10 @@ export class MobileControlsOverlay {
   setState(state: MobileControlsState) {
     if (!this.mounted) return;
 
+    this.root.style.setProperty(
+      "--mobile-top-ui-offset-px",
+      `${Math.max(0, Math.round(state.topUiOffsetPx))}px`
+    );
     this.root.classList.toggle("mobile-controls-layer--visible", state.visible);
     this.weaponDock.classList.toggle("mobile-weapon-dock--hidden", !state.visible);
     this.weaponButton.disabled = !state.canSelectWeapon;

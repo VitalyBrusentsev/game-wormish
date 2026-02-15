@@ -16,9 +16,13 @@ type MapGadgetOptions = {
   projectiles?: readonly Projectile[];
   showRadar?: boolean;
   maxWidthPx?: number;
+  topOffsetPx?: number;
 };
 
-type MapGadgetLayoutOptions = Pick<MapGadgetOptions, "viewportWidth" | "terrain" | "maxWidthPx">;
+type MapGadgetLayoutOptions = Pick<
+  MapGadgetOptions,
+  "viewportWidth" | "terrain" | "maxWidthPx" | "topOffsetPx"
+>;
 
 type Layout = {
   x: number;
@@ -60,6 +64,7 @@ function getLayout({
   viewportWidth,
   terrain,
   maxWidthPx,
+  topOffsetPx = 0,
 }: MapGadgetLayoutOptions): Layout {
   const worldWidth = Math.max(1, terrain.worldRight - terrain.worldLeft);
   const maxWidth = Math.max(80, Math.min(MAP_GADGET_WIDTH_PX, maxWidthPx ?? MAP_GADGET_WIDTH_PX));
@@ -70,7 +75,7 @@ function getLayout({
   const outerHeight = mapHeight + FRAME_PAD_PX * 2;
 
   const x = viewportWidth - HUD_TOP_PADDING_PX - outerWidth;
-  const y = HUD_TOP_PADDING_PX + HUD_BAR_HEIGHT_PX + HUD_TO_GADGET_GAP_PX;
+  const y = topOffsetPx + HUD_TOP_PADDING_PX + HUD_BAR_HEIGHT_PX + HUD_TO_GADGET_GAP_PX;
   const innerX = x + FRAME_PAD_PX;
   const innerY = y + FRAME_PAD_PX;
 
@@ -431,6 +436,7 @@ export function renderMapGadget({
   projectiles = [],
   showRadar = true,
   maxWidthPx,
+  topOffsetPx,
 }: MapGadgetOptions): void {
   if (viewportWidth <= 0 || viewportHeight <= 0) return;
   if (teams.length === 0) return;
@@ -439,6 +445,7 @@ export function renderMapGadget({
     viewportWidth,
     terrain,
     ...(maxWidthPx !== undefined ? { maxWidthPx } : {}),
+    ...(topOffsetPx !== undefined ? { topOffsetPx } : {}),
   });
   if (layout.outerWidth <= 0 || layout.outerHeight <= 0) return;
   if (layout.y + layout.outerHeight < 0) return;

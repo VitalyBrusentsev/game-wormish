@@ -239,6 +239,7 @@ const MOBILE_AIM_LINE_MAX_PX = 180;
 const MOBILE_DEFAULT_AIM_DISTANCE_PX = 140;
 const MOBILE_DEFAULT_AIM_ANGLE_UP_DEG = 30;
 const MATCH_RESULT_DIALOG_DELAY_MS = 1000;
+const MOBILE_FULLSCREEN_TOP_UI_OFFSET_PX = 44;
 const SETTINGS_BUTTON_SIZE_PX = 48;
 const SETTINGS_BUTTON_PADDING_PX = 14;
 const SETTINGS_ICON_WIDTH_PX = 28;
@@ -648,6 +649,25 @@ export class Game {
 
   private isMobileProfile() {
     return this.controlProfile === "mobile-portrait";
+  }
+
+  private isStandaloneDisplayMode() {
+    if (typeof window.matchMedia === "function") {
+      try {
+        if (window.matchMedia("(display-mode: standalone)").matches) return true;
+        if (window.matchMedia("(display-mode: fullscreen)").matches) return true;
+      } catch {
+        // ignore and fallback
+      }
+    }
+    const standaloneNavigator = navigator as Navigator & { standalone?: boolean };
+    return standaloneNavigator.standalone === true;
+  }
+
+  private getMobileTopUiOffsetPx() {
+    if (!this.isMobileProfile()) return 0;
+    if (!this.isStandaloneDisplayMode()) return 0;
+    return MOBILE_FULLSCREEN_TOP_UI_OFFSET_PX;
   }
 
   private getDesiredWorldZoom() {
@@ -1090,6 +1110,7 @@ export class Game {
 
     const canUseMobile = this.canUseMobileControls();
     const canUseWeaponSelector = this.canUseWeaponSelector();
+    const topUiOffsetPx = this.getMobileTopUiOffsetPx();
     const canSelectWeapon =
       canUseWeaponSelector && this.mobileAimMode !== "charge" && !this.session.state.charging;
     if (!canSelectWeapon) {
@@ -1112,6 +1133,7 @@ export class Game {
       aimButtonX: aimAnchor.x,
       aimButtonY: aimAnchor.y,
       showJumpButton: canUseMobile && this.mobileMovementAssist !== null,
+      topUiOffsetPx,
     });
   }
 
@@ -2899,6 +2921,7 @@ export class Game {
     ctx.save();
     ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
     const mobileMapMaxWidthPx = isMobileProfile ? Math.floor(this.width * 0.5) : undefined;
+    const topUiOffsetPx = this.getMobileTopUiOffsetPx();
     const timeLabelY = isMobileProfile
       ? Math.min(
           this.height - 12,
@@ -2906,6 +2929,7 @@ export class Game {
             viewportWidth: this.width,
             terrain: this.session.terrain,
             ...(mobileMapMaxWidthPx !== undefined ? { maxWidthPx: mobileMapMaxWidthPx } : {}),
+            ...(topUiOffsetPx > 0 ? { topOffsetPx: topUiOffsetPx } : {}),
           }) + 16
         )
       : undefined;
@@ -2930,6 +2954,7 @@ export class Game {
         message: displayMessage,
         turnDurationMs: GAMEPLAY.turnTimeMs,
         showChargeHint: !isMobileProfile,
+        ...(topUiOffsetPx > 0 ? { topOffsetPx: topUiOffsetPx } : {}),
         ...(timeLabelY !== undefined ? { timeLabelY } : {}),
         ...(networkMicroStatus ? { networkMicroStatus } : {}),
         ...(teamLabels ? { teamLabels } : {}),
@@ -2956,6 +2981,7 @@ export class Game {
       projectiles: this.session.projectiles,
       showRadar: initialMenuDismissed,
       ...(mobileMapMaxWidthPx !== undefined ? { maxWidthPx: mobileMapMaxWidthPx } : {}),
+      ...(topUiOffsetPx > 0 ? { topOffsetPx: topUiOffsetPx } : {}),
     });
 
     renderNetworkLogHUD(ctx, this.width, this.height, this.networkState);

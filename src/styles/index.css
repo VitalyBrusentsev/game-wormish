@@ -658,7 +658,7 @@ Mobile gameplay controls
 .mobile-weapon-dock {
   position: absolute;
   left: 10px;
-  top: 64px;
+  top: calc(64px + var(--mobile-top-ui-offset-px, 0px));
   display: flex;
   flex-direction: column;
   gap: 8px;

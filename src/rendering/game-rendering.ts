@@ -58,6 +58,7 @@ export type RenderHudOptions = {
   message: string | null;
   turnDurationMs: number;
   timeLabelY?: number;
+  topOffsetPx?: number;
   showChargeHint?: boolean;
 };
 
@@ -106,13 +107,15 @@ export function renderHUD({
   message,
   turnDurationMs,
   timeLabelY,
+  topOffsetPx = 0,
   showChargeHint = true,
 }: RenderHudOptions) {
   const padding = 10;
+  const topInset = Math.max(0, topOffsetPx);
 
   const barH = 44;
   ctx.save();
-  drawRoundedRect(ctx, padding, padding, width - padding * 2, barH, 10);
+  drawRoundedRect(ctx, padding, padding + topInset, width - padding * 2, barH, 10);
   ctx.fillStyle = COLORS.hudBg;
   ctx.fill();
   ctx.strokeStyle = COLORS.hudPanelBorder;
@@ -127,7 +130,7 @@ export function renderHUD({
   const hbH = 10;
   const leftX = padding + 12 + hbW / 2;
   const rightX = width - padding - 12 - hbW / 2;
-  const topY = padding + 10;
+  const topY = padding + topInset + 10;
 
   const leftLabel = truncateHudText(
     ctx,
@@ -311,7 +314,7 @@ export function renderHUD({
       ctx,
       message,
       width / 2,
-      padding + barH + 32,
+      padding + topInset + barH + 32,
       COLORS.white,
       16,
       "center"
