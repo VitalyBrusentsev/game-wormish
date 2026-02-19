@@ -60,6 +60,7 @@ import {
   didMovementGetStuck,
   isForwardProgressBlocked,
 } from "./movement/stuck-detection";
+import { parseJoinLinkHash } from "./network/join-link";
 
 let initialMenuDismissed = false;
 
@@ -529,7 +530,8 @@ export class Game {
       },
     });
 
-    if (!initialMenuDismissed) {
+    const startedFromJoinLink = this.tryStartJoinFromShareLink();
+    if (!initialMenuDismissed && !startedFromJoinLink) {
       this.showStartMenu("start", false);
     }
 
@@ -1869,6 +1871,34 @@ export class Game {
 
   cancelNetworkSetup(): void {
     void this.teardownNetworkSession(false);
+  }
+
+  private tryStartJoinFromShareLink(): boolean {
+    const joinLink = parseJoinLinkHash(window.location.hash);
+    if (!joinLink) {
+      return false;
+    }
+
+    this.clearJoinLinkHash();
+    this.hideStartMenu();
+    this.networkDialog.show("guest");
+    this.networkDialog.prepareJoinFromShareLink(joinLink);
+
+    void this.lookupRoom({ registryUrl: this.registryUrl, roomCode: joinLink.roomCode })
+      .catch(() => { })
+      .finally(() => {
+        this.networkDialog.completeJoinLinkLookup();
+      });
+
+    return true;
+  }
+
+  private clearJoinLinkHash() {
+    if (!window.location.hash) {
+      return;
+    }
+    const nextUrl = `${window.location.pathname}${window.location.search}`;
+    window.history.replaceState(window.history.state, document.title, nextUrl);
   }
 
   private setupWebRTCCallbacks(client: WebRTCRegistryClient, clientGeneration: number) {

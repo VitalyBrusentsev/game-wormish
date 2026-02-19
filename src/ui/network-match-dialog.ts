@@ -1,6 +1,7 @@
 import { CommandDialog, type CloseReason } from "./dialog";
 import type { NetworkSessionState, NetworkSessionStateSnapshot } from "../network/session-state";
 import { ConnectionState } from "../webrtc/types";
+import { createJoinLinkUrl, type JoinLinkData } from "../network/join-link";
 
 export type NetworkRole = "host" | "guest";
 
@@ -16,6 +17,7 @@ export type HostPhase = "creating" | "room-ready" | "connecting" | "connected";
 export type GuestPhase =
   | "enter-room"
   | "found-room"
+  | "confirm-link"
   | "joining-room"
   | "connecting"
   | "connected";
@@ -113,6 +115,7 @@ export class NetworkMatchDialog {
   private statusMessages: string[] = [];
   private isProcessing = false;
   private contentContainer: HTMLElement | null = null;
+  private pendingJoinLink: JoinLinkData | null = null;
 
   constructor(callbacks: NetworkMatchCallbacks) {
     this.callbacks = callbacks;
@@ -123,6 +126,7 @@ export class NetworkMatchDialog {
   show(initialRole: NetworkRole = "host") {
     this.statusMessages = [];
     this.isProcessing = false;
+    this.pendingJoinLink = null;
     if (!this.playerName) {
       this.playerName = this.readStoredPlayerName();
     }
@@ -156,10 +160,50 @@ export class NetworkMatchDialog {
 
   updateFromNetworkState(networkState: NetworkSessionState) {
     const snapshot = networkState.getSnapshot();
+    const nextState = deriveDialogStateFromSnapshot(this.state, snapshot);
 
-    this.state = deriveDialogStateFromSnapshot(this.state, snapshot);
+    if (
+      this.pendingJoinLink &&
+      nextState.kind === "joining" &&
+      nextState.phase === "found-room" &&
+      nextState.hostName &&
+      snapshot.connection.lifecycle === ConnectionState.IDLE
+    ) {
+      this.state = {
+        ...nextState,
+        phase: "confirm-link",
+        roomCode: this.pendingJoinLink.roomCode,
+        joinCode: this.pendingJoinLink.joinCode,
+      };
+    } else {
+      this.state = nextState;
+    }
+
     this.statusMessages = this.collectStatusMessages(snapshot, this.state);
 
+    this.refreshContent();
+  }
+
+  prepareJoinFromShareLink(link: JoinLinkData) {
+    this.pendingJoinLink = link;
+    this.state = {
+      kind: "joining",
+      phase: "enter-room",
+      roomCode: link.roomCode,
+      joinCode: link.joinCode,
+      hostName: "",
+      expiresAt: null,
+    };
+    this.statusMessages = ["Finding room..."];
+    this.isProcessing = true;
+    this.refreshContent();
+  }
+
+  completeJoinLinkLookup() {
+    this.isProcessing = false;
+    if (this.statusMessages[0] === "Finding room...") {
+      this.statusMessages = [];
+    }
     this.refreshContent();
   }
 
@@ -251,8 +295,13 @@ export class NetworkMatchDialog {
   }
 
   private buildHostContent(): HTMLElement {
+    const hostState = this.getHostState();
     const section = document.createElement("div");
     section.className = "network-section";
+
+    if (hostState.phase !== "creating" && hostState.roomCode && hostState.joinCode) {
+      section.appendChild(this.buildHostShareActions());
+    }
 
     const statusBlock = this.buildStatusBlock(true);
     if (statusBlock) {
@@ -274,6 +323,9 @@ export class NetworkMatchDialog {
     } else if (guestState.phase === "found-room") {
       section.appendChild(this.buildJoinCodeControls(guestState));
       section.appendChild(this.buildJoinActions());
+    } else if (guestState.phase === "confirm-link") {
+      section.appendChild(this.buildJoinLinkConfirmation(guestState));
+      section.appendChild(this.buildJoinActions("Join This Game"));
     } else {
       if (guestState.phase === "joining-room" || guestState.phase === "connecting") {
         section.appendChild(this.buildJoinCodeControls(guestState, true));
@@ -309,6 +361,7 @@ export class NetworkMatchDialog {
     roomCodeInput.maxLength = 16;
     roomCodeInput.addEventListener("input", (e) => {
       const nextCode = (e.target as HTMLInputElement).value.toUpperCase();
+      this.pendingJoinLink = null;
       this.state = { ...guestState, roomCode: nextCode };
       (e.target as HTMLInputElement).value = nextCode;
     });
@@ -336,6 +389,7 @@ export class NetworkMatchDialog {
     joinCodeInput.maxLength = 16;
     joinCodeInput.readOnly = readonly;
     joinCodeInput.addEventListener("input", (e) => {
+      this.pendingJoinLink = null;
       this.state = { ...guestState, joinCode: (e.target as HTMLInputElement).value };
     });
 
@@ -359,19 +413,55 @@ export class NetworkMatchDialog {
     return buttonGroup;
   }
 
-  private buildJoinActions(): HTMLElement {
+  private buildJoinActions(label = "Join"): HTMLElement {
     const buttonGroup = document.createElement("div");
     buttonGroup.className = "network-button-group";
 
     const joinButton = document.createElement("button");
     joinButton.type = "button";
     joinButton.className = "network-button network-button--primary";
-    joinButton.textContent = "Join";
+    joinButton.textContent = label;
     joinButton.disabled = this.isProcessing;
     joinButton.addEventListener("click", () => this.handleJoinRoom());
 
     buttonGroup.appendChild(joinButton);
     return buttonGroup;
+  }
+
+  private buildHostShareActions(): HTMLElement {
+    const buttonGroup = document.createElement("div");
+    buttonGroup.className = "network-button-group";
+
+    const copyLinkButton = document.createElement("button");
+    copyLinkButton.type = "button";
+    copyLinkButton.className = "network-button";
+    copyLinkButton.textContent = "Copy Join Link";
+    copyLinkButton.disabled = this.isProcessing;
+    copyLinkButton.addEventListener("click", () => {
+      void this.handleCopyJoinLink();
+    });
+
+    buttonGroup.appendChild(copyLinkButton);
+    return buttonGroup;
+  }
+
+  private buildJoinLinkConfirmation(guestState: Extract<DialogState, { kind: "joining" }>): HTMLElement {
+    const wrapper = document.createElement("div");
+    wrapper.className = "network-status";
+
+    const title = document.createElement("div");
+    title.className = "network-status-title";
+    title.textContent = "Join Confirmation";
+    wrapper.appendChild(title);
+
+    const message = document.createElement("div");
+    message.className = "network-status-message";
+    message.textContent = guestState.hostName
+      ? `Join ${guestState.hostName}'s game using this invite link?`
+      : "Join this game using the invite link?";
+    wrapper.appendChild(message);
+
+    return wrapper;
   }
 
   private buildCancelRow(allowDismiss = true): HTMLElement {
@@ -455,6 +545,7 @@ export class NetworkMatchDialog {
       if (this.state.kind === "joining") {
         if (this.state.phase === "enter-room") return "Finding room...";
         if (this.state.phase === "found-room") return "Joining room...";
+        if (this.state.phase === "confirm-link") return "Preparing join confirmation...";
       }
     }
 
@@ -474,6 +565,11 @@ export class NetworkMatchDialog {
         return this.state.hostName
           ? `Found host ${this.state.hostName}. Enter the join code to connect.`
           : "Room found. Enter the join code to connect.";
+      }
+      if (this.state.phase === "confirm-link") {
+        return this.state.hostName
+          ? `Ready to join ${this.state.hostName}.`
+          : "Ready to join this game.";
       }
       if (this.state.phase === "joining-room") return "Joining room...";
       if (this.state.phase === "connecting") return "Establishing connection...";
@@ -532,6 +628,9 @@ export class NetworkMatchDialog {
         return ["Establishing connection..."];
       }
       if (lifecycle === ConnectionState.CONNECTED || state.phase === "connected") return ["Connected. Starting match..."];
+      if (state.phase === "confirm-link") {
+        return [state.hostName ? `Ready to join ${state.hostName}.` : "Ready to join this game."];
+      }
       if (state.phase === "found-room") {
         return [
           state.hostName
@@ -547,6 +646,14 @@ export class NetworkMatchDialog {
   private getGuestState(): Extract<DialogState, { kind: "joining" }> {
     if (this.state.kind !== "joining") {
       throw new Error("Guest state requested outside joining flow");
+    }
+
+    return this.state;
+  }
+
+  private getHostState(): Extract<DialogState, { kind: "hosting" }> {
+    if (this.state.kind !== "hosting") {
+      throw new Error("Host state requested outside hosting flow");
     }
 
     return this.state;
@@ -610,6 +717,7 @@ export class NetworkMatchDialog {
     }
 
     this.isProcessing = true;
+    this.pendingJoinLink = null;
     this.statusMessages = ["Finding room..."];
     this.refreshContent();
 
@@ -646,6 +754,7 @@ export class NetworkMatchDialog {
 
     try {
       await this.callbacks.onJoinRoom(this.state.roomCode.trim(), this.state.joinCode.trim(), this.playerName.trim());
+      this.pendingJoinLink = null;
       this.state = { ...this.state, phase: "joining-room" } as DialogState;
       this.statusMessages = [];
     } catch (error) {
@@ -657,6 +766,7 @@ export class NetworkMatchDialog {
   }
 
   private handleCancel(allowDismiss: boolean) {
+    this.pendingJoinLink = null;
     this.callbacks.onCancel();
     if (allowDismiss && this.state.kind === "landing") {
       this.hide();
@@ -670,6 +780,31 @@ export class NetworkMatchDialog {
     this.state = createLandingState();
     this.statusMessages = [];
     this.isProcessing = false;
+    this.pendingJoinLink = null;
+    this.refreshContent();
+  }
+
+  private async handleCopyJoinLink() {
+    if (this.state.kind !== "hosting" || !this.state.roomCode || !this.state.joinCode) {
+      return;
+    }
+
+    const baseUrl = `${window.location.origin}${window.location.pathname}${window.location.search}`;
+    const shareUrl = createJoinLinkUrl(baseUrl, {
+      roomCode: this.state.roomCode,
+      joinCode: this.state.joinCode,
+    });
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API is unavailable");
+      }
+      await navigator.clipboard.writeText(shareUrl);
+      this.statusMessages = ["Join link copied to clipboard."];
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.statusMessages = [`Failed to copy join link: ${message}`];
+    }
     this.refreshContent();
   }
 
