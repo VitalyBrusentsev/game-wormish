@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { WeaponType } from "../definitions";
 import { Worm } from "../entities";
 import { computeCritterRig } from "../critter/critter-geometry";
-import { critterHitTestCircle } from "../game/critter-hit-test";
+import { critterHitTestCircle, critterSweepHitTestCircle } from "../game/critter-hit-test";
 import { resolveCritterSpriteOffsets } from "../critter/critter-sprites";
 
 function createWorm(config: { x: number; y: number; facing: -1 | 1 }) {
@@ -98,5 +98,38 @@ describe("critterHitTestCircle", () => {
 
     const hand = rigAim.arms.right.lower.b;
     expect(critterHitTestCircle(worm, hand.x, hand.y, 1)).toBe(false);
+  });
+
+  it("detects sweep hits when segment crosses torso but endpoints miss", () => {
+    const worm = createWorm({ x: 100, y: 120, facing: 1 });
+    const rig = computeCritterRig({
+      x: worm.x,
+      y: worm.y,
+      r: worm.radius,
+      facing: 1,
+      pose: { kind: "idle" },
+    });
+    const offsets = resolveCritterSpriteOffsets();
+    const torsoCenter = {
+      x: rig.body.center.x + worm.facing * offsets.torso.x,
+      y: rig.body.center.y + offsets.torso.y,
+    };
+    const sweepY = torsoCenter.y - rig.body.h * 0.2;
+    const fromX = torsoCenter.x - 16;
+    const toX = torsoCenter.x + 16;
+
+    expect(critterHitTestCircle(worm, fromX, sweepY, 2)).toBe(false);
+    expect(critterHitTestCircle(worm, toX, sweepY, 2)).toBe(false);
+
+    const hitT = critterSweepHitTestCircle(worm, fromX, sweepY, toX, sweepY, 2);
+    expect(hitT).not.toBeNull();
+    expect(hitT).toBeGreaterThan(0);
+    expect(hitT).toBeLessThan(1);
+  });
+
+  it("returns null sweep hit for dead worms", () => {
+    const worm = createWorm({ x: 120, y: 140, facing: 1 });
+    worm.alive = false;
+    expect(critterSweepHitTestCircle(worm, worm.x - 20, worm.y, worm.x + 20, worm.y, 2)).toBeNull();
   });
 });

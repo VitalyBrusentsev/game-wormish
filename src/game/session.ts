@@ -34,7 +34,7 @@ import type {
   TurnDriverUpdateOptions,
   TurnContext,
 } from "./turn-driver";
-import { critterHitTestCircle } from "./critter-hit-test";
+import { critterHitTestCircle, critterSweepHitTestCircle } from "./critter-hit-test";
 import type { WormMovementSmoothingMode } from "../rendering/worm-animation-setting";
 
 export interface WormSnapshot {
@@ -565,6 +565,8 @@ export class GameSession {
       };
 
       for (const projectile of this.projectiles) {
+        const prevX = projectile.x;
+        const prevY = projectile.y;
         if (projectile.type === WeaponType.HandGrenade)
           projectile.update(dt, this.terrain, specHG);
         else if (projectile.type === WeaponType.Bazooka)
@@ -581,36 +583,50 @@ export class GameSession {
           (projectile.type === WeaponType.Rifle || projectile.type === WeaponType.Uzi) &&
           !projectile.exploded
         ) {
+          let firstWormHit: { worm: Worm; team: Team; t: number } | null = null;
           for (const team of this.teams) {
             for (const worm of team.worms) {
               if (!worm.alive) continue;
-              if (critterHitTestCircle(worm, projectile.x, projectile.y, projectile.r)) {
-                if (this.isLocalTurnActive()) {
-                  const wasAlive = worm.alive;
-                  const beforeHealth = worm.health;
-                  const dmg =
-                    projectile.type === WeaponType.Rifle
-                      ? GAMEPLAY.rifle.directDamage
-                      : GAMEPLAY.uzi.directDamage;
-                  worm.takeDamage(dmg);
-                  this.recordWormHealthChange(
-                    worm,
-                    team,
-                    beforeHealth,
-                    wasAlive,
-                    projectile.type
-                  );
-                  const d = distance(projectile.x, projectile.y, worm.x, worm.y);
-                  const dirx = (worm.x - projectile.x) / (d || 1);
-                  const diry = (worm.y - projectile.y) / (d || 1);
-                  const impulse = projectile.type === WeaponType.Rifle ? 120 : 70;
-                  worm.applyImpulse(dirx * impulse, diry * impulse);
-                }
-                projectile.explode(projectile.type === WeaponType.Rifle ? specRifle : specUzi, "worm");
-                break;
+              const hitT = critterSweepHitTestCircle(
+                worm,
+                prevX,
+                prevY,
+                projectile.x,
+                projectile.y,
+                projectile.r
+              );
+              if (hitT === null) continue;
+              if (!firstWormHit || hitT < firstWormHit.t) {
+                firstWormHit = { worm, team, t: hitT };
               }
             }
-            if (projectile.exploded) break;
+          }
+          if (firstWormHit) {
+            projectile.x = prevX + (projectile.x - prevX) * firstWormHit.t;
+            projectile.y = prevY + (projectile.y - prevY) * firstWormHit.t;
+
+            if (this.isLocalTurnActive()) {
+              const wasAlive = firstWormHit.worm.alive;
+              const beforeHealth = firstWormHit.worm.health;
+              const dmg =
+                projectile.type === WeaponType.Rifle
+                  ? GAMEPLAY.rifle.directDamage
+                  : GAMEPLAY.uzi.directDamage;
+              firstWormHit.worm.takeDamage(dmg);
+              this.recordWormHealthChange(
+                firstWormHit.worm,
+                firstWormHit.team,
+                beforeHealth,
+                wasAlive,
+                projectile.type
+              );
+              const d = distance(projectile.x, projectile.y, firstWormHit.worm.x, firstWormHit.worm.y);
+              const dirx = (firstWormHit.worm.x - projectile.x) / (d || 1);
+              const diry = (firstWormHit.worm.y - projectile.y) / (d || 1);
+              const impulse = projectile.type === WeaponType.Rifle ? 120 : 70;
+              firstWormHit.worm.applyImpulse(dirx * impulse, diry * impulse);
+            }
+            projectile.explode(projectile.type === WeaponType.Rifle ? specRifle : specUzi, "worm");
           }
         }
 

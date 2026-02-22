@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { GAMEPLAY, WeaponType } from "../definitions";
+import { Projectile } from "../entities";
 import type { AiTurnPlan } from "../ai/game-ai";
 import { executeAiTurnPlan } from "../ai/game-ai";
 import { GameSession } from "../game/session";
@@ -362,6 +363,50 @@ describe("GameSession turn logging", () => {
     const second = spawned[1]!.position;
     expect(second.x - first.x).toBeGreaterThan(40);
     expect(second.y - first.y).toBeLessThan(-20);
+  });
+
+  it("applies Uzi direct damage when a bullet segment crosses a worm in one frame", () => {
+    const session = new GameSession(420, 240, { random: createRng(31), now: createNow(0, 16) });
+    session.state.shotFired();
+
+    for (const team of session.teams) {
+      for (const worm of team.worms) {
+        worm.x = 380;
+        worm.y = 220;
+        worm.vx = 0;
+        worm.vy = 0;
+      }
+    }
+
+    const shooter = session.activeWorm;
+    shooter.x = 120;
+    shooter.y = 100;
+
+    const enemyTeam = session.teams.find((team) => team.id !== session.activeTeam.id);
+    expect(enemyTeam).toBeDefined();
+    const target = enemyTeam!.worms[0]!;
+    target.x = 210;
+    target.y = 100;
+    target.vx = 0;
+    target.vy = 0;
+
+    const projectile = new Projectile(
+      target.x - 14,
+      target.y - 2,
+      GAMEPLAY.uzi.speed,
+      0,
+      GAMEPLAY.uzi.projectileRadius,
+      WeaponType.Uzi,
+      0,
+      () => {}
+    );
+    session.projectiles.push(projectile);
+
+    const before = target.health;
+    session.update(1 / 60);
+
+    expect(target.health).toBe(before - GAMEPLAY.uzi.directDamage);
+    expect(projectile.exploded).toBe(true);
   });
 });
 
