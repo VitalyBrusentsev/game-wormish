@@ -13,6 +13,7 @@
 
 - `combat.projectile.spawned` → launch/shot sound (Rifle/Uzi/Bazooka/Grenade).
 - `combat.projectile.exploded` → impact (Rifle/Uzi) or explosion (Bazooka/Grenade).
+- `worm.killed` → short high-pitched comical “uh-oh” voice cue, spatialized to the worm X position.
 - Background loop starts after the first user gesture unlock and plays through the `music` bus.
 
 ## Extension points

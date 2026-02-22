@@ -2322,6 +2322,12 @@ export class Game {
     gameEvents.on(
       "worm.killed",
       (event) => {
+        this.sound.playWormDeath({
+          worldX: event.position.x,
+          turnIndex: event.turnIndex,
+          wormIndex: event.wormIndex,
+          cause: event.cause,
+        });
         const team = this.session.teams.find((t) => t.id === event.teamId);
         if (!team) return;
         const saluteDelayMs = 500;

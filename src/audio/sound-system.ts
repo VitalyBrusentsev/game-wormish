@@ -1,7 +1,7 @@
 import { clamp, WeaponType } from "../definitions";
 import { track1Url } from "../assets";
 import { createNoiseBuffer, normalizeLevel } from "./audio-utils";
-import { createProjectileExplodedVoice, createProjectileLaunchVoice, type VoiceBlueprint } from "./sfx";
+import { createProjectileExplodedVoice, createProjectileLaunchVoice, createWormDeathVoice, type VoiceBlueprint } from "./sfx";
 
 export type SoundLevels = {
   master: number;
@@ -188,6 +188,20 @@ export class SoundSystem {
     if (!ctx || !this.nodes || !noise) return;
     if (!this.enabled || this.levels.master <= 0 || this.levels.sfx <= 0) return;
     const voice = createProjectileExplodedVoice({ ctx, noise, ...config });
+    this.startVoice(voice);
+  }
+
+  playWormDeath(config: {
+    worldX: number;
+    turnIndex: number;
+    wormIndex: number;
+    cause: WeaponType;
+  }) {
+    const ctx = this.ctx;
+    const noise = this.noise;
+    if (!ctx || !this.nodes || !noise) return;
+    if (!this.enabled || this.levels.master <= 0 || this.levels.sfx <= 0) return;
+    const voice = createWormDeathVoice({ ctx, noise, ...config });
     this.startVoice(voice);
   }
 
