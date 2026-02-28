@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeFrameSimulationPolicy } from "../game";
+import { computeFrameSimulationPolicy, rebaseOverlayOpenedAtMs } from "../game";
 import { NetworkSessionState } from "../network/session-state";
 import { ConnectionState } from "../webrtc/types";
 
@@ -43,5 +43,25 @@ describe("frame simulation policy", () => {
     expect(policy.waitingForSync).toBe(true);
     expect(policy.networkPaused).toBe(true);
     expect(policy.simulationPaused).toBe(true);
+  });
+
+  it("rebases overlay open timestamp after background pause", () => {
+    expect(rebaseOverlayOpenedAtMs(null, 5000)).toBeNull();
+    expect(rebaseOverlayOpenedAtMs(1200, 0)).toBe(1200);
+    expect(rebaseOverlayOpenedAtMs(1200, -10)).toBe(1200);
+    expect(rebaseOverlayOpenedAtMs(1200, 5000)).toBe(6200);
+  });
+
+  it("prevents double-counting hidden time in overlay pause duration", () => {
+    const openedAtMs = 1000;
+    const hiddenForMs = 5000;
+    const resumedAtMs = 7000;
+    const closedAtMs = 9000;
+
+    const rebasedOpenedAtMs = rebaseOverlayOpenedAtMs(openedAtMs, hiddenForMs);
+    const overlayVisibleMs = closedAtMs - (rebasedOpenedAtMs ?? 0);
+    const expectedVisibleMs = (2000 - openedAtMs) + (closedAtMs - resumedAtMs);
+
+    expect(overlayVisibleMs).toBe(expectedVisibleMs);
   });
 });

@@ -133,6 +133,15 @@ export const computeFrameSimulationPolicy = (
   };
 };
 
+export const rebaseOverlayOpenedAtMs = (
+  openedAtMs: number | null,
+  pausedForMs: number
+): number | null => {
+  if (openedAtMs === null) return null;
+  if (pausedForMs <= 0) return openedAtMs;
+  return openedAtMs + pausedForMs;
+};
+
 const getNetworkMicroStatus = (snapshot: NetworkSessionStateSnapshot): NetworkMicroStatus | null => {
   if (snapshot.mode === "local") return null;
 
@@ -1316,6 +1325,11 @@ export class Game {
       const pausedForMs = Math.max(0, nowMs() - suspendedAtMs);
       if (pausedForMs > 0) {
         this.session.pauseFor(pausedForMs);
+        this.startMenuOpenedAtMs = rebaseOverlayOpenedAtMs(
+          this.startMenuOpenedAtMs,
+          pausedForMs
+        );
+        this.helpOverlay.shiftOpenedAtMs(pausedForMs);
       }
     }
 

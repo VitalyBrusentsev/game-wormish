@@ -64,6 +64,12 @@ export class HelpOverlay {
     return this.dialog.isVisible();
   }
 
+  shiftOpenedAtMs(pausedForMs: number) {
+    if (this.openedAtMs === null) return;
+    if (pausedForMs <= 0) return;
+    this.openedAtMs += pausedForMs;
+  }
+
   private handleClose(reason: CloseReason) {
     this.stopAnimations();
     const now = nowMs();
