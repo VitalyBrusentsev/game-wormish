@@ -77,6 +77,7 @@ import {
   type ResolvedSinglePlayerConfig,
 } from "./game/single-player-config";
 import { computeUziVisuals } from "./rendering/uzi-visuals";
+import { GameCamera } from "./game/game-camera";
 
 export {
   computeFrameSimulationPolicy,
@@ -160,18 +161,7 @@ export class Game {
   private networkClientGeneration = 0;
   private restartMissionTask: Promise<void> | null = null;
 
-  private readonly cameraPadding = 48;
-  private cameraOffsetX = 0;
-  private cameraOffsetY = 0;
-  private cameraY = 0;
-  private cameraTargetY = 0;
-  private cameraVelocityY = 0;
-  private cameraShakeTime = 0;
-  private cameraShakeDuration = 0;
-  private cameraShakeMagnitude = 0;
-  private cameraX = 0;
-  private cameraVelocityX = 0;
-  private cameraTargetX = 0;
+  private camera!: GameCamera;
   private lastTurnStartMs = -1;
 
   private readonly frameTimes: number[] = [];
@@ -242,7 +232,6 @@ export class Game {
   private pendingTurnEffectsNextFlushAtMs = 0;
   private readonly turnEffectsFlushIntervalMs = 1000;
   private controlProfile: ControlProfile = "desktop";
-  private worldZoom = 1;
   private mobileControls: MobileControlsOverlay | null = null;
   private mobileGestures: MobileGestureController | null = null;
   private mobileAimMode: MobileAimMode = "idle";
@@ -288,14 +277,16 @@ export class Game {
       horizontalPadding: 0,
       teamOrder: this.getSinglePlayerTeamOrder(),
     });
+    this.camera = new GameCamera({
+      viewportWidth: width,
+      viewportHeight: height,
+      worldWidth: this.session.width,
+      worldHeight: this.session.height,
+    });
 
     this.initializeTurnControllers();
     this.refreshControlProfile();
-    const initialWorldViewport = this.getWorldViewportSize();
-    this.cameraX = this.clampCameraX(this.activeWorm.x - initialWorldViewport.width / 2);
-    this.cameraTargetX = this.cameraX;
-    this.cameraY = this.clampCameraY(this.activeWorm.y - initialWorldViewport.height / 2);
-    this.cameraTargetY = this.cameraY;
+    this.camera.centerOn(this.activeWorm);
     this.lastTurnStartMs = this.session.state.turnStartMs;
 
     this.helpOverlay = new HelpOverlay({
@@ -544,24 +535,7 @@ export class Game {
   }
 
   private applyWorldZoom(nextZoomRaw: number) {
-    const nextZoom = clamp(nextZoomRaw, 0.35, 2);
-    if (Math.abs(nextZoom - this.worldZoom) < 1e-6) return;
-
-    const prevViewport = this.getWorldViewportSize();
-    const cameraCenterX = this.cameraX + prevViewport.width / 2;
-    const cameraCenterY = this.cameraY + prevViewport.height / 2;
-    const targetCenterX = this.cameraTargetX + prevViewport.width / 2;
-    const targetCenterY = this.cameraTargetY + prevViewport.height / 2;
-
-    this.worldZoom = nextZoom;
-    const nextViewport = this.getWorldViewportSize();
-    const bounds = this.getCameraBounds();
-    this.cameraX = clamp(cameraCenterX - nextViewport.width / 2, bounds.minX, bounds.maxX);
-    this.cameraY = clamp(cameraCenterY - nextViewport.height / 2, bounds.minY, bounds.maxY);
-    this.cameraTargetX = clamp(targetCenterX - nextViewport.width / 2, bounds.minX, bounds.maxX);
-    this.cameraTargetY = clamp(targetCenterY - nextViewport.height / 2, bounds.minY, bounds.maxY);
-    this.cameraVelocityX = 0;
-    this.cameraVelocityY = 0;
+    this.camera.setZoom(nextZoomRaw);
   }
 
   private updateWorldZoomForMobileStage() {
@@ -569,10 +543,7 @@ export class Game {
   }
 
   private getWorldViewportSize() {
-    return {
-      width: this.width / this.worldZoom,
-      height: this.height / this.worldZoom,
-    };
+    return this.camera.getWorldViewportSize();
   }
 
   private hasBlockingOverlay() {
@@ -615,17 +586,11 @@ export class Game {
   }
 
   private screenToWorld(screenX: number, screenY: number) {
-    return {
-      x: (screenX - this.cameraOffsetX) / this.worldZoom + this.cameraX,
-      y: (screenY - this.cameraOffsetY) / this.worldZoom + this.cameraY,
-    };
+    return this.camera.screenToWorld(screenX, screenY);
   }
 
   private worldToScreen(worldX: number, worldY: number) {
-    return {
-      x: (worldX - this.cameraX) * this.worldZoom + this.cameraOffsetX,
-      y: (worldY - this.cameraY) * this.worldZoom + this.cameraOffsetY,
-    };
+    return this.camera.worldToScreen(worldX, worldY);
   }
 
   private clientToCanvasPoint(clientX: number, clientY: number) {
@@ -657,8 +622,8 @@ export class Game {
   private getSettingsButtonScreenBounds(): Rect {
     const layout = this.getSettingsButtonLayoutBounds();
     return {
-      x: layout.x + this.cameraOffsetX,
-      y: layout.y + this.cameraOffsetY,
+      x: layout.x + this.camera.offsetX,
+      y: layout.y + this.camera.offsetY,
       width: layout.width,
       height: layout.height,
     };
@@ -692,17 +657,7 @@ export class Game {
   }
 
   private panCameraByScreenDelta(deltaScreenX: number, deltaScreenY: number) {
-    const bounds = this.getCameraBounds();
-    this.cameraTargetX = clamp(
-      this.cameraTargetX - deltaScreenX / this.worldZoom,
-      bounds.minX,
-      bounds.maxX
-    );
-    this.cameraTargetY = clamp(
-      this.cameraTargetY - deltaScreenY / this.worldZoom,
-      bounds.minY,
-      bounds.maxY
-    );
+    this.camera.panByScreenDelta(deltaScreenX, deltaScreenY);
   }
 
   private canStartWormInteraction(worldX: number, worldY: number) {
@@ -1224,19 +1179,13 @@ export class Game {
     const nextHeight = height | 0;
     if (nextWidth === this.width && nextHeight === this.height) return;
     const worldViewport = this.getWorldViewportSize();
-    const centerX = this.cameraX + worldViewport.width / 2;
+    const centerX = this.camera.x + worldViewport.width / 2;
     this.width = nextWidth;
     this.height = nextHeight;
     this.canvas.width = this.width;
     this.canvas.height = this.height;
     this.refreshControlProfile();
-    const nextWorldViewport = this.getWorldViewportSize();
-    this.cameraX = this.clampCameraX(centerX - nextWorldViewport.width / 2);
-    this.cameraTargetX = this.cameraX;
-    this.cameraY = this.clampCameraY(this.activeWorm.y - nextWorldViewport.height / 2);
-    this.cameraTargetY = this.cameraY;
-    this.cameraVelocityX = 0;
-    this.cameraVelocityY = 0;
+    this.camera.resizeKeepingCenter(this.width, this.height, this.activeWorm.y, centerX);
   }
 
   start() {
@@ -1860,13 +1809,8 @@ export class Game {
     if (state.mode !== "network-host") return;
     this.session.restart({ startingTeamIndex: 0, teamOrder: ["Red", "Blue"] });
     this.lastTurnStartMs = this.session.state.turnStartMs;
-    const worldViewport = this.getWorldViewportSize();
-    this.cameraX = this.clampCameraX(this.activeWorm.x - worldViewport.width / 2);
-    this.cameraTargetX = this.cameraX;
-    this.cameraVelocityX = 0;
-    this.cameraY = this.clampCameraY(this.activeWorm.y - worldViewport.height / 2);
-    this.cameraTargetY = this.cameraY;
-    this.cameraVelocityY = 0;
+    this.camera.setWorldSize(this.session.width, this.session.height);
+    this.camera.centerOn(this.activeWorm);
     this.resetMobileTransientState();
     this.updateCursor();
   }
@@ -1899,13 +1843,8 @@ export class Game {
     }
     this.session = nextSession;
     this.lastTurnStartMs = this.session.state.turnStartMs;
-    const worldViewport = this.getWorldViewportSize();
-    this.cameraX = this.clampCameraX(this.activeWorm.x - worldViewport.width / 2);
-    this.cameraTargetX = this.cameraX;
-    this.cameraVelocityX = 0;
-    this.cameraY = this.clampCameraY(this.activeWorm.y - worldViewport.height / 2);
-    this.cameraTargetY = this.cameraY;
-    this.cameraVelocityY = 0;
+    this.camera.setWorldSize(this.session.width, this.session.height);
+    this.camera.centerOn(this.activeWorm);
     this.resetMobileTransientState();
     this.turnControllers.clear();
     const mode = this.networkState.getSnapshot().mode;
@@ -2308,133 +2247,23 @@ export class Game {
   }
 
   private resetCameraShake() {
-    this.cameraShakeTime = 0;
-    this.cameraShakeDuration = 0;
-    this.cameraShakeMagnitude = 0;
-    this.cameraOffsetX = 0;
-    this.cameraOffsetY = 0;
+    this.camera.resetShake();
   }
 
   private triggerCameraShake(magnitude: number, duration = 0.4) {
-    const clamped = Math.min(Math.abs(magnitude), this.cameraPadding * 0.9);
-    this.cameraShakeMagnitude = Math.max(this.cameraShakeMagnitude, clamped);
-    this.cameraShakeDuration = Math.max(this.cameraShakeDuration, duration);
-    this.cameraShakeTime = Math.max(this.cameraShakeTime, duration);
+    this.camera.triggerShake(magnitude, duration);
   }
 
   private updateCameraShake(dt: number) {
-    if (this.cameraShakeTime <= 0) {
-      if (this.cameraOffsetX !== 0 || this.cameraOffsetY !== 0) {
-        this.cameraOffsetX = 0;
-        this.cameraOffsetY = 0;
-      }
-      this.cameraShakeMagnitude = 0;
-      this.cameraShakeDuration = 0;
-      return;
-    }
-
-    this.cameraShakeTime = Math.max(0, this.cameraShakeTime - dt);
-    const denom = this.cameraShakeDuration > 0 ? this.cameraShakeDuration : 1;
-    const progress = this.cameraShakeTime / denom;
-    const damping = progress * progress;
-    const magnitude = this.cameraShakeMagnitude * damping;
-    const angle = Math.random() * Math.PI * 2;
-    this.cameraOffsetX = Math.cos(angle) * magnitude;
-    this.cameraOffsetY = Math.sin(angle) * magnitude;
-  }
-
-  private getCameraBounds() {
-    const groundWidth = this.session.width;
-    const viewWidth = this.getWorldViewportSize().width;
-    const minX = 0;
-    const maxX = Math.max(0, groundWidth - viewWidth);
-
-    const groundHeight = this.session.height;
-    const viewHeight = this.getWorldViewportSize().height;
-
-    // Allow scrolling up to the total height difference
-    const maxY = Math.max(0, groundHeight - viewHeight);
-    const minY = Math.min(0, groundHeight - viewHeight);
-
-    return { minX, maxX, minY, maxY };
-  }
-
-  private clampCameraX(x: number) {
-    const { minX, maxX } = this.getCameraBounds();
-    return clamp(x, minX, maxX);
-  }
-
-  private clampCameraY(y: number) {
-    const { minY, maxY } = this.getCameraBounds();
-    return clamp(y, minY, maxY);
-  }
-
-  private getCameraMargin() {
-    const viewWidth = this.getWorldViewportSize().width;
-    const base = Math.min(240, Math.max(120, viewWidth * 0.2));
-    return Math.min(base, viewWidth * 0.45);
-  }
-
-  private getEdgeScrollDelta(dt: number, bounds: { minX: number; maxX: number }) {
-    if (!this.input.mouseInside) return 0;
-    const threshold = Math.min(160, Math.max(80, this.width * 0.15));
-    if (threshold <= 0) return 0;
-    const maxSpeed = 520;
-    const mouseX = this.input.mouseX;
-    if (mouseX <= threshold && this.cameraX > bounds.minX + 0.5) {
-      const t = (threshold - mouseX) / threshold;
-      return -maxSpeed * t * dt;
-    }
-    if (mouseX >= this.width - threshold && this.cameraX < bounds.maxX - 0.5) {
-      const t = (mouseX - (this.width - threshold)) / threshold;
-      return maxSpeed * t * dt;
-    }
-    return 0;
+    this.camera.updateShake(dt);
   }
 
   private updateCamera(dt: number, allowEdgeScroll: boolean) {
-    const bounds = this.getCameraBounds();
-    let targetX = this.cameraTargetX;
-    let targetY = this.cameraTargetY;
-
-    if (allowEdgeScroll) {
-      const edgeDelta = this.getEdgeScrollDelta(dt, bounds);
-      if (edgeDelta !== 0) {
-        targetX += edgeDelta;
-      }
-    }
-
-    targetX = clamp(targetX, bounds.minX, bounds.maxX);
-    this.cameraTargetX = targetX;
-
-    // Y scroll could also be edge-scrolled if we wanted, but for now X is sufficient or we can add Y edge scrolling logic too.
-    // Let's just clamp Y target.
-    targetY = clamp(targetY, bounds.minY, bounds.maxY);
-    this.cameraTargetY = targetY;
-
-    const stiffness = 18;
-    const damping = 10;
-    const delta = this.cameraTargetX - this.cameraX;
-    this.cameraVelocityX += delta * stiffness * dt;
-    const deltaY = this.cameraTargetY - this.cameraY;
-    this.cameraVelocityY += deltaY * stiffness * dt;
-    const decay = Math.exp(-damping * dt);
-    this.cameraVelocityX *= decay;
-    this.cameraX += this.cameraVelocityX * dt;
-    this.cameraVelocityY *= decay;
-    this.cameraY += this.cameraVelocityY * dt;
-
-    const clampedX = clamp(this.cameraX, bounds.minX, bounds.maxX);
-    const clampedY = clamp(this.cameraY, bounds.minY, bounds.maxY);
-
-    if (clampedX !== this.cameraX) {
-      this.cameraX = clampedX;
-      this.cameraVelocityX = 0;
-    }
-    if (clampedY !== this.cameraY) {
-      this.cameraY = clampedY;
-      this.cameraVelocityY = 0;
-    }
+    this.camera.update(dt, {
+      enabled: allowEdgeScroll,
+      mouseInside: this.input.mouseInside,
+      mouseX: this.input.mouseX,
+    });
   }
 
   private updatePassiveProjectileFocus(): boolean {
@@ -2447,42 +2276,12 @@ export class Game {
     if (this.session.projectiles.length === 0) return false;
 
     const projectile = this.session.projectiles[this.session.projectiles.length - 1]!;
-    const bounds = this.getCameraBounds();
-    const worldViewport = this.getWorldViewportSize();
-    this.cameraTargetX = clamp(projectile.x - worldViewport.width / 2, bounds.minX, bounds.maxX);
-    this.cameraTargetY = clamp(projectile.y - worldViewport.height / 2, bounds.minY, bounds.maxY);
+    this.camera.focusCenterOn(projectile);
     return true;
   }
 
   private focusCameraOnActiveWorm() {
-    const worldViewport = this.getWorldViewportSize();
-    const margin = this.getCameraMargin();
-    const bounds = this.getCameraBounds();
-    const wormX = this.activeWorm.x;
-    const wormY = this.activeWorm.y;
-    const leftEdge = this.cameraX + margin;
-    const rightEdge = this.cameraX + worldViewport.width - margin;
-    const topEdge = this.cameraY + margin;
-    const bottomEdge = this.cameraY + worldViewport.height - margin;
-    let targetX = this.cameraTargetX;
-    let targetY = this.cameraTargetY;
-
-    if (wormX < leftEdge) {
-      targetX = wormX - margin;
-    } else if (wormX > rightEdge) {
-      targetX = wormX - (worldViewport.width - margin);
-    } else {
-      // return; // Don't return here because we need to check Y
-    }
-
-    if (wormY < topEdge) {
-      targetY = wormY - margin;
-    } else if (wormY > bottomEdge) {
-      targetY = wormY - (worldViewport.height - margin);
-    }
-
-    this.cameraTargetX = clamp(targetX, bounds.minX, bounds.maxX);
-    this.cameraTargetY = clamp(targetY, bounds.minY, bounds.maxY);
+    this.camera.focusOnPoint(this.activeWorm);
   }
 
   private updateTurnFocus() {
@@ -2693,7 +2492,7 @@ export class Game {
 
   private renderWorldWater(ctx: CanvasRenderingContext2D) {
     const worldViewport = this.getWorldViewportSize();
-    const worldBottom = this.cameraY + worldViewport.height + this.cameraPadding / this.worldZoom;
+    const worldBottom = this.camera.y + worldViewport.height + this.camera.padding / this.camera.zoom;
     const waterTopY = this.session.height - 30;
     const fillHeight = Math.max(40, worldBottom - waterTopY + 120);
     const terrain = this.session.terrain;
@@ -2742,7 +2541,7 @@ export class Game {
     const aim = this.getAimInfo();
     const state = this.session.state;
     ctx.save();
-    ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
+    ctx.translate(this.camera.offsetX, this.camera.offsetY);
     // Background should probably fill the screen regardless of camera Y? 
     // Or does it scroll? The background function draws a gradient.
     // If we scroll Y, we might see out of bounds.
@@ -2750,14 +2549,14 @@ export class Game {
     // renderBackground fills rect from 0,0 to width,height. 
     // If we have vertical camera, we probably want the sky to stay fixed or parallax?
     // For now, let's just draw it covering the viewport.
-    renderBackground(ctx, this.width, this.height, this.cameraPadding, false);
+    renderBackground(ctx, this.width, this.height, this.camera.padding, false);
     ctx.restore();
 
     ctx.save();
     // Apply camera transform
-    ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
-    ctx.scale(this.worldZoom, this.worldZoom);
-    ctx.translate(-this.cameraX, -this.cameraY);
+    ctx.translate(this.camera.offsetX, this.camera.offsetY);
+    ctx.scale(this.camera.zoom, this.camera.zoom);
+    ctx.translate(-this.camera.x, -this.camera.y);
     this.renderWorldWater(ctx);
     this.session.terrain.render(ctx);
 
@@ -2822,7 +2621,7 @@ export class Game {
     ctx.restore();
 
     ctx.save();
-    ctx.translate(this.cameraOffsetX, this.cameraOffsetY);
+    ctx.translate(this.camera.offsetX, this.camera.offsetY);
     const mobileMapMaxWidthPx = isMobileProfile ? Math.floor(this.width * 0.5) : undefined;
     const topUiOffsetPx = this.getMobileTopUiOffsetPx();
     const timeLabelY = isMobileProfile
@@ -2931,12 +2730,10 @@ export class Game {
     );
     const worldViewport = this.getWorldViewportSize();
     this.sound.setListener({
-      centerX: this.cameraX + worldViewport.width / 2,
+      centerX: this.camera.x + worldViewport.width / 2,
       viewportWidth: worldViewport.width,
     });
     this.sound.update();
-    const worldCameraOffsetX = this.cameraOffsetX - this.cameraX * this.worldZoom;
-    const worldCameraOffsetY = this.cameraOffsetY - this.cameraY * this.worldZoom;
     if (simulationPolicy.networkPaused) {
       this.session.pauseFor(dt * 1000);
     }
@@ -2945,7 +2742,7 @@ export class Game {
       allowInput: !overlaysBlocking && !simulationPolicy.waitingForSync,
       allowLocalInput: !this.isMobileProfile(),
       input: this.input,
-      camera: { offsetX: worldCameraOffsetX, offsetY: worldCameraOffsetY, zoom: this.worldZoom },
+      camera: this.camera.getDriverCamera(),
     });
     if (!simulationPolicy.networkPaused) {
       this.updateMobileMovementAssist(dt);
