@@ -53,12 +53,13 @@ import { RegistryClient } from "./webrtc/registry-client";
 import { HttpClient } from "./webrtc/http-client";
 import { SoundSystem, type SoundLevels, type SoundSnapshot } from "./audio/sound-system";
 import { detectControlProfile, type ControlProfile } from "./mobile/control-profile";
-import { MobileControlsOverlay, type MobileAimMode } from "./ui/mobile-controls";
+import { MobileControlsOverlay } from "./ui/mobile-controls";
 import { MobileGestureController } from "./mobile/mobile-gesture-controller";
 import {
-  didMovementGetStuck,
-  isForwardProgressBlocked,
-} from "./movement/stuck-detection";
+  MobileGameplayController,
+  type MobileGameplayContext,
+  type MobileMovementGhostSprite,
+} from "./mobile/mobile-gameplay-controller";
 import { parseJoinLinkHash } from "./network/join-link";
 import {
   computeFrameSimulationPolicy,
@@ -91,17 +92,6 @@ export type {
 
 let initialMenuDismissed = false;
 
-const MOBILE_WORLD_ZOOM = 0.8;
-const MOBILE_AIM_STAGE_ZOOM_MULTIPLIER = 0.7;
-const MOBILE_GHOST_REACH_PX = 8;
-const MOBILE_ASSIST_MOVE_STEP_MS = 120;
-const MOBILE_ASSIST_STUCK_STEPS = 3;
-const MOBILE_WORM_TOUCH_RADIUS_PX = 44;
-const MOBILE_AIM_GESTURE_ZONE_RADIUS_PX = 56;
-const MOBILE_AIM_BUTTON_OFFSET_PX = 56;
-const MOBILE_AIM_LINE_MAX_PX = 180;
-const MOBILE_DEFAULT_AIM_DISTANCE_PX = 140;
-const MOBILE_DEFAULT_AIM_ANGLE_UP_DEG = 30;
 const MATCH_RESULT_DIALOG_DELAY_MS = 1000;
 const MOBILE_FULLSCREEN_TOP_UI_OFFSET_PX = 44;
 const SETTINGS_BUTTON_SIZE_PX = 48;
@@ -119,19 +109,6 @@ type Rect = {
   y: number;
   width: number;
   height: number;
-};
-
-type MobileMovementAssistState = {
-  destinationX: number;
-  accumulatorMs: number;
-  stuckSteps: number;
-  jumpRequested: boolean;
-};
-
-type MobileMovementGhostSprite = {
-  canvas: HTMLCanvasElement;
-  anchorX: number;
-  anchorY: number;
 };
 
 export class Game {
@@ -232,17 +209,9 @@ export class Game {
   private pendingTurnEffectsNextFlushAtMs = 0;
   private readonly turnEffectsFlushIntervalMs = 1000;
   private controlProfile: ControlProfile = "desktop";
+  private readonly mobileGameplay = new MobileGameplayController();
   private mobileControls: MobileControlsOverlay | null = null;
   private mobileGestures: MobileGestureController | null = null;
-  private mobileAimMode: MobileAimMode = "idle";
-  private mobileAimZoomLocked = false;
-  private mobileWeaponPickerOpen = false;
-  private mobileAimButtonVisible = false;
-  private mobileAimTarget: { x: number; y: number } | null = null;
-  private mobileMovementGhostX: number | null = null;
-  private mobileMovementGhostSprite: MobileMovementGhostSprite | null = null;
-  private mobileDraggingMovement = false;
-  private mobileMovementAssist: MobileMovementAssistState | null = null;
   private matchResultDialogTimerId: number | null = null;
   private settingsGhostClickUntilMs = 0;
   private settingsGhostClickClientPoint: { x: number; y: number } | null = null;
@@ -468,7 +437,8 @@ export class Game {
         canStartAimGesture: (canvasX, canvasY) => this.canStartMobileAimGesture(canvasX, canvasY),
         screenToWorld: (screenX, screenY) => this.screenToWorld(screenX, screenY),
         canStartWormInteraction: (worldX, worldY) =>
-          this.mobileAimMode === "idle" && this.canStartWormInteraction(worldX, worldY),
+          this.mobileGameplay.getSnapshot().aimMode === "idle" &&
+          this.canStartWormInteraction(worldX, worldY),
         onTap: (worldX, worldY) => this.handleMobileTap(worldX, worldY),
         onPan: (dx, dy) => this.panCameraByScreenDelta(dx, dy),
         onMovementDragStart: (worldX, worldY) => this.handleMobileMovementDragStart(worldX, worldY),
@@ -491,15 +461,7 @@ export class Game {
   }
 
   private resetMobileTransientState() {
-    this.mobileAimMode = "idle";
-    this.mobileAimZoomLocked = false;
-    this.mobileWeaponPickerOpen = false;
-    this.mobileAimButtonVisible = false;
-    this.mobileAimTarget = null;
-    this.mobileDraggingMovement = false;
-    this.mobileMovementGhostX = null;
-    this.mobileMovementGhostSprite = null;
-    this.mobileMovementAssist = null;
+    this.mobileGameplay.resetTransientState();
   }
 
   private isMobileProfile() {
@@ -526,12 +488,7 @@ export class Game {
   }
 
   private getDesiredWorldZoom() {
-    const baseZoom = this.isMobileProfile() ? MOBILE_WORLD_ZOOM : 1;
-    if (!this.isMobileProfile()) return baseZoom;
-    if (this.mobileAimZoomLocked || this.mobileAimMode === "aim" || this.mobileAimMode === "charge") {
-      return baseZoom * MOBILE_AIM_STAGE_ZOOM_MULTIPLIER;
-    }
-    return baseZoom;
+    return this.mobileGameplay.getDesiredWorldZoom(this.isMobileProfile());
   }
 
   private applyWorldZoom(nextZoomRaw: number) {
@@ -560,29 +517,44 @@ export class Game {
   }
 
   private canUseMobilePanning() {
-    if (!this.isMobileProfile()) return false;
-    if (this.hasBlockingOverlay()) return false;
-    if (!initialMenuDismissed) return false;
-    return true;
+    return this.mobileGameplay.canUsePanning(this.getMobileGameplayContext());
   }
 
-  private canUseMobileControls() {
-    if (!this.canUseWeaponSelector()) return false;
-    if (!this.canUseMobilePanning()) return false;
-    return true;
-  }
-
-  private canUseWeaponSelector() {
-    if (this.hasBlockingOverlay()) return false;
-    if (!initialMenuDismissed) return false;
-    if (!this.isActiveTeamLocallyControlled()) return false;
-    if (!this.session.isLocalTurnActive()) return false;
-    if (this.session.state.phase !== "aim") return false;
-
+  private getMobileGameplayContext(): MobileGameplayContext {
     const networkSnapshot = this.networkState.getSnapshot();
-    if (networkSnapshot.mode === "local") return true;
-    if (networkSnapshot.bridge.waitingForRemoteSnapshot) return false;
-    return networkSnapshot.connection.lifecycle === "connected";
+    const networkReady =
+      networkSnapshot.mode === "local"
+        ? true
+        : !networkSnapshot.bridge.waitingForRemoteSnapshot &&
+          networkSnapshot.connection.lifecycle === "connected";
+
+    return {
+      isMobileProfile: this.isMobileProfile(),
+      overlaysBlocking: this.hasBlockingOverlay(),
+      initialMenuDismissed,
+      isActiveTeamLocallyControlled: this.isActiveTeamLocallyControlled(),
+      isLocalTurnActive: this.session.isLocalTurnActive(),
+      networkReady,
+      phase: this.session.state.phase,
+      charging: this.session.state.charging,
+      weapon: this.session.state.weapon,
+      activeWorm: this.activeWorm,
+      terrainLeft: this.session.terrain.worldLeft,
+      terrainRight: this.session.terrain.worldRight,
+      topUiOffsetPx: this.getMobileTopUiOffsetPx(),
+      getAimInfo: () => this.session.getRenderAimInfo(),
+      worldToScreen: (worldX, worldY) => this.worldToScreen(worldX, worldY),
+      setWeapon: (weapon) => this.session.setWeaponCommand(weapon),
+      setAimTarget: (worldX, worldY) => this.session.setAimTargetCommand(worldX, worldY),
+      startCharge: () => this.session.startChargeCommand(),
+      cancelCharge: () => this.session.cancelChargeCommand(),
+      fireCurrentWeapon: (options) => this.session.fireCurrentWeaponCommand(options),
+      recordMovementStep: (direction, durationMs, jump) =>
+        this.session.recordMovementStepCommand(direction, durationMs, jump, {
+          movementSmoothingMode: "ai",
+        }),
+      captureMovementGhostSprite: () => this.captureMobileMovementGhostSprite(),
+    };
   }
 
   private screenToWorld(screenX: number, screenY: number) {
@@ -661,172 +633,73 @@ export class Game {
   }
 
   private canStartWormInteraction(worldX: number, worldY: number) {
-    if (!this.canUseMobileControls()) return false;
-    const active = this.activeWorm;
-    if (!active.alive) return false;
-    const maxR = Math.max(MOBILE_WORM_TOUCH_RADIUS_PX, active.radius * 2.8);
-    const dist = Math.hypot(worldX - active.x, worldY - active.y);
-    return dist <= maxR;
+    return this.mobileGameplay.canStartWormInteraction(
+      this.getMobileGameplayContext(),
+      worldX,
+      worldY
+    );
   }
 
   private canStartMobileAimGesture(canvasX: number, canvasY: number) {
-    if (!this.canUseMobileControls()) return false;
-    if (this.mobileAimMode !== "aim") return false;
-    const aim = this.session.getRenderAimInfo();
-    const anchorWorld = this.getMobileAimAnchorWorldPoint(aim);
-    const anchor = this.worldToScreen(anchorWorld.x, anchorWorld.y);
-    const dx = canvasX - anchor.x;
-    const dy = canvasY - anchor.y;
-    return dx * dx + dy * dy <= MOBILE_AIM_GESTURE_ZONE_RADIUS_PX * MOBILE_AIM_GESTURE_ZONE_RADIUS_PX;
+    return this.mobileGameplay.canStartAimGesture(
+      this.getMobileGameplayContext(),
+      canvasX,
+      canvasY
+    );
   }
 
   private handleMobileTap(worldX: number, worldY: number) {
-    if (!this.canUseMobileControls()) return;
-    if (!this.canStartWormInteraction(worldX, worldY)) return;
-    this.mobileAimButtonVisible = true;
-    this.mobileWeaponPickerOpen = false;
+    this.mobileGameplay.handleTap(this.getMobileGameplayContext(), worldX, worldY);
   }
 
   private handleMobileToggleWeaponPicker() {
-    if (!this.canUseWeaponSelector()) return;
-    if (this.mobileAimMode === "charge" || this.session.state.charging) return;
-    this.mobileWeaponPickerOpen = !this.mobileWeaponPickerOpen;
+    this.mobileGameplay.handleToggleWeaponPicker(this.getMobileGameplayContext());
   }
 
   private handleMobileSelectWeapon(weapon: WeaponType) {
-    if (!this.canUseWeaponSelector()) return;
-    if (this.mobileAimMode === "charge" || this.session.state.charging) return;
-    this.session.setWeaponCommand(weapon);
-    this.mobileWeaponPickerOpen = false;
+    this.mobileGameplay.handleSelectWeapon(this.getMobileGameplayContext(), weapon);
   }
 
   private handleMobileAimButton() {
-    if (!this.canUseMobileControls()) return;
-    if (this.mobileAimMode !== "idle") return;
-    this.mobileAimMode = "aim";
-    this.mobileAimZoomLocked = true;
-    this.mobileAimButtonVisible = false;
-    this.mobileWeaponPickerOpen = false;
-    const defaultTarget = this.getMobileDefaultAimTarget();
-    this.mobileAimTarget = defaultTarget;
-    this.session.setAimTargetCommand(defaultTarget.x, defaultTarget.y);
+    this.mobileGameplay.handleAimButton(this.getMobileGameplayContext());
   }
 
   private handleMobileCancel() {
-    if (!this.canUseMobileControls()) return;
-    if (this.mobileAimMode === "charge") {
-      this.session.cancelChargeCommand();
-      this.mobileAimMode = "aim";
-      return;
-    }
-    if (this.mobileAimMode === "aim") {
-      this.mobileAimMode = "idle";
-      this.mobileAimZoomLocked = false;
-      this.mobileAimButtonVisible = false;
-      this.mobileWeaponPickerOpen = false;
-      this.mobileAimTarget = null;
-    }
+    this.mobileGameplay.handleCancel(this.getMobileGameplayContext());
   }
 
   private handleMobilePrimary() {
-    if (!this.canUseMobileControls()) return;
-    if (this.mobileAimMode === "aim") {
-      const weapon = this.session.state.weapon;
-      if (weapon === WeaponType.Bazooka || weapon === WeaponType.HandGrenade) {
-        if (this.session.startChargeCommand()) {
-          this.mobileAimMode = "charge";
-          this.mobileWeaponPickerOpen = false;
-        }
-        return;
-      }
-      if (this.session.fireCurrentWeaponCommand({ instantPower01: 1 })) {
-        this.mobileAimMode = "idle";
-        this.mobileAimButtonVisible = false;
-        this.mobileAimTarget = null;
-      }
-      return;
-    }
-    if (this.mobileAimMode === "charge") {
-      if (this.session.fireCurrentWeaponCommand()) {
-        this.mobileAimMode = "idle";
-        this.mobileAimButtonVisible = false;
-        this.mobileAimTarget = null;
-      }
-    }
+    this.mobileGameplay.handlePrimary(this.getMobileGameplayContext());
   }
 
   private handleMobileJump() {
-    const movement = this.mobileMovementAssist;
-    if (!movement) return;
-    movement.jumpRequested = true;
+    this.mobileGameplay.handleJump();
   }
 
   private handleMobileAimGesture(worldX: number, worldY: number) {
-    if (!this.canUseMobileControls()) return;
-    if (this.mobileAimMode !== "aim") return;
-    this.mobileAimTarget = { x: worldX, y: worldY };
-    this.session.setAimTargetCommand(worldX, worldY);
-  }
-
-  private getMobileDefaultAimTarget() {
-    const worm = this.activeWorm;
-    const facing: -1 | 1 = worm.facing < 0 ? -1 : 1;
-    const upAngle = (MOBILE_DEFAULT_AIM_ANGLE_UP_DEG * Math.PI) / 180;
-    const angle = facing < 0 ? -Math.PI + upAngle : -upAngle;
-    return {
-      x: worm.x + Math.cos(angle) * MOBILE_DEFAULT_AIM_DISTANCE_PX,
-      y: worm.y + Math.sin(angle) * MOBILE_DEFAULT_AIM_DISTANCE_PX,
-    };
+    this.mobileGameplay.handleAimGesture(this.getMobileGameplayContext(), worldX, worldY);
   }
 
   private handleMobileMovementDragStart(worldX: number, _worldY: number) {
-    if (!this.canUseMobileControls()) return;
-    if (this.mobileAimMode !== "idle") return;
-    this.mobileDraggingMovement = true;
-    this.mobileAimButtonVisible = false;
-    this.mobileWeaponPickerOpen = false;
-    this.captureMobileMovementGhostSprite();
-    this.mobileMovementGhostX = clamp(worldX, this.session.terrain.worldLeft, this.session.terrain.worldRight);
+    this.mobileGameplay.handleMovementDragStart(this.getMobileGameplayContext(), worldX);
   }
 
   private handleMobileMovementDrag(worldX: number, _worldY: number) {
-    if (!this.mobileDraggingMovement) return;
-    this.mobileMovementGhostX = clamp(worldX, this.session.terrain.worldLeft, this.session.terrain.worldRight);
+    this.mobileGameplay.handleMovementDrag(this.getMobileGameplayContext(), worldX);
   }
 
   private handleMobileMovementDragEnd(worldX: number, _worldY: number) {
-    if (!this.mobileDraggingMovement) return;
-    this.mobileDraggingMovement = false;
-    const destinationX = clamp(worldX, this.session.terrain.worldLeft, this.session.terrain.worldRight);
-    if (Math.abs(destinationX - this.activeWorm.x) <= MOBILE_GHOST_REACH_PX) {
-      this.mobileMovementGhostX = null;
-      this.mobileMovementGhostSprite = null;
-      return;
-    }
-    this.mobileMovementAssist = {
-      destinationX,
-      accumulatorMs: 0,
-      stuckSteps: 0,
-      jumpRequested: false,
-    };
-    this.mobileMovementGhostX = destinationX;
-    this.mobileAimButtonVisible = false;
+    this.mobileGameplay.handleMovementDragEnd(this.getMobileGameplayContext(), worldX);
   }
 
   private stopMobileMovementAssist(clearGhost: boolean) {
-    this.mobileMovementAssist = null;
-    this.mobileDraggingMovement = false;
-    if (clearGhost) {
-      this.mobileMovementGhostX = null;
-      this.mobileMovementGhostSprite = null;
-    }
+    this.mobileGameplay.stopMovementAssist(clearGhost);
   }
 
-  private captureMobileMovementGhostSprite() {
+  private captureMobileMovementGhostSprite(): MobileMovementGhostSprite | null {
     const worm = this.activeWorm;
     if (!worm.alive) {
-      this.mobileMovementGhostSprite = null;
-      return;
+      return null;
     }
 
     const spriteSize = Math.max(112, Math.ceil(worm.radius * 8));
@@ -835,8 +708,7 @@ export class Game {
     spriteCanvas.height = spriteSize;
     const spriteCtx = spriteCanvas.getContext("2d");
     if (!spriteCtx) {
-      this.mobileMovementGhostSprite = null;
-      return;
+      return null;
     }
 
     const anchorX = spriteSize * 0.5;
@@ -849,111 +721,16 @@ export class Game {
     spriteCtx.translate(anchorX - worm.x, anchorY - worm.y);
     worm.render(spriteCtx, false, null);
     spriteCtx.restore();
-    this.mobileMovementGhostSprite = { canvas: spriteCanvas, anchorX, anchorY };
+    return { canvas: spriteCanvas, anchorX, anchorY };
   }
 
   private updateMobileMovementAssist(dt: number) {
-    const movement = this.mobileMovementAssist;
-    if (!movement) return;
-    if (!this.canUseMobileControls()) {
-      this.stopMobileMovementAssist(true);
-      return;
-    }
-    if (this.mobileAimMode !== "idle") {
-      this.stopMobileMovementAssist(true);
-      return;
-    }
-
-    const worm = this.activeWorm;
-    if (Math.abs(movement.destinationX - worm.x) <= MOBILE_GHOST_REACH_PX) {
-      this.stopMobileMovementAssist(true);
-      return;
-    }
-
-    movement.accumulatorMs += dt * 1000;
-    while (movement.accumulatorMs >= MOBILE_ASSIST_MOVE_STEP_MS) {
-      movement.accumulatorMs -= MOBILE_ASSIST_MOVE_STEP_MS;
-      const toward = movement.destinationX < worm.x ? -1 : 1;
-      const direction = (toward < 0 ? -1 : 1) as -1 | 1;
-      const before = { x: worm.x, y: worm.y };
-      const moved = this.session.recordMovementStepCommand(
-        direction,
-        MOBILE_ASSIST_MOVE_STEP_MS,
-        movement.jumpRequested,
-        { movementSmoothingMode: "ai" }
-      );
-      movement.jumpRequested = false;
-      if (!moved) {
-        this.stopMobileMovementAssist(true);
-        return;
-      }
-      const after = { x: worm.x, y: worm.y };
-      const stuck =
-        didMovementGetStuck(before, after) ||
-        isForwardProgressBlocked(before, after, direction);
-      movement.stuckSteps = stuck ? movement.stuckSteps + 1 : 0;
-      if (movement.stuckSteps >= MOBILE_ASSIST_STUCK_STEPS) {
-        this.stopMobileMovementAssist(true);
-        return;
-      }
-      if (Math.abs(movement.destinationX - worm.x) <= MOBILE_GHOST_REACH_PX) {
-        this.stopMobileMovementAssist(true);
-        return;
-      }
-    }
+    this.mobileGameplay.updateMovementAssist(this.getMobileGameplayContext(), dt);
   }
 
   private syncMobileControls() {
     if (!this.mobileControls) return;
-
-    if (this.session.state.phase !== "aim") {
-      this.mobileAimMode = "idle";
-      this.mobileAimButtonVisible = false;
-      this.mobileWeaponPickerOpen = false;
-      this.mobileAimTarget = null;
-      this.stopMobileMovementAssist(false);
-    }
-
-    if (this.mobileAimMode === "charge" && !this.session.state.charging) {
-      this.mobileAimMode = this.session.state.phase === "aim" ? "aim" : "idle";
-    }
-
-    if (this.mobileAimMode === "aim" || this.mobileAimMode === "charge") {
-      if (!this.mobileAimTarget) {
-        const aim = this.session.getRenderAimInfo();
-        this.mobileAimTarget = { x: aim.targetX, y: aim.targetY };
-      }
-    } else {
-      this.mobileAimTarget = null;
-    }
-
-    const canUseMobile = this.canUseMobileControls();
-    const canUseWeaponSelector = this.canUseWeaponSelector();
-    const topUiOffsetPx = this.getMobileTopUiOffsetPx();
-    const canSelectWeapon =
-      canUseWeaponSelector && this.mobileAimMode !== "charge" && !this.session.state.charging;
-    if (!canSelectWeapon) {
-      this.mobileWeaponPickerOpen = false;
-    }
-    const visible = canUseWeaponSelector || canUseMobile;
-    const showAimButton = canUseMobile && this.mobileAimMode === "idle" && this.mobileAimButtonVisible;
-    const aimAnchor = this.worldToScreen(
-      this.activeWorm.x,
-      this.activeWorm.y - this.activeWorm.radius - MOBILE_AIM_BUTTON_OFFSET_PX
-    );
-
-    this.mobileControls.setState({
-      visible,
-      weapon: this.session.state.weapon,
-      canSelectWeapon,
-      weaponPickerOpen: canSelectWeapon && this.mobileWeaponPickerOpen,
-      mode: canUseMobile ? this.mobileAimMode : "idle",
-      showAimButton,
-      aimButtonX: aimAnchor.x,
-      aimButtonY: aimAnchor.y,
-      showJumpButton: canUseMobile && this.mobileMovementAssist !== null,
-      topUiOffsetPx,
-    });
+    this.mobileControls.setState(this.mobileGameplay.sync(this.getMobileGameplayContext()));
   }
 
   private restartSinglePlayerMatch() {
@@ -2289,12 +2066,7 @@ export class Game {
     if (turnStartMs === this.lastTurnStartMs) return;
     this.lastTurnStartMs = turnStartMs;
     if (this.isMobileProfile()) {
-      this.mobileAimMode = "idle";
-      this.mobileAimZoomLocked = false;
-      this.mobileAimButtonVisible = false;
-      this.mobileWeaponPickerOpen = false;
-      this.mobileAimTarget = null;
-      this.stopMobileMovementAssist(true);
+      this.mobileGameplay.resetForTurn();
       this.updateWorldZoomForMobileStage();
     }
     this.focusCameraOnActiveWorm();
@@ -2397,7 +2169,8 @@ export class Game {
 
   private renderMobileMovementGhost(ctx: CanvasRenderingContext2D) {
     if (!this.isMobileProfile()) return;
-    const ghostX = this.mobileMovementGhostX;
+    const mobile = this.mobileGameplay.getSnapshot();
+    const ghostX = mobile.movementGhostX;
     if (ghostX === null) return;
     if (this.session.state.phase !== "aim") return;
     const worm = this.activeWorm;
@@ -2405,14 +2178,14 @@ export class Game {
     const wormSurfaceY = this.getTerrainSurfaceY(worm.x, worm.radius);
     const verticalOffset = worm.y - wormSurfaceY;
     const ghostY = this.getTerrainSurfaceY(ghostX, worm.radius) + verticalOffset;
-    const markerCol = this.mobileMovementAssist
+    const markerCol = mobile.movementAssistActive
       ? "rgba(150, 255, 200, 0.95)"
       : "rgba(255, 250, 170, 0.95)";
 
-    const ghostSprite = this.mobileMovementGhostSprite;
+    const ghostSprite = mobile.movementGhostSprite;
     if (ghostSprite) {
       ctx.save();
-      ctx.globalAlpha = this.mobileMovementAssist ? 0.58 : 0.5;
+      ctx.globalAlpha = mobile.movementAssistActive ? 0.58 : 0.5;
       ctx.drawImage(
         ghostSprite.canvas,
         ghostX - ghostSprite.anchorX,
@@ -2455,7 +2228,8 @@ export class Game {
 
   private renderMobileAimDragCrosshair(ctx: CanvasRenderingContext2D, aim: AimInfo) {
     if (!this.isMobileProfile()) return;
-    if (this.mobileAimMode !== "aim" && this.mobileAimMode !== "charge") return;
+    const mobile = this.mobileGameplay.getSnapshot();
+    if (mobile.aimMode !== "aim" && mobile.aimMode !== "charge") return;
     if (this.session.state.phase !== "aim") return;
     const worm = this.activeWorm;
     if (!worm.alive) return;
@@ -2476,18 +2250,7 @@ export class Game {
   }
 
   private getMobileAimAnchorWorldPoint(aim: AimInfo) {
-    const worm = this.activeWorm;
-    const dx = aim.targetX - worm.x;
-    const dy = aim.targetY - worm.y;
-    const len = Math.hypot(dx, dy);
-    if (len <= MOBILE_AIM_LINE_MAX_PX || len <= 1e-6) {
-      return { x: aim.targetX, y: aim.targetY };
-    }
-    const scale = MOBILE_AIM_LINE_MAX_PX / len;
-    return {
-      x: worm.x + dx * scale,
-      y: worm.y + dy * scale,
-    };
+    return this.mobileGameplay.getAimAnchorWorldPoint(this.activeWorm, aim);
   }
 
   private renderWorldWater(ctx: CanvasRenderingContext2D) {

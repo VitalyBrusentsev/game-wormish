@@ -58,7 +58,7 @@ export class MobileGestureController {
       this.mode = "pan";
     }
 
-    this.canvas.setPointerCapture(event.pointerId);
+    this.trySetPointerCapture(event.pointerId);
     event.preventDefault();
   };
 
@@ -166,7 +166,23 @@ export class MobileGestureController {
     this.mode = "none";
     this.activePointerId = null;
     if (this.canvas.hasPointerCapture(pointerId)) {
+      this.tryReleasePointerCapture(pointerId);
+    }
+  }
+
+  private trySetPointerCapture(pointerId: number) {
+    try {
+      this.canvas.setPointerCapture(pointerId);
+    } catch {
+      // Synthetic smoke-test events may not have an active browser pointer.
+    }
+  }
+
+  private tryReleasePointerCapture(pointerId: number) {
+    try {
       this.canvas.releasePointerCapture(pointerId);
+    } catch {
+      // Pointer capture can already be gone after cancellation or synthetic events.
     }
   }
 }
