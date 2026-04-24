@@ -23,7 +23,6 @@ import type { Team } from "./game/team-manager";
 import {
   GameSession,
   type MatchInitSnapshot,
-  type UziBurstSnapshot,
 } from "./game/session";
 import {
   LocalTurnController,
@@ -61,181 +60,35 @@ import {
   isForwardProgressBlocked,
 } from "./movement/stuck-detection";
 import { parseJoinLinkHash } from "./network/join-link";
+import {
+  computeFrameSimulationPolicy,
+  rebaseOverlayOpenedAtMs,
+} from "./game/frame-policy";
+import {
+  cleanPlayerName,
+  getNetworkMicroStatus,
+  getNetworkTeamNames,
+  replaceWinnerInMessage,
+} from "./game/player-display";
+import {
+  oppositeTeamId,
+  resolveSinglePlayerConfig,
+  type GameOptions,
+  type ResolvedSinglePlayerConfig,
+} from "./game/single-player-config";
+import { computeUziVisuals } from "./rendering/uzi-visuals";
+
+export {
+  computeFrameSimulationPolicy,
+  rebaseOverlayOpenedAtMs,
+} from "./game/frame-policy";
+export type {
+  GameOptions,
+  SinglePlayerConfig,
+  SinglePlayerTeamSide,
+} from "./game/single-player-config";
 
 let initialMenuDismissed = false;
-
-export type SinglePlayerTeamSide = "left" | "right";
-
-export type SinglePlayerConfig = {
-  playerTeamColor?: TeamId;
-  playerStartSide?: SinglePlayerTeamSide;
-};
-
-export type GameOptions = {
-  singlePlayer?: SinglePlayerConfig;
-};
-
-type ResolvedSinglePlayerConfig = {
-  playerTeamColor: TeamId;
-  playerStartSide: SinglePlayerTeamSide;
-};
-
-const resolveSinglePlayerConfig = (config?: SinglePlayerConfig): ResolvedSinglePlayerConfig => ({
-  playerTeamColor: config?.playerTeamColor ?? "Blue",
-  playerStartSide: config?.playerStartSide ?? "left",
-});
-
-const oppositeTeamId = (teamId: TeamId): TeamId => (teamId === "Red" ? "Blue" : "Red");
-
-const cleanPlayerName = (name: string | null) => {
-  const cleaned = name?.trim();
-  return cleaned ? cleaned : null;
-};
-
-const getNetworkTeamNames = (snapshot: NetworkSessionStateSnapshot) => {
-  if (snapshot.mode === "local") return null;
-
-  const localTeamId = snapshot.player.localTeamId;
-  const remoteTeamId = snapshot.player.remoteTeamId;
-  const localName = cleanPlayerName(snapshot.player.localName);
-  const remoteName = cleanPlayerName(snapshot.player.remoteName);
-
-  const names: Partial<Record<TeamId, string>> = {};
-  if (localTeamId && localName) names[localTeamId] = localName;
-  if (remoteTeamId && remoteName) names[remoteTeamId] = remoteName;
-  return names;
-};
-
-type NetworkMicroStatus = { text: string; color: string; opponentSide: "left" | "right" };
-
-export type FrameSimulationPolicy = {
-  waitingForSync: boolean;
-  networkPaused: boolean;
-  simulationPaused: boolean;
-};
-
-export const computeFrameSimulationPolicy = (
-  snapshot: NetworkSessionStateSnapshot,
-  overlaysBlocking: boolean
-): FrameSimulationPolicy => {
-  const waitingForSync =
-    snapshot.mode !== "local" &&
-    snapshot.bridge.waitingForRemoteSnapshot;
-  const networkPaused =
-    snapshot.mode !== "local" &&
-    (snapshot.connection.lifecycle !== "connected" || waitingForSync);
-  const overlayPausesSimulation = overlaysBlocking && snapshot.mode === "local";
-
-  return {
-    waitingForSync,
-    networkPaused,
-    simulationPaused: overlayPausesSimulation || networkPaused,
-  };
-};
-
-export const rebaseOverlayOpenedAtMs = (
-  openedAtMs: number | null,
-  pausedForMs: number
-): number | null => {
-  if (openedAtMs === null) return null;
-  if (pausedForMs <= 0) return openedAtMs;
-  return openedAtMs + pausedForMs;
-};
-
-const getNetworkMicroStatus = (snapshot: NetworkSessionStateSnapshot): NetworkMicroStatus | null => {
-  if (snapshot.mode === "local") return null;
-
-  const remoteTeamId = snapshot.player.remoteTeamId;
-  const localTeamId = snapshot.player.localTeamId;
-  const opponentSide: "left" | "right" =
-    remoteTeamId === "Red"
-      ? "left"
-      : remoteTeamId === "Blue"
-        ? "right"
-        : localTeamId === "Blue"
-          ? "left"
-          : "right";
-
-  if (snapshot.bridge.networkReady && snapshot.bridge.waitingForRemoteSnapshot) {
-    return {
-      text: snapshot.mode === "network-guest" ? "Waiting for host sync..." : "Waiting for sync...",
-      color: "#FFFF00",
-      opponentSide,
-    };
-  }
-
-  switch (snapshot.connection.lifecycle) {
-    case "idle":
-      return { text: "Idle", color: "#888888", opponentSide };
-    case "creating":
-    case "joining":
-      return { text: "Setting up...", color: "#FFA500", opponentSide };
-    case "created":
-    case "joined":
-      return { text: "Waiting...", color: "#FFFF00", opponentSide };
-    case "connecting":
-      return { text: "Connecting...", color: "#FFA500", opponentSide };
-    case "connected":
-      return { text: "Connected", color: "#00FF00", opponentSide };
-    case "disconnected":
-      return { text: "Disconnected", color: "#FF6600", opponentSide };
-    case "error": {
-      const details = snapshot.connection.lastError?.trim();
-      return { text: details ? `Error: ${details}` : "Error", color: "#FF0000", opponentSide };
-    }
-  }
-
-  return { text: "Unknown", color: COLORS.white, opponentSide };
-};
-
-const replaceWinnerInMessage = (message: string | null, teamLabels?: Partial<Record<TeamId, string>>) => {
-  if (!message) return null;
-
-  const match = /^(Red|Blue) wins!/.exec(message);
-  if (!match) return message;
-
-  const teamId = match[1] as TeamId;
-  const teamName = cleanPlayerName(teamLabels?.[teamId] ?? null);
-  if (!teamName) return message;
-
-  const winnerToken = match[1];
-  if (!winnerToken) return message;
-  return message.replace(winnerToken, teamName);
-};
-
-const uziHash01 = (v: number) => {
-  const x = Math.sin(v) * 10000;
-  return x - Math.floor(x);
-};
-
-const uziHashSigned = (v: number) => uziHash01(v) * 2 - 1;
-
-const computeUziVisuals = (params: {
-  burst: UziBurstSnapshot;
-  turnAtMs: number;
-  baseAimAngle: number;
-}): { angle: number; recoilKick01: number } => {
-  const intervalMs = 1000 / Math.max(1, GAMEPLAY.uzi.shotsPerSecond);
-  const elapsedMs = Math.max(0, params.turnAtMs - params.burst.startAtMs);
-  const shotIndexFloat = intervalMs > 0 ? elapsedMs / intervalMs : 0;
-  const lastShotIndex = Math.max(0, params.burst.shotCount - 1);
-  const shotIndex = clamp(Math.floor(shotIndexFloat), 0, lastShotIndex);
-  const shotPhase01 = clamp(shotIndexFloat - shotIndex, 0, 1);
-  const progress01 = lastShotIndex > 0 ? shotIndex / lastShotIndex : 1;
-
-  const ampRad = 0.045 + 0.095 * progress01;
-  const seedBase = params.burst.seedBase;
-  const stepNoise =
-    uziHashSigned(seedBase + shotIndex * 17.13) * 0.85 +
-    uziHashSigned(seedBase + shotIndex * 71.77) * 0.55;
-  const microNoise =
-    Math.sin((elapsedMs + seedBase * 3.1) * 0.06) * 0.65 +
-    Math.sin((elapsedMs + seedBase * 1.7) * 0.13) * 0.35;
-  const shakeRad = clamp((stepNoise + microNoise * 0.35) * ampRad, -0.22, 0.22);
-
-  const recoilKick01 = Math.exp(-shotPhase01 * 7.5);
-  return { angle: params.baseAimAngle + shakeRad, recoilKick01 };
-};
 
 const MOBILE_WORLD_ZOOM = 0.8;
 const MOBILE_AIM_STAGE_ZOOM_MULTIPLIER = 0.7;
