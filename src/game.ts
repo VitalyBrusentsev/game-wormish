@@ -43,10 +43,8 @@ import type {
   PlayerHelloMessage,
   TurnCommandMessage,
   TurnEffectsMessage,
-  TurnResolutionMessage,
 } from "./game/network/messages";
-import { applyAimThrottle, type AimThrottleState } from "./game/network/aim-throttle";
-import { applyMoveThrottle, flushMoveThrottle, type MoveThrottleState } from "./game/network/move-throttle";
+import { NetworkTurnRelay } from "./game/network/turn-relay";
 import { WebRTCRegistryClient } from "./webrtc/client";
 import { ConnectionState } from "./webrtc/types";
 import { RegistryClient } from "./webrtc/registry-client";
@@ -203,11 +201,7 @@ export class Game {
   private readonly turnControllers = new Map<TeamId, TurnDriver>();
   private readonly singlePlayer: ResolvedSinglePlayerConfig;
   private singlePlayerName: string | null = null;
-  private aimThrottleState: AimThrottleState | null = null;
-  private moveThrottleState: MoveThrottleState | null = null;
-  private pendingTurnEffects: TurnEffectsMessage["payload"] | null = null;
-  private pendingTurnEffectsNextFlushAtMs = 0;
-  private readonly turnEffectsFlushIntervalMs = 1000;
+  private readonly networkTurnRelay = new NetworkTurnRelay(nowMs);
   private controlProfile: ControlProfile = "desktop";
   private readonly mobileGameplay = new MobileGameplayController();
   private mobileControls: MobileControlsOverlay | null = null;
@@ -1072,170 +1066,46 @@ export class Game {
     this.webrtcClient.sendMessage(message);
   }
 
-  private handleLocalTurnCommand(command: TurnCommand, meta: { turnIndex: number; teamId: TeamId }) {
-    if (!this.webrtcClient) return;
+  private canSendNetworkTurnMessage() {
+    if (!this.webrtcClient) return false;
     const snapshot = this.networkState.getSnapshot();
-    if (snapshot.mode === "local") return;
-    if (snapshot.connection.lifecycle !== "connected") return;
+    if (snapshot.mode === "local") return false;
+    return snapshot.connection.lifecycle === "connected";
+  }
 
-    if (command.type !== "aim" && command.type !== "move") {
-      const flushed = flushMoveThrottle({ state: this.moveThrottleState, nowMs: nowMs() });
-      this.moveThrottleState = flushed.nextState;
-      for (const movement of flushed.toSend) {
-        const message: TurnCommandMessage = {
-          type: "turn_command",
-          payload: {
-            turnIndex: meta.turnIndex,
-            teamId: meta.teamId,
-            command: movement,
-          },
-        };
-        this.sendNetworkMessage(message);
-      }
-    }
-
-    if (command.type === "aim") {
-      const worm = this.session.activeWorm;
-      const decision = applyAimThrottle({
-        state: this.aimThrottleState,
-        config: {
-          minIntervalMs: 60,
-          maxIntervalMs: 250,
-          diffThreshold: 0.2,
-          angleThresholdRad: 0.2,
-        },
-        nowMs: nowMs(),
-        turnIndex: meta.turnIndex,
-        teamId: meta.teamId,
-        wormX: worm.x,
-        wormY: worm.y,
-        aim: command.aim,
-      });
-      this.aimThrottleState = decision.nextState;
-      if (!decision.shouldSend) return;
-    }
-
-    if (command.type === "move") {
-      const decision = applyMoveThrottle({
-        state: this.moveThrottleState,
-        config: {
-          minIntervalMs: 60,
-          suppressIdle: true,
-        },
-        nowMs: nowMs(),
-        turnIndex: meta.turnIndex,
-        teamId: meta.teamId,
-        movement: command,
-      });
-      this.moveThrottleState = decision.nextState;
-      if (decision.toSend.length === 0) return;
-      for (const movement of decision.toSend) {
-        const message: TurnCommandMessage = {
-          type: "turn_command",
-          payload: {
-            turnIndex: meta.turnIndex,
-            teamId: meta.teamId,
-            command: movement,
-          },
-        };
-        this.sendNetworkMessage(message);
-      }
-      return;
-    }
-
-    const message: TurnCommandMessage = {
-      type: "turn_command",
-      payload: {
-        turnIndex: meta.turnIndex,
-        teamId: meta.teamId,
-        command,
-      },
-    };
-    this.sendNetworkMessage(message);
+  private handleLocalTurnCommand(command: TurnCommand, meta: { turnIndex: number; teamId: TeamId }) {
+    if (!this.canSendNetworkTurnMessage()) return;
+    this.networkTurnRelay.handleLocalTurnCommand(
+      command,
+      meta,
+      this.session.activeWorm,
+      (message) => this.sendNetworkMessage(message)
+    );
   }
 
   private handleLocalTurnEffects(effects: TurnEffectsMessage["payload"]) {
-    if (!this.webrtcClient) return;
-    const snapshot = this.networkState.getSnapshot();
-    if (snapshot.mode === "local") return;
-    if (snapshot.connection.lifecycle !== "connected") return;
-
-    const shouldBatch =
-      effects.terrainOperations.every((op) => op.type !== "carve-circle" || op.radius <= 10) &&
-      effects.wormHealth.every((change) => change.cause === WeaponType.Uzi);
-    if (!shouldBatch) {
-      this.flushPendingTurnEffects(true);
-      const message: TurnEffectsMessage = {
-        type: "turn_effects",
-        payload: effects,
-      };
-      this.sendNetworkMessage(message);
-      return;
-    }
-
-    const pending = this.pendingTurnEffects;
-    if (!pending || pending.turnIndex !== effects.turnIndex || pending.actingTeamId !== effects.actingTeamId) {
-      this.flushPendingTurnEffects(true);
-      this.pendingTurnEffects = {
-        turnIndex: effects.turnIndex,
-        actingTeamId: effects.actingTeamId,
-        terrainOperations: [...effects.terrainOperations],
-        wormHealth: [...effects.wormHealth],
-      };
-      if (this.pendingTurnEffectsNextFlushAtMs <= 0) {
-        this.pendingTurnEffectsNextFlushAtMs = nowMs() + this.turnEffectsFlushIntervalMs;
-      }
-      return;
-    }
-
-    pending.terrainOperations.push(...effects.terrainOperations);
-    pending.wormHealth.push(...effects.wormHealth);
-
-    if (pending.terrainOperations.length + pending.wormHealth.length >= 24) {
-      this.flushPendingTurnEffects(true);
-    }
+    if (!this.canSendNetworkTurnMessage()) return;
+    this.networkTurnRelay.handleLocalTurnEffects(
+      effects,
+      (message) => this.sendNetworkMessage(message)
+    );
   }
 
   private flushPendingTurnEffects(force = false) {
-    if (!this.webrtcClient) return;
-    const snapshot = this.networkState.getSnapshot();
-    if (snapshot.mode === "local") return;
-    if (snapshot.connection.lifecycle !== "connected") return;
-
-    const pending = this.pendingTurnEffects;
-    if (!pending) return;
-    if (pending.terrainOperations.length === 0 && pending.wormHealth.length === 0) {
-      this.pendingTurnEffects = null;
-      this.pendingTurnEffectsNextFlushAtMs = 0;
-      return;
-    }
-
-    const now = nowMs();
-    if (!force && now < this.pendingTurnEffectsNextFlushAtMs) return;
-
-    const message: TurnEffectsMessage = {
-      type: "turn_effects",
-      payload: pending,
-    };
-    this.sendNetworkMessage(message);
-    this.pendingTurnEffects = null;
-    this.pendingTurnEffectsNextFlushAtMs = now + this.turnEffectsFlushIntervalMs;
+    if (!this.canSendNetworkTurnMessage()) return;
+    this.networkTurnRelay.flushPendingTurnEffects(
+      force,
+      (message) => this.sendNetworkMessage(message)
+    );
   }
 
   private flushTurnResolution() {
-    if (!this.webrtcClient) return;
-    const snapshot = this.networkState.getSnapshot();
-    if (snapshot.mode === "local") return;
-    if (snapshot.connection.lifecycle !== "connected") return;
-
+    if (!this.canSendNetworkTurnMessage()) return;
     const resolution = this.session.consumeTurnResolution();
-    if (!resolution) return;
-    this.flushPendingTurnEffects(true);
-    const message: TurnResolutionMessage = {
-      type: "turn_resolution",
-      payload: resolution,
-    };
-    this.sendNetworkMessage(message);
+    this.networkTurnRelay.flushTurnResolution(
+      resolution,
+      (message) => this.sendNetworkMessage(message)
+    );
   }
 
   private setActiveWebRTCClient(client: WebRTCRegistryClient): number {
@@ -1269,6 +1139,7 @@ export class Game {
   private resetNetworkSessionToLocal() {
     this.connectionStartRequested = false;
     this.hasReceivedMatchInit = false;
+    this.networkTurnRelay?.reset();
     this.networkState.setMode("local");
     this.networkState.resetNetworkOnlyState();
     this.singlePlayerName = this.readSinglePlayerNameFromStorage();
