@@ -1,12 +1,12 @@
 import { GAMEPLAY, clamp } from "../definitions";
 import type { UziBurstSnapshot } from "../game/session";
 
-const uziHash01 = (v: number) => {
-  const x = Math.sin(v) * 10000;
+const uziHash01 = (value: number) => {
+  const x = Math.sin(value) * 10000;
   return x - Math.floor(x);
 };
 
-const uziHashSigned = (v: number) => uziHash01(v) * 2 - 1;
+const uziHashSigned = (value: number) => uziHash01(value) * 2 - 1;
 
 export const computeUziVisuals = (params: {
   burst: UziBurstSnapshot;

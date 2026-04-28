@@ -1,6 +1,6 @@
 import type { TeamId, PredictedPoint } from "./definitions";
-import { GAMEPLAY, WeaponType, nowMs, COLORS, WORLD, clamp } from "./definitions";
-import { Input, drawArrow, drawCrosshair, drawRoundedRect, drawText } from "./utils";
+import { WeaponType, nowMs, WORLD, clamp } from "./definitions";
+import { Input, drawArrow, drawCrosshair, drawRoundedRect } from "./utils";
 import type { Worm } from "./entities";
 import { HelpOverlay } from "./ui/help-overlay";
 import { StartMenuOverlay } from "./ui/start-menu-overlay";
@@ -10,14 +10,7 @@ import { gameEvents } from "./events/game-events";
 import { DamageFloaters } from "./ui/damage-floaters";
 import { ActiveWormArrow } from "./ui/active-worm-arrow";
 import { TurnCountdownOverlay } from "./ui/turn-countdown";
-import {
-  renderAimHelpers,
-  renderBackground,
-  renderHUD,
-  type AimInfo,
-} from "./rendering/game-rendering";
-import { renderNetworkLogHUD } from "./ui/network-log-hud";
-import { getMapGadgetBottomY, renderMapGadget } from "./ui/map-gadget";
+import type { AimInfo } from "./rendering/game-rendering";
 import { drawMenuIconSprite } from "./ui/menu-icons";
 import type { Team } from "./game/team-manager";
 import {
@@ -65,9 +58,7 @@ import {
 } from "./game/frame-policy";
 import {
   cleanPlayerName,
-  getNetworkMicroStatus,
   getNetworkTeamNames,
-  replaceWinnerInMessage,
 } from "./game/player-display";
 import {
   oppositeTeamId,
@@ -75,8 +66,8 @@ import {
   type GameOptions,
   type ResolvedSinglePlayerConfig,
 } from "./game/single-player-config";
-import { computeUziVisuals } from "./rendering/uzi-visuals";
 import { GameCamera } from "./game/game-camera";
+import { renderGameScene } from "./rendering/game-scene-renderer";
 
 export {
   computeFrameSimulationPolicy,
@@ -1586,14 +1577,6 @@ export class Game {
     return this.networkState.getNetworkLogSetting();
   }
 
-  private get activeWormIndex() {
-    return this.session.activeWormIndex;
-  }
-
-  private get teams() {
-    return this.session.teams;
-  }
-
   private showTurnStartArrowForCurrentTurn(initial: boolean) {
     this.activeWormArrow.onTurnStarted(
       {
@@ -2124,22 +2107,6 @@ export class Game {
     return this.mobileGameplay.getAimAnchorWorldPoint(this.activeWorm, aim);
   }
 
-  private renderWorldWater(ctx: CanvasRenderingContext2D) {
-    const worldViewport = this.getWorldViewportSize();
-    const worldBottom = this.camera.y + worldViewport.height + this.camera.padding / this.camera.zoom;
-    const waterTopY = this.session.height - 30;
-    const fillHeight = Math.max(40, worldBottom - waterTopY + 120);
-    const terrain = this.session.terrain;
-    const padX = Math.max(200, terrain.width * 0.1);
-    const x = terrain.worldLeft - padX;
-    const w = terrain.worldRight - terrain.worldLeft + padX * 2;
-
-    ctx.save();
-    ctx.fillStyle = COLORS.water;
-    ctx.fillRect(x, waterTopY, w, fillHeight);
-    ctx.restore();
-  }
-
   private renderSettingsButton(ctx: CanvasRenderingContext2D) {
     if (!this.isSettingsButtonVisible()) return;
 
@@ -2171,162 +2138,37 @@ export class Game {
   render() {
     const now = nowMs();
     const networkSnapshot = this.networkState.getSnapshot();
-    const ctx = this.ctx;
     const aim = this.getAimInfo();
-    const state = this.session.state;
-    ctx.save();
-    ctx.translate(this.camera.offsetX, this.camera.offsetY);
-    // Background should probably fill the screen regardless of camera Y? 
-    // Or does it scroll? The background function draws a gradient.
-    // If we scroll Y, we might see out of bounds.
-    // Let's keep background fixed or adjust it. 
-    // renderBackground fills rect from 0,0 to width,height. 
-    // If we have vertical camera, we probably want the sky to stay fixed or parallax?
-    // For now, let's just draw it covering the viewport.
-    renderBackground(ctx, this.width, this.height, this.camera.padding, false);
-    ctx.restore();
-
-    ctx.save();
-    // Apply camera transform
-    ctx.translate(this.camera.offsetX, this.camera.offsetY);
-    ctx.scale(this.camera.zoom, this.camera.zoom);
-    ctx.translate(-this.camera.x, -this.camera.y);
-    this.renderWorldWater(ctx);
-    this.session.terrain.render(ctx);
-
-    for (const particle of this.session.particles) particle.render(ctx);
-
-    for (let t = 0; t < this.teams.length; t++) {
-      const team = this.teams[t]!;
-      for (let i = 0; i < team.worms.length; i++) {
-        const worm = team.worms[i]!;
-        const isActive =
-          team.id === this.activeTeam.id &&
-          i === this.activeWormIndex &&
-          this.session.state.phase !== "gameover";
-        const showAimPose =
-          isActive &&
-          (state.phase === "aim" ||
-            ((state.phase === "projectile" || state.phase === "post") &&
-              state.weapon !== WeaponType.HandGrenade));
-        let poseAngle = aim.angle;
-        let recoilKick01 = 0;
-        if (isActive && state.phase === "projectile" && state.weapon === WeaponType.Uzi) {
-          const burst = this.session.getUziBurstSnapshot();
-          if (burst) {
-            const turnAtMs = Math.max(0, now - state.turnStartMs);
-            const visuals = computeUziVisuals({
-              burst,
-              turnAtMs,
-              baseAimAngle: burst.aimAngle,
-            });
-            poseAngle = visuals.angle;
-            recoilKick01 = visuals.recoilKick01;
-          }
-        }
-
-        const aimPose = showAimPose
-          ? {
-              weapon: state.weapon,
-              angle: poseAngle,
-              ...(recoilKick01 > 0 ? { recoil: { kick01: recoilKick01 } } : {}),
-            }
-          : null;
-        worm.render(ctx, isActive, aimPose);
-      }
-    }
-
-    for (const projectile of this.session.projectiles) projectile.render(ctx);
-
-    this.damageFloaters.render(ctx, this.session, now);
-    this.activeWormArrow.render(ctx, this.session, now);
-    this.renderMobileAimDragCrosshair(ctx, aim);
-    this.renderMobileMovementGhost(ctx);
     const isMobileProfile = this.isMobileProfile();
-
-    renderAimHelpers({
-      ctx,
-      state,
-      activeWorm: this.activeWorm,
+    const topUiOffsetPx = this.getMobileTopUiOffsetPx();
+    const displayTeamLabels = this.getDisplayedTeamLabels(networkSnapshot);
+    renderGameScene({
+      ctx: this.ctx,
+      width: this.width,
+      height: this.height,
+      now,
+      fps: this.fps,
+      camera: this.camera,
+      session: this.session,
+      networkState: this.networkState,
+      networkSnapshot,
+      damageFloaters: this.damageFloaters,
+      activeWormArrow: this.activeWormArrow,
+      turnCountdown: this.turnCountdown,
       aim,
       predictedPath: this.predictPath(),
-      showDesktopAssist: !isMobileProfile,
-    });
-    ctx.restore();
-
-    ctx.save();
-    ctx.translate(this.camera.offsetX, this.camera.offsetY);
-    const mobileMapMaxWidthPx = isMobileProfile ? Math.floor(this.width * 0.5) : undefined;
-    const topUiOffsetPx = this.getMobileTopUiOffsetPx();
-    const timeLabelY = isMobileProfile
-      ? Math.min(
-          this.height - 12,
-          getMapGadgetBottomY({
-            viewportWidth: this.width,
-            terrain: this.session.terrain,
-            ...(mobileMapMaxWidthPx !== undefined ? { maxWidthPx: mobileMapMaxWidthPx } : {}),
-            ...(topUiOffsetPx > 0 ? { topOffsetPx: topUiOffsetPx } : {}),
-          }) + 16
-        )
-      : undefined;
-    const displayTeamLabels = this.getDisplayedTeamLabels(networkSnapshot);
-    const teamDisplayOrder =
-      networkSnapshot.mode === "local" ? this.getSinglePlayerTeamOrder() : undefined;
-    const teamLabels = displayTeamLabels ?? undefined;
-    const activeTeamLabel = displayTeamLabels?.[this.activeTeam.id] ?? undefined;
-    const networkMicroStatus = getNetworkMicroStatus(networkSnapshot) ?? undefined;
-    const displayMessage = replaceWinnerInMessage(this.session.message, displayTeamLabels ?? undefined);
-    renderHUD(
-      {
-        ctx,
-        width: this.width,
-        height: this.height,
-        state: this.session.state,
-        now,
-        activeTeamId: this.activeTeam.id,
-        ...(teamDisplayOrder ? { teamDisplayOrder } : {}),
-        getTeamHealth: (teamId) => this.getTeamHealth(teamId),
-        wind: this.session.wind,
-        message: displayMessage,
-        turnDurationMs: GAMEPLAY.turnTimeMs,
-        showChargeHint: !isMobileProfile,
-        ...(topUiOffsetPx > 0 ? { topOffsetPx: topUiOffsetPx } : {}),
-        ...(timeLabelY !== undefined ? { timeLabelY } : {}),
-        ...(networkMicroStatus ? { networkMicroStatus } : {}),
-        ...(teamLabels ? { teamLabels } : {}),
-        ...(activeTeamLabel ? { activeTeamLabel } : {}),
-      }
-    );
-
-    const overlaysBlocking =
-      this.helpOverlay.isVisible() ||
-      this.startMenu.isVisible() ||
-      this.matchResultDialog.isVisible() ||
-      this.networkDialog.isVisible();
-    if (!overlaysBlocking) {
-      this.turnCountdown.render(ctx, this.session, now, this.width, this.height);
-    }
-
-    renderMapGadget({
-      ctx,
-      viewportWidth: this.width,
-      viewportHeight: this.height,
-      now,
-      terrain: this.session.terrain,
-      teams: this.teams,
-      projectiles: this.session.projectiles,
+      isMobileProfile,
+      topUiOffsetPx,
+      displayTeamLabels,
+      singlePlayerTeamOrder: this.getSinglePlayerTeamOrder(),
+      getTeamHealth: (teamId) => this.getTeamHealth(teamId),
+      renderMobileAimDragCrosshair: (ctx, renderAim) =>
+        this.renderMobileAimDragCrosshair(ctx, renderAim),
+      renderMobileMovementGhost: (ctx) => this.renderMobileMovementGhost(ctx),
+      renderSettingsButton: (ctx) => this.renderSettingsButton(ctx),
+      overlaysBlocking: this.hasBlockingOverlay(),
       showRadar: initialMenuDismissed,
-      ...(mobileMapMaxWidthPx !== undefined ? { maxWidthPx: mobileMapMaxWidthPx } : {}),
-      ...(topUiOffsetPx > 0 ? { topOffsetPx: topUiOffsetPx } : {}),
     });
-
-    renderNetworkLogHUD(ctx, this.width, this.height, this.networkState);
-
-    this.renderSettingsButton(ctx);
-
-    const fpsText = `FPS: ${Math.round(this.fps)}`;
-    drawText(ctx, fpsText, 12, this.height - 12, COLORS.white, 12, "left", "bottom");
-    ctx.restore();
   }
 
   frame(timeMs: number) {

@@ -8,6 +8,7 @@ import { drawHealthBar, drawRoundedRect } from "../utils";
 import type { Terrain } from "./terrain";
 import { WormVisualAnimator, type MotionSample } from "./worm-visual-animator";
 import type { WormMovementSmoothingMode } from "../rendering/worm-animation-setting";
+import type { WormRenderAimPose } from "../critter/worm-render-pose";
 
 export class Worm {
   x: number;
@@ -245,7 +246,7 @@ export class Worm {
   render(
     ctx: CanvasRenderingContext2D,
     highlight = false,
-    aimPose?: { weapon: WeaponType; angle: number; recoil?: { kick01: number } } | null
+    aimPose?: WormRenderAimPose | null
   ) {
     const now = nowMs();
     const motion = this.visualAnimator.sampleMotion(now, this.getMotionSample());
