@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { Game } from "../game";
 import { ConnectionState } from "../webrtc/types";
+import {
+  NetworkOrchestrator,
+  type NetworkOrchestratorHost,
+} from "../network/network-orchestrator";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -67,25 +71,71 @@ const createMockClient = (closePromise: Promise<void>): MockClient => {
   };
 };
 
-describe("Game network restart behavior", () => {
+function createOrchestrator(opts: { mode: "network-host" | "network-guest"; lifecycle?: ConnectionState }) {
+  const host: NetworkOrchestratorHost & {
+    startMatchAsHost: ReturnType<typeof vi.fn>;
+    applyMatchInitSnapshot: ReturnType<typeof vi.fn>;
+    restoreLocalSetup: ReturnType<typeof vi.fn>;
+    setTurnControllersOnSession: ReturnType<typeof vi.fn>;
+  } = {
+    getSession: () => ({
+      getTurnIndex: () => 0,
+      activeTeam: { id: "Red" },
+      activeWorm: { x: 0, y: 0 },
+      consumeTurnResolution: () => null,
+      applyRemoteTurnEffects: vi.fn(),
+      setTurnControllers: vi.fn(),
+      toMatchInitSnapshot: vi.fn(() => ({})),
+    }) as any,
+    getTurnControllers: () => new Map(),
+    setTurnControllersOnSession: vi.fn(),
+    startMatchAsHost: vi.fn(),
+    applyMatchInitSnapshot: vi.fn(),
+    restoreLocalSetup: vi.fn(),
+  };
+  let lifecycle = opts.lifecycle ?? ConnectionState.DISCONNECTED;
+  const state = {
+    setMode: vi.fn(),
+    setPlayerNames: vi.fn(),
+    setRemoteName: vi.fn(),
+    assignTeams: vi.fn(),
+    updateRegistryInfo: vi.fn(),
+    updateConnectionLifecycle: vi.fn((next: ConnectionState) => { lifecycle = next; }),
+    reportConnectionError: vi.fn(),
+    setWaitingForSnapshot: vi.fn(),
+    storePendingSnapshot: vi.fn(),
+    enqueueResolution: vi.fn(),
+    dequeueResolution: vi.fn(),
+    resetNetworkOnlyState: vi.fn(),
+    appendNetworkMessageLog: vi.fn(),
+    getSnapshot: vi.fn(() => ({ mode: opts.mode, connection: { lifecycle }, player: { localName: "P", remoteName: null } })),
+  };
+  const orch = new NetworkOrchestrator(host, { state: state as any });
+  return { orch, host, state };
+}
+
+describe("Game.restartMissionFromPauseMenu network teardown sequencing", () => {
   it("awaits host teardown before restarting mission", async () => {
     const order: string[] = [];
     const game = Object.create(Game.prototype) as any;
     game.restartMissionTask = null;
-    game.networkState = { getSnapshot: vi.fn(() => ({ mode: "network-host" })) };
-    game.teardownNetworkSession = vi.fn(async (awaitClose: boolean) => {
-      expect(awaitClose).toBe(true);
-      order.push("teardown:start");
-      await Promise.resolve();
-      order.push("teardown:end");
-    });
+    game.network = {
+      state: { getSnapshot: vi.fn(() => ({ mode: "network-host" })) },
+      getSnapshot: vi.fn(() => ({ mode: "network-host" })),
+      teardownSession: vi.fn(async (awaitClose: boolean) => {
+        expect(awaitClose).toBe(true);
+        order.push("teardown:start");
+        await Promise.resolve();
+        order.push("teardown:end");
+      }),
+    };
     game.restartSinglePlayerMatch = vi.fn(() => {
       order.push("restart");
     });
 
     await callRestartFromPauseMenu(game);
 
-    expect(game.teardownNetworkSession).toHaveBeenCalledTimes(1);
+    expect(game.network.teardownSession).toHaveBeenCalledTimes(1);
     expect(game.restartSinglePlayerMatch).toHaveBeenCalledTimes(1);
     expect(order).toEqual(["teardown:start", "teardown:end", "restart"]);
   });
@@ -94,17 +144,20 @@ describe("Game network restart behavior", () => {
     const order: string[] = [];
     const game = Object.create(Game.prototype) as any;
     game.restartMissionTask = null;
-    game.networkState = { getSnapshot: vi.fn(() => ({ mode: "network-guest" })) };
-    game.teardownNetworkSession = vi.fn(async () => {
-      order.push("teardown");
-    });
+    game.network = {
+      state: { getSnapshot: vi.fn(() => ({ mode: "network-guest" })) },
+      getSnapshot: vi.fn(() => ({ mode: "network-guest" })),
+      teardownSession: vi.fn(async () => {
+        order.push("teardown");
+      }),
+    };
     game.restartSinglePlayerMatch = vi.fn(() => {
       order.push("restart");
     });
 
     await callRestartFromPauseMenu(game);
 
-    expect(game.teardownNetworkSession).toHaveBeenCalledTimes(1);
+    expect(game.network.teardownSession).toHaveBeenCalledTimes(1);
     expect(game.restartSinglePlayerMatch).toHaveBeenCalledTimes(1);
     expect(order).toEqual(["teardown", "restart"]);
   });
@@ -112,109 +165,80 @@ describe("Game network restart behavior", () => {
   it("skips network teardown in local mode restart", async () => {
     const game = Object.create(Game.prototype) as any;
     game.restartMissionTask = null;
-    game.networkState = { getSnapshot: vi.fn(() => ({ mode: "local" })) };
-    game.teardownNetworkSession = vi.fn();
+    game.network = {
+      state: { getSnapshot: vi.fn(() => ({ mode: "local" })) },
+      getSnapshot: vi.fn(() => ({ mode: "local" })),
+      teardownSession: vi.fn(),
+    };
     game.restartSinglePlayerMatch = vi.fn();
 
     await callRestartFromPauseMenu(game);
 
-    expect(game.teardownNetworkSession).not.toHaveBeenCalled();
+    expect(game.network.teardownSession).not.toHaveBeenCalled();
     expect(game.restartSinglePlayerMatch).toHaveBeenCalledTimes(1);
   });
+});
 
+describe("NetworkOrchestrator setupWebRTCCallbacks stale-client safety", () => {
   it("ignores stale callbacks from a torn-down client", async () => {
     const closeDeferred = createDeferred<void>();
     const staleClient = createMockClient(closeDeferred.promise);
 
-    const networkState = {
-      getSnapshot: vi.fn(() => ({
-        mode: "network-host",
-        connection: { lifecycle: ConnectionState.CONNECTING },
-      })),
-      updateConnectionLifecycle: vi.fn(),
-      appendNetworkMessageLog: vi.fn(),
-      reportConnectionError: vi.fn(),
-      setWaitingForSnapshot: vi.fn(),
-      enqueueResolution: vi.fn(),
-      setMode: vi.fn(),
-      resetNetworkOnlyState: vi.fn(),
-    };
+    const { orch, state } = createOrchestrator({ mode: "network-host", lifecycle: ConnectionState.CONNECTING });
+    (orch as any).webrtcClient = staleClient;
+    (orch as any).clientGeneration = 7;
+    (orch as any).connectionStartRequested = true;
+    (orch as any).hasReceivedMatchInit = false;
 
-    const game = Object.create(Game.prototype) as any;
-    game.webrtcClient = staleClient;
-    game.networkClientGeneration = 7;
-    game.connectionStartRequested = true;
-    game.hasReceivedMatchInit = false;
-    game.networkState = networkState;
-    game.readSinglePlayerNameFromStorage = vi.fn(() => "Player");
-    game.initializeTurnControllers = vi.fn();
-    game.notifyNetworkStateChange = vi.fn();
-    game.swapToNetworkControllers = vi.fn();
-    game.sendPlayerHello = vi.fn();
-    game.startNetworkMatchAsHost = vi.fn();
-    game.sendMatchInit = vi.fn();
-    game.handleMatchInit = vi.fn();
-    game.handlePlayerHello = vi.fn();
-    game.handleRestartRequest = vi.fn();
-    game.deliverCommandToController = vi.fn();
-    game.deliverEffectsToSession = vi.fn();
-    game.deliverResolutionToController = vi.fn();
+    orch.setupWebRTCCallbacks(staleClient as any, 7);
 
-    (Game.prototype as any).setupWebRTCCallbacks.call(game, staleClient, 7);
+    const teardownPromise = orch.teardownSession(true);
 
-    const teardownPromise = (Game.prototype as any).teardownNetworkSession.call(game, true) as Promise<void>;
+    expect((orch as any).webrtcClient).toBeNull();
+    expect((orch as any).clientGeneration).toBe(8);
+    expect(state.setMode).toHaveBeenCalledWith("local");
 
-    expect(game.webrtcClient).toBeNull();
-    expect(game.networkClientGeneration).toBe(8);
-    expect(networkState.setMode).toHaveBeenCalledWith("local");
+    state.updateConnectionLifecycle.mockClear();
+    state.appendNetworkMessageLog.mockClear();
+    state.reportConnectionError.mockClear();
 
     staleClient.emitState(ConnectionState.CONNECTED);
     staleClient.emitMessage({ type: "player_hello", payload: { name: "Late peer" } });
     staleClient.emitError(new Error("late error"));
 
-    expect(networkState.updateConnectionLifecycle).not.toHaveBeenCalled();
-    expect(networkState.appendNetworkMessageLog).not.toHaveBeenCalled();
-    expect(networkState.reportConnectionError).not.toHaveBeenCalled();
+    expect(state.updateConnectionLifecycle).not.toHaveBeenCalled();
+    expect(state.appendNetworkMessageLog).not.toHaveBeenCalled();
+    expect(state.reportConnectionError).not.toHaveBeenCalled();
 
     closeDeferred.resolve(undefined);
     await teardownPromise;
   });
+});
 
+describe("NetworkOrchestrator teardown timeout", () => {
   it("falls back to timeout when client teardown hangs", async () => {
     vi.useFakeTimers();
     try {
       const neverClose = new Promise<void>(() => { });
       const closeRoom = vi.fn(() => neverClose);
-      const client = { closeRoom } as unknown as {
-        closeRoom: () => Promise<void>;
-      };
+      const client = { closeRoom } as unknown as { closeRoom: () => Promise<void> };
 
-      const networkState = {
-        setMode: vi.fn(),
-        resetNetworkOnlyState: vi.fn(),
-      };
+      const { orch, state, host } = createOrchestrator({ mode: "network-host" });
+      (orch as any).webrtcClient = client;
+      (orch as any).clientGeneration = 21;
+      (orch as any).connectionStartRequested = true;
+      (orch as any).hasReceivedMatchInit = true;
 
-      const game = Object.create(Game.prototype) as any;
-      game.webrtcClient = client;
-      game.networkClientGeneration = 21;
-      game.connectionStartRequested = true;
-      game.hasReceivedMatchInit = true;
-      game.networkState = networkState;
-      game.readSinglePlayerNameFromStorage = vi.fn(() => "Player");
-      game.initializeTurnControllers = vi.fn();
-      game.notifyNetworkStateChange = vi.fn();
-
-      const teardownPromise = (Game.prototype as any).teardownNetworkSession.call(game, true) as Promise<void>;
+      const teardownPromise = orch.teardownSession(true);
       await vi.advanceTimersByTimeAsync(3100);
       await teardownPromise;
 
       expect(closeRoom).toHaveBeenCalledTimes(1);
-      expect(game.webrtcClient).toBeNull();
-      expect(game.networkClientGeneration).toBe(22);
-      expect(networkState.setMode).toHaveBeenCalledWith("local");
-      expect(networkState.resetNetworkOnlyState).toHaveBeenCalledTimes(1);
-      expect(game.initializeTurnControllers).toHaveBeenCalledTimes(1);
-      expect(game.notifyNetworkStateChange).toHaveBeenCalledTimes(1);
+      expect((orch as any).webrtcClient).toBeNull();
+      expect((orch as any).clientGeneration).toBe(22);
+      expect(state.setMode).toHaveBeenCalledWith("local");
+      expect(state.resetNetworkOnlyState).toHaveBeenCalledTimes(1);
+      expect(host.restoreLocalSetup).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
