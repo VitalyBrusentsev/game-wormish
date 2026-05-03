@@ -10,6 +10,82 @@ import { WormVisualAnimator, type MotionSample } from "./worm-visual-animator";
 import type { WormMovementSmoothingMode } from "../rendering/worm-animation-setting";
 import type { WormRenderAimPose } from "../critter/worm-render-pose";
 
+const TAU = Math.PI * 2;
+
+type ActiveRingOptions = {
+  ctx: CanvasRenderingContext2D;
+  teamColor: string;
+  teamGlow: string;
+  radius: number;
+  now: number;
+  activeLineScale: number;
+  front: boolean;
+};
+
+function renderActiveSelectionRing({
+  ctx,
+  teamColor,
+  teamGlow,
+  radius,
+  now,
+  activeLineScale,
+  front,
+}: ActiveRingOptions) {
+  const ringPulse01 = 0.5 + 0.5 * Math.sin(now * 0.006);
+  const rx = (radius + 8) * 1.64;
+  const ry = (radius + 8) * 0.46;
+  const cy = radius * 0.46;
+  const rotation = -0.12;
+  const start = front ? 0 : Math.PI;
+  const end = front ? Math.PI : TAU;
+  const alphaScale = front ? 1 : 0.56;
+
+  const strokeEllipse = () => {
+    ctx.beginPath();
+    ctx.ellipse(0, cy, rx, ry, rotation, start, end);
+    ctx.stroke();
+  };
+
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  ctx.globalAlpha = (0.22 + ringPulse01 * 0.08) * alphaScale;
+  ctx.strokeStyle = `rgba(${teamGlow},0.72)`;
+  ctx.lineWidth = 12 * activeLineScale;
+  ctx.shadowColor = teamColor;
+  ctx.shadowBlur = 16 + ringPulse01 * 8;
+  strokeEllipse();
+
+  ctx.globalAlpha = (0.58 + ringPulse01 * 0.14) * alphaScale;
+  ctx.strokeStyle = teamColor;
+  ctx.lineWidth = 4.2 * activeLineScale;
+  ctx.shadowBlur = 8;
+  strokeEllipse();
+
+  ctx.globalAlpha = (0.72 + ringPulse01 * 0.12) * alphaScale;
+  ctx.strokeStyle = "rgba(226,250,255,0.92)";
+  ctx.lineWidth = 1.6 * activeLineScale;
+  ctx.shadowColor = "rgba(255,255,255,0.6)";
+  ctx.shadowBlur = 5;
+  strokeEllipse();
+
+  const orbitAngle = (now * 0.0042) % TAU;
+  const orbitOnFront = orbitAngle <= Math.PI;
+  if (orbitOnFront === front) {
+    ctx.globalAlpha = front ? 0.92 : 0.5;
+    ctx.strokeStyle = "rgba(255,255,255,0.94)";
+    ctx.lineWidth = 3 * activeLineScale;
+    ctx.shadowColor = teamColor;
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.ellipse(0, cy, rx, ry, rotation, orbitAngle - 0.26, orbitAngle + 0.26);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
 export class Worm {
   x: number;
   y: number;
@@ -428,6 +504,7 @@ export class Worm {
 
     const bodyColor = this.team === "Red" ? "#ff9aa9" : "#9ad0ff";
     const teamColor = this.team === "Red" ? COLORS.red : COLORS.blue;
+    const teamGlow = this.team === "Red" ? "255,77,77" : "77,163,255";
     const outlineAlpha = highlight ? 0.26 + 0.16 * activePulse01 : 0.25;
     const outline = `rgba(0,0,0,${outlineAlpha.toFixed(3)})`;
     const armColor = this.team === "Red" ? "#ff8b9c" : "#84c6ff";
@@ -620,6 +697,18 @@ export class Worm {
       renderHandOverlays();
     };
 
+    if (highlight) {
+      renderActiveSelectionRing({
+        ctx,
+        teamColor,
+        teamGlow,
+        radius: this.radius,
+        now,
+        activeLineScale,
+        front: false,
+      });
+    }
+
     const renderedSprites = renderCritterSprites({
       ctx,
       rig,
@@ -736,28 +825,16 @@ export class Worm {
       ctx.stroke();
     }
 
-    // Highlight ring for active
     if (highlight) {
-      const ringPulse01 = 0.5 + 0.5 * Math.sin(now * 0.006);
-      const ringR = (this.radius + 4) * 1.5;
-
-      ctx.save();
-      ctx.strokeStyle = "rgba(255,255,255,0.125)";
-      ctx.lineWidth = 7 * activeLineScale;
-      ctx.shadowColor = "rgba(255,255,255,0.175)";
-      ctx.shadowBlur = 10;
-      ctx.beginPath();
-      ctx.arc(0, 0, ringR, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-
-      ctx.globalAlpha = 0.36 + 0.09 * ringPulse01;
-      ctx.strokeStyle = "#fff";
-      ctx.lineWidth = 2.5 * activeLineScale;
-      ctx.beginPath();
-      ctx.arc(0, 0, ringR, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+      renderActiveSelectionRing({
+        ctx,
+        teamColor,
+        teamGlow,
+        radius: this.radius,
+        now,
+        activeLineScale,
+        front: true,
+      });
     }
 
     const hbW = 48;
