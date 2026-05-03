@@ -53,7 +53,7 @@ export function drawHudText(config: {
   ctx.textBaseline = baseline;
   if (shadow) {
     ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillText(text, x + 2, y + 2);
+    ctx.fillText(text, x + 1.25, y + 1.25);
   }
   ctx.fillStyle = color;
   ctx.fillText(text, x, y);
@@ -339,7 +339,7 @@ function drawHealthMeter(config: {
   const labelSize = compact ? 13 : 16;
   const labelGap = compact ? 5 : 9;
   ctx.font = `900 ${labelSize}px ${HUD_FONT_STACK}`;
-  const labelWidth = Math.max(26, ctx.measureText(label).width + 4);
+  const labelWidth = Math.max(compact ? 31 : 42, ctx.measureText("000").width + 4);
   const barX = side === "left" ? x : x + labelWidth + labelGap;
   const textX = side === "left" ? x + w + labelGap : x + labelWidth;
 
@@ -462,7 +462,7 @@ export function drawTeamPanel(config: {
     : side === "left"
       ? contentX
       : contentX + contentW - healthW - 44;
-  const healthY = compact ? y + h - 21 * scale : y + h - 43;
+  const healthY = compact ? y + h - 24 * scale : y + h - 47;
   const truncated = truncateHudText(ctx, label, contentW, labelSize, 900);
 
   drawHudText({

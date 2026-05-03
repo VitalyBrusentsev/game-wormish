@@ -4,7 +4,7 @@ import { computeCritterRig, type BaseCritterPose } from "../critter/critter-geom
 import { renderCritterFace } from "../critter/critter-face";
 import { renderCritterSprites, resolveCritterSpriteOffsets } from "../critter/critter-sprites";
 import { drawWeaponSprite } from "../weapons/weapon-sprites";
-import { drawRoundedRect, drawText } from "../utils";
+import { drawRoundedRect } from "../utils";
 import type { Terrain } from "./terrain";
 import { WormVisualAnimator, type MotionSample } from "./worm-visual-animator";
 import type { WormMovementSmoothingMode } from "../rendering/worm-animation-setting";
@@ -763,7 +763,7 @@ export class Worm {
     const hbW = 48;
     const hbH = 17;
     const hbX = -hbW / 2;
-    const hbY = rig.head.center.y - rig.head.r - 37;
+    const hbY = rig.head.center.y - rig.head.r - 43;
     const health01 = clamp(this.health / 100, 0, 1);
     drawRoundedRect(ctx, hbX, hbY, hbW, hbH, 6);
     ctx.fillStyle = "rgba(18,42,32,0.78)";
@@ -777,17 +777,13 @@ export class Worm {
     healthFill.addColorStop(1, "#4bd332");
     ctx.fillStyle = healthFill;
     ctx.fill();
-    drawText(
-      ctx,
-      String(Math.max(0, Math.round(this.health))),
-      0,
-      hbY + hbH / 2 + 0.5,
-      COLORS.white,
-      10,
-      "center",
-      "middle",
-      true
-    );
+    ctx.font = "bold 10px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(0,0,0,0.32)";
+    ctx.fillText(String(Math.max(0, Math.round(this.health))), 0, hbY + hbH / 2 + 1.1);
+    ctx.fillStyle = COLORS.white;
+    ctx.fillText(String(Math.max(0, Math.round(this.health))), 0, hbY + hbH / 2);
 
     const debugCollision =
       typeof window !== "undefined" && (window as Window).debugCritterCollision === true;
