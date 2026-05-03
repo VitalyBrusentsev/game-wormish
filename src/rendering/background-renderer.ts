@@ -1,5 +1,105 @@
 import { COLORS } from "../definitions";
 
+export type BackgroundCamera = {
+  x: number;
+  y: number;
+  zoom: number;
+};
+
+type BackgroundLayerName =
+  | "distant-light-mountains"
+  | "darker-mountains"
+  | "tree-line"
+  | "main-ground-plane";
+
+type BackgroundLayer = {
+  name: BackgroundLayerName;
+  parallaxX: number;
+  parallaxY: number;
+};
+
+export const BACKGROUND_LAYERS = {
+  distantLightMountains: {
+    name: "distant-light-mountains",
+    parallaxX: 0,
+    parallaxY: 0,
+  },
+  darkerMountains: {
+    name: "darker-mountains",
+    parallaxX: 0.12,
+    parallaxY: 0.04,
+  },
+  treeLine: {
+    name: "tree-line",
+    parallaxX: 0.28,
+    parallaxY: 0.08,
+  },
+  mainGroundPlane: {
+    name: "main-ground-plane",
+    parallaxX: 1,
+    parallaxY: 1,
+  },
+} as const satisfies Record<string, BackgroundLayer>;
+
+type LayerFrame = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  width: number;
+  height: number;
+  offsetX: number;
+  offsetY: number;
+};
+
+const DEFAULT_BACKGROUND_CAMERA: BackgroundCamera = {
+  x: 0,
+  y: 0,
+  zoom: 1,
+};
+
+function positiveModulo(value: number, divisor: number) {
+  return ((value % divisor) + divisor) % divisor;
+}
+
+export function getBackgroundLayerOffset(layer: BackgroundLayer, camera: BackgroundCamera) {
+  return {
+    x: -camera.x * camera.zoom * layer.parallaxX,
+    y: -camera.y * camera.zoom * layer.parallaxY,
+  };
+}
+
+function getLayerFrame(config: {
+  width: number;
+  height: number;
+  padding: number;
+  camera: BackgroundCamera;
+  layer: BackgroundLayer;
+}): LayerFrame {
+  const { width, height, padding, camera, layer } = config;
+  const baseLeft = -padding;
+  const baseTop = -padding;
+  const baseWidth = width + padding * 2;
+  const baseHeight = height + padding * 2;
+  const offset = getBackgroundLayerOffset(layer, camera);
+  const repeatWidth = Math.max(320, baseWidth);
+  const wrappedOffsetX = positiveModulo(offset.x, repeatWidth);
+  const left = baseLeft + wrappedOffsetX - repeatWidth;
+  const drawWidth = baseWidth + repeatWidth * 2;
+  const top = baseTop + offset.y;
+
+  return {
+    left,
+    right: left + drawWidth,
+    top,
+    bottom: top + baseHeight,
+    width: drawWidth,
+    height: baseHeight,
+    offsetX: offset.x,
+    offsetY: offset.y,
+  };
+}
+
 function drawCloud(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -41,23 +141,37 @@ function drawMountainLayer(config: {
   width: number;
   baseY: number;
   amplitude: number;
+  ridgeOffsetX: number;
   colorTop: string;
   colorBottom: string;
   alpha: number;
   seed: number;
 }) {
-  const { ctx, left, bottom, width, baseY, amplitude, colorTop, colorBottom, alpha, seed } = config;
+  const {
+    ctx,
+    left,
+    bottom,
+    width,
+    baseY,
+    amplitude,
+    ridgeOffsetX,
+    colorTop,
+    colorBottom,
+    alpha,
+    seed,
+  } = config;
   const right = left + width;
+  const ridgeAt = (x: number) => ridgeY(x - ridgeOffsetX, seed, baseY, amplitude);
 
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.beginPath();
   ctx.moveTo(left, bottom);
-  ctx.lineTo(left, ridgeY(left, seed, baseY, amplitude));
+  ctx.lineTo(left, ridgeAt(left));
   for (let x = left; x <= right; x += 38) {
-    ctx.lineTo(x, ridgeY(x, seed, baseY, amplitude));
+    ctx.lineTo(x, ridgeAt(x));
   }
-  ctx.lineTo(right, ridgeY(right, seed, baseY, amplitude));
+  ctx.lineTo(right, ridgeAt(right));
   ctx.lineTo(right, bottom);
   ctx.closePath();
 
@@ -72,7 +186,7 @@ function drawMountainLayer(config: {
   ctx.lineWidth = 2;
   ctx.beginPath();
   for (let x = left; x <= right; x += 95) {
-    const peakY = ridgeY(x, seed, baseY, amplitude);
+    const peakY = ridgeAt(x);
     ctx.moveTo(x, peakY + 8);
     ctx.lineTo(x + 34, peakY + amplitude * 0.9);
   }
@@ -109,13 +223,15 @@ function drawForestLayer(
   baseY: number,
   spacing: number,
   scale: number,
-  color: string
+  color: string,
+  offsetX: number
 ) {
   ctx.save();
-  for (let x = left - spacing; x <= right + spacing; x += spacing) {
-    const jitter = Math.sin(x * 0.037) * spacing * 0.24;
-    const heightJitter = Math.sin(x * 0.021 + 3.1) * 16;
-    drawTree(ctx, x + jitter, baseY + heightJitter, scale, color);
+  const firstTreeX = Math.floor((left - offsetX - spacing) / spacing) * spacing;
+  for (let treeX = firstTreeX; treeX <= right - offsetX + spacing; treeX += spacing) {
+    const jitter = Math.sin(treeX * 0.037) * spacing * 0.24;
+    const heightJitter = Math.sin(treeX * 0.021 + 3.1) * 16;
+    drawTree(ctx, treeX + offsetX + jitter, baseY + heightJitter, scale, color);
   }
   ctx.restore();
 }
@@ -125,13 +241,13 @@ export function renderBackground(
   width: number,
   height: number,
   padding = 0,
-  drawWater = true
+  drawWater = true,
+  camera: BackgroundCamera = DEFAULT_BACKGROUND_CAMERA
 ) {
   const left = -padding;
   const top = -padding;
   const drawWidth = width + padding * 2;
   const drawHeight = height + padding * 2;
-  const right = left + drawWidth;
   const bottom = top + drawHeight;
 
   const sky = ctx.createLinearGradient(0, top, 0, bottom);
@@ -151,33 +267,75 @@ export function renderBackground(
   drawCloud(ctx, width * 0.58, top + height * 0.26, 0.9, 0.45);
   drawCloud(ctx, width * 0.84, top + height * 0.31, 1.25, 0.42);
 
+  const distantMountains = getLayerFrame({
+    width,
+    height,
+    padding,
+    camera,
+    layer: BACKGROUND_LAYERS.distantLightMountains,
+  });
   drawMountainLayer({
     ctx,
-    left,
-    bottom,
-    width: drawWidth,
-    baseY: top + height * 0.47,
+    left: distantMountains.left,
+    bottom: distantMountains.bottom,
+    width: distantMountains.width,
+    baseY: distantMountains.top + height * 0.47,
     amplitude: height * 0.075,
+    ridgeOffsetX: distantMountains.offsetX,
     colorTop: "#8fb4d8",
     colorBottom: "#c7dded",
     alpha: 0.52,
     seed: 2.8,
   });
+
+  const darkerMountains = getLayerFrame({
+    width,
+    height,
+    padding,
+    camera,
+    layer: BACKGROUND_LAYERS.darkerMountains,
+  });
   drawMountainLayer({
     ctx,
-    left,
-    bottom,
-    width: drawWidth,
-    baseY: top + height * 0.55,
+    left: darkerMountains.left,
+    bottom: darkerMountains.bottom,
+    width: darkerMountains.width,
+    baseY: darkerMountains.top + height * 0.55,
     amplitude: height * 0.062,
+    ridgeOffsetX: darkerMountains.offsetX,
     colorTop: "#5f8bad",
     colorBottom: "#9fc4da",
-    alpha: 0.44,
+    alpha: 1,
     seed: 5.2,
   });
 
-  drawForestLayer(ctx, left, right, top + height * 0.72, 58, 0.82, "rgba(51,105,91,0.28)");
-  drawForestLayer(ctx, left, right, top + height * 0.79, 48, 0.96, "rgba(38,88,78,0.32)");
+  const treeLine = getLayerFrame({
+    width,
+    height,
+    padding,
+    camera,
+    layer: BACKGROUND_LAYERS.treeLine,
+  });
+  drawForestLayer(
+    ctx,
+    treeLine.left,
+    treeLine.right,
+    treeLine.top + height * 0.72,
+    58,
+    0.82,
+    "rgba(51,105,91,0.28)",
+    treeLine.offsetX
+  );
+  drawForestLayer(
+    ctx,
+    treeLine.left,
+    treeLine.right,
+    treeLine.top + height * 0.79,
+    48,
+    0.96,
+    "rgba(38,88,78,0.32)",
+    treeLine.offsetX
+  );
 
   const groundHaze = ctx.createLinearGradient(0, top + height * 0.45, 0, bottom);
   groundHaze.addColorStop(0, "rgba(255,255,255,0)");

@@ -128,7 +128,7 @@ export function renderGameScene(options: GameSceneRenderOptions) {
 
   ctx.save();
   ctx.translate(camera.offsetX, camera.offsetY);
-  renderBackground(ctx, width, height, camera.padding, false);
+  renderBackground(ctx, width, height, camera.padding, false, camera);
   ctx.restore();
 
   ctx.save();
