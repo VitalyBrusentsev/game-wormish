@@ -126,28 +126,65 @@ export class Terrain {
 
   private drawGrass() {
     const ctx = this.ctx;
+
     ctx.save();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = COLORS.grassHighlight;
+    ctx.strokeStyle = "rgba(36,21,10,0.42)";
+    ctx.lineWidth = 10;
+    ctx.lineCap = "round";
     ctx.beginPath();
-    for (let x = 0; x < this.totalWidth; x += 1) {
-      const y = Math.floor(this.heightMap[x]!) - 1;
-      ctx.moveTo(x, y - 1);
-      ctx.lineTo(x + 2, y - 1 - this.random() * 2);
+    for (let x = 0; x < this.totalWidth; x += 3) {
+      const y = Math.floor(this.heightMap[x]!) + 5;
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
     }
     ctx.stroke();
     ctx.restore();
 
-    // Top grass fill
     ctx.save();
     ctx.fillStyle = COLORS.grass;
     ctx.beginPath();
-    for (let x = 0; x < this.totalWidth; x++) {
+    const firstY = Math.floor(this.heightMap[0] ?? this.height) + 9;
+    ctx.moveTo(0, firstY);
+    for (let x = 0; x < this.totalWidth; x += 3) {
       const y = Math.floor(this.heightMap[x]!);
-      ctx.rect(x, y - 5, 2, 6);
+      ctx.lineTo(x, y + 9);
     }
-    ctx.globalAlpha = 0.3;
+    for (let x = this.totalWidth - 1; x >= 0; x -= 2) {
+      const y = Math.floor(this.heightMap[x]!);
+      const tuft = 4 + this.surfaceNoise(x, 1) * 6;
+      ctx.lineTo(x, y - tuft);
+    }
+    ctx.closePath();
+    ctx.globalAlpha = 0.72;
     ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.lineWidth = 2.6;
+    ctx.strokeStyle = COLORS.grassHighlight;
+    ctx.beginPath();
+    for (let x = 0; x < this.totalWidth; x += 3) {
+      const y = Math.floor(this.heightMap[x]!) - 1;
+      const lean = this.surfaceNoise(x, 2) * 8 - 4;
+      const bladeHeight = 4 + this.surfaceNoise(x, 3) * 10;
+      ctx.moveTo(x, y + 2);
+      ctx.lineTo(x + lean, y - bladeHeight);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(230,255,118,0.36)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (let x = 1; x < this.totalWidth; x += 7) {
+      const y = Math.floor(this.heightMap[x]!) - 3;
+      const lean = this.surfaceNoise(x, 4) * 6 - 3;
+      const bladeHeight = 5 + this.surfaceNoise(x, 5) * 7;
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + lean, y - bladeHeight);
+    }
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -177,6 +214,11 @@ export class Terrain {
 
   private randomRange(min: number, max: number) {
     return this.random() * (max - min) + min;
+  }
+
+  private surfaceNoise(x: number, salt = 0) {
+    const v = Math.sin((x + salt * 101.3) * 12.9898) * 43758.5453;
+    return v - Math.floor(v);
   }
 
   private applyTilePattern() {

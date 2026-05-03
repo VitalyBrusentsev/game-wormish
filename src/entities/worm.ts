@@ -4,7 +4,7 @@ import { computeCritterRig, type BaseCritterPose } from "../critter/critter-geom
 import { renderCritterFace } from "../critter/critter-face";
 import { renderCritterSprites, resolveCritterSpriteOffsets } from "../critter/critter-sprites";
 import { drawWeaponSprite } from "../weapons/weapon-sprites";
-import { drawHealthBar, drawRoundedRect } from "../utils";
+import { drawRoundedRect, drawText } from "../utils";
 import type { Terrain } from "./terrain";
 import { WormVisualAnimator, type MotionSample } from "./worm-visual-animator";
 import type { WormMovementSmoothingMode } from "../rendering/worm-animation-setting";
@@ -760,18 +760,33 @@ export class Worm {
       ctx.globalAlpha = 1;
     }
 
-    // Individual health bar above the worm
-    const hbW = 34;
-    const hbH = 6;
-    drawHealthBar(
+    const hbW = 48;
+    const hbH = 17;
+    const hbX = -hbW / 2;
+    const hbY = rig.head.center.y - rig.head.r - 37;
+    const health01 = clamp(this.health / 100, 0, 1);
+    drawRoundedRect(ctx, hbX, hbY, hbW, hbH, 6);
+    ctx.fillStyle = "rgba(18,42,32,0.78)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(196,255,148,0.78)";
+    ctx.lineWidth = 1.5 * activeLineScale;
+    ctx.stroke();
+    drawRoundedRect(ctx, hbX + 2, hbY + 2, Math.max(0, (hbW - 4) * health01), hbH - 4, 4);
+    const healthFill = ctx.createLinearGradient(hbX, hbY, hbX, hbY + hbH);
+    healthFill.addColorStop(0, "#aaff55");
+    healthFill.addColorStop(1, "#4bd332");
+    ctx.fillStyle = healthFill;
+    ctx.fill();
+    drawText(
       ctx,
+      String(Math.max(0, Math.round(this.health))),
       0,
-      rig.head.center.y - rig.head.r - 33,
-      hbW,
-      hbH,
-      this.health / 100,
-      COLORS.healthGreen,
-      "rgba(0,0,0,0.35)"
+      hbY + hbH / 2 + 0.5,
+      COLORS.white,
+      10,
+      "center",
+      "middle",
+      true
     );
 
     const debugCollision =

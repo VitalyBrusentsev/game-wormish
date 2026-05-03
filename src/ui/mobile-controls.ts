@@ -70,12 +70,27 @@ function weaponShortName(weapon: WeaponType): string {
   }
 }
 
+function weaponDescription(weapon: WeaponType): string {
+  switch (weapon) {
+    case WeaponType.HandGrenade:
+      return "Large blast\nTimed explosive";
+    case WeaponType.Bazooka:
+      return "High damage\nExplosive weapon";
+    case WeaponType.Rifle:
+      return "Direct shot\nHigh precision";
+    case WeaponType.Uzi:
+      return "Burst fire\nClose pressure";
+  }
+}
+
 export class MobileControlsOverlay {
   private readonly callbacks: MobileControlsCallbacks;
   private readonly root: HTMLDivElement;
   private readonly weaponDock: HTMLDivElement;
   private readonly weaponButton: HTMLButtonElement;
+  private readonly weaponCopy: HTMLDivElement;
   private readonly weaponLabel: HTMLSpanElement;
+  private readonly weaponDescription: HTMLSpanElement;
   private readonly weaponIcon: HTMLCanvasElement;
   private readonly weaponMenu: HTMLDivElement;
   private readonly weaponButtons = new Map<WeaponType, HTMLButtonElement>();
@@ -102,12 +117,19 @@ export class MobileControlsOverlay {
 
     this.weaponIcon = document.createElement("canvas");
     this.weaponIcon.className = "mobile-weapon-icon";
-    this.weaponIcon.width = 54;
+    this.weaponIcon.width = 62;
     this.weaponIcon.height = 40;
 
     this.weaponLabel = document.createElement("span");
     this.weaponLabel.className = "mobile-weapon-label";
-    this.weaponButton.append(this.weaponIcon, this.weaponLabel);
+
+    this.weaponDescription = document.createElement("span");
+    this.weaponDescription.className = "mobile-weapon-description";
+
+    this.weaponCopy = document.createElement("div");
+    this.weaponCopy.className = "mobile-weapon-copy";
+    this.weaponCopy.append(this.weaponLabel, this.weaponDescription);
+    this.weaponButton.append(this.weaponIcon, this.weaponCopy);
 
     this.weaponMenu = document.createElement("div");
     this.weaponMenu.className = "mobile-weapon-menu";
@@ -182,6 +204,7 @@ export class MobileControlsOverlay {
     this.weaponButton.disabled = !state.canSelectWeapon;
     this.weaponMenu.classList.toggle("mobile-weapon-menu--open", state.weaponPickerOpen);
     this.weaponLabel.textContent = weaponShortName(state.weapon);
+    this.weaponDescription.textContent = weaponDescription(state.weapon);
     this.drawWeaponIcon(state.weapon);
     for (const [weapon, button] of this.weaponButtons) {
       button.classList.toggle("mobile-weapon-item--active", weapon === state.weapon);
@@ -235,7 +258,7 @@ export class MobileControlsOverlay {
     const ok = drawWeaponSprite({
       ctx,
       weapon,
-      rotationPoint: { x: this.weaponIcon.width * 0.5, y: this.weaponIcon.height * 0.52 },
+      rotationPoint: { x: this.weaponIcon.width * 0.4, y: this.weaponIcon.height * 0.52 },
       aimAngle: -0.22,
     });
     if (!ok) {

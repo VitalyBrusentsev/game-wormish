@@ -658,7 +658,7 @@ Mobile gameplay controls
 .mobile-weapon-dock {
   position: absolute;
   left: 10px;
-  top: calc(64px + var(--mobile-top-ui-offset-px, 0px));
+  top: calc(118px + var(--mobile-top-ui-offset-px, 0px));
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -678,8 +678,8 @@ Mobile gameplay controls
 }
 
 .mobile-weapon-button {
-  min-width: 132px;
-  min-height: 58px;
+  width: min(225px, calc(100vw - 20px));
+  min-height: 88px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.25);
   background: linear-gradient(160deg, rgba(12, 22, 44, 0.88), rgba(24, 36, 66, 0.9));
@@ -687,8 +687,9 @@ Mobile gameplay controls
   font: 700 14px "Fredoka", "Trebuchet MS", system-ui, sans-serif;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 10px 14px 10px 9px;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
 }
 
@@ -697,13 +698,34 @@ Mobile gameplay controls
 }
 
 .mobile-weapon-icon {
-  width: 54px;
+  width: 62px;
   height: 40px;
   image-rendering: auto;
 }
 
 .mobile-weapon-label {
-  padding-left: 8px;
+  display: block;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.mobile-weapon-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.mobile-weapon-description {
+  display: block;
+  color: rgba(230, 240, 255, 0.86);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.18;
+  white-space: pre-line;
+  text-align: left;
 }
 
 .mobile-weapon-menu {

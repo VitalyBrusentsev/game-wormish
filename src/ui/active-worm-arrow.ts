@@ -67,47 +67,38 @@ export class ActiveWormArrow {
     const x = worm.x;
     const y = baseY - bouncePx;
 
-    const arrowWidth = 30;
-    const arrowHeight = 44;
-    const headHeight = 18;
-    const shaftWidth = 12;
-
     const fill = worm.team === "Red" ? COLORS.red : COLORS.blue;
 
     ctx.save();
     ctx.translate(x, y);
     ctx.globalAlpha = 0.92 * alpha;
 
-    ctx.shadowColor = "rgba(0,0,0,0.35)";
-    ctx.shadowBlur = 10;
+    ctx.shadowColor = fill;
+    ctx.shadowBlur = 16;
     ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 6;
+    ctx.shadowOffsetY = 0;
 
-    ctx.fillStyle = fill;
+    ctx.fillStyle = "rgba(255,255,255,0.08)";
+    ctx.strokeStyle = fill;
+    ctx.lineWidth = 3.5;
     ctx.beginPath();
-    ctx.moveTo(0, arrowHeight / 2);
-    ctx.lineTo(arrowWidth / 2, arrowHeight / 2 - headHeight);
-    ctx.lineTo(shaftWidth / 2, arrowHeight / 2 - headHeight);
-    ctx.lineTo(shaftWidth / 2, -arrowHeight / 2);
-    ctx.lineTo(-shaftWidth / 2, -arrowHeight / 2);
-    ctx.lineTo(-shaftWidth / 2, arrowHeight / 2 - headHeight);
-    ctx.lineTo(-arrowWidth / 2, arrowHeight / 2 - headHeight);
+    ctx.moveTo(0, 17);
+    ctx.lineTo(26, -17);
+    ctx.lineTo(-26, -17);
     ctx.closePath();
     ctx.fill();
-
-    ctx.shadowColor = "transparent";
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = "rgba(255,255,255,0.75)";
     ctx.stroke();
 
-    ctx.globalAlpha = 0.65 * alpha;
-    ctx.fillStyle = "rgba(255,255,255,0.22)";
+    ctx.shadowColor = "transparent";
+    ctx.globalAlpha = 0.78 * alpha;
+    ctx.strokeStyle = "rgba(255,255,255,0.86)";
+    ctx.lineWidth = 1.7;
     ctx.beginPath();
-    ctx.moveTo(0, -arrowHeight / 2 + 3);
-    ctx.lineTo(shaftWidth / 2 - 2, -arrowHeight / 2 + 10);
-    ctx.lineTo(-shaftWidth / 2 + 2, -arrowHeight / 2 + 10);
+    ctx.moveTo(0, 10);
+    ctx.lineTo(18, -13);
+    ctx.lineTo(-18, -13);
     ctx.closePath();
-    ctx.fill();
+    ctx.stroke();
 
     ctx.restore();
   }

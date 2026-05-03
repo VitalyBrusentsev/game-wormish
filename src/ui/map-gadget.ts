@@ -4,7 +4,7 @@ import type { Projectile, Terrain } from "../entities";
 import type { Team } from "../game/team-manager";
 import { drawRoundedRect } from "../utils";
 
-export const MAP_GADGET_WIDTH_PX = 240;
+export const MAP_GADGET_WIDTH_PX = 360;
 
 type MapGadgetOptions = {
   ctx: CanvasRenderingContext2D;
@@ -36,9 +36,8 @@ type Layout = {
   scale: number;
 };
 
-const HUD_TOP_PADDING_PX = 10;
-const HUD_BAR_HEIGHT_PX = 44;
-const HUD_TO_GADGET_GAP_PX = 10;
+const HUD_TOP_PADDING_PX = 14;
+const HUD_TO_GADGET_GAP_PX = 22;
 
 const FRAME_PAD_PX = 10;
 const FRAME_RADIUS_PX = 14;
@@ -67,7 +66,8 @@ function getLayout({
   topOffsetPx = 0,
 }: MapGadgetLayoutOptions): Layout {
   const worldWidth = Math.max(1, terrain.worldRight - terrain.worldLeft);
-  const maxWidth = Math.max(80, Math.min(MAP_GADGET_WIDTH_PX, maxWidthPx ?? MAP_GADGET_WIDTH_PX));
+  const defaultWidth = clamp(viewportWidth * 0.23, 240, MAP_GADGET_WIDTH_PX);
+  const maxWidth = Math.max(80, Math.min(MAP_GADGET_WIDTH_PX, maxWidthPx ?? defaultWidth));
   const scale = maxWidth / worldWidth;
   const mapWidth = maxWidth;
   const mapHeight = Math.max(1, Math.round(terrain.height * scale));
@@ -75,7 +75,8 @@ function getLayout({
   const outerHeight = mapHeight + FRAME_PAD_PX * 2;
 
   const x = viewportWidth - HUD_TOP_PADDING_PX - outerWidth;
-  const y = topOffsetPx + HUD_TOP_PADDING_PX + HUD_BAR_HEIGHT_PX + HUD_TO_GADGET_GAP_PX;
+  const hudHeight = viewportWidth < 760 ? 56 : 96;
+  const y = topOffsetPx + HUD_TOP_PADDING_PX + hudHeight + HUD_TO_GADGET_GAP_PX;
   const innerX = x + FRAME_PAD_PX;
   const innerY = y + FRAME_PAD_PX;
 
@@ -103,17 +104,17 @@ function drawMetalFrame(ctx: CanvasRenderingContext2D, layout: Layout) {
   ctx.save();
   drawRoundedRect(ctx, x, y, w, h, FRAME_RADIUS_PX);
   const g = ctx.createLinearGradient(x, y, x + w, y + h);
-  g.addColorStop(0, "#6e747c");
-  g.addColorStop(0.25, "#2f343a");
-  g.addColorStop(0.55, "#7b828a");
-  g.addColorStop(0.85, "#22262b");
-  g.addColorStop(1, "#5f656e");
+  g.addColorStop(0, "#275b8f");
+  g.addColorStop(0.28, "#142f50");
+  g.addColorStop(0.6, "#4582b9");
+  g.addColorStop(0.86, "#0b1e35");
+  g.addColorStop(1, "#2d669b");
   ctx.fillStyle = g;
   ctx.fill();
 
   ctx.save();
   ctx.globalAlpha = 0.9;
-  ctx.strokeStyle = "rgba(255,255,255,0.22)";
+  ctx.strokeStyle = "rgba(195,230,255,0.32)";
   ctx.lineWidth = 2;
   drawRoundedRect(ctx, x + 1, y + 1, w - 2, h - 2, FRAME_RADIUS_PX - 1);
   ctx.stroke();
@@ -121,7 +122,7 @@ function drawMetalFrame(ctx: CanvasRenderingContext2D, layout: Layout) {
 
   ctx.save();
   ctx.globalAlpha = 0.65;
-  ctx.strokeStyle = "rgba(0,0,0,0.55)";
+  ctx.strokeStyle = "rgba(0,0,0,0.5)";
   ctx.lineWidth = 2;
   drawRoundedRect(ctx, x + 3, y + 3, w - 6, h - 6, FRAME_RADIUS_PX - 3);
   ctx.stroke();
@@ -129,8 +130,8 @@ function drawMetalFrame(ctx: CanvasRenderingContext2D, layout: Layout) {
 
   const rand = mulberry32(0xdecafbad);
   ctx.save();
-  ctx.globalAlpha = 0.22;
-  ctx.strokeStyle = "rgba(255,255,255,0.55)";
+  ctx.globalAlpha = 0.12;
+  ctx.strokeStyle = "rgba(205,238,255,0.72)";
   ctx.lineWidth = 1;
   for (let i = 0; i < 14; i++) {
     const sx = x + 6 + rand() * (w - 12);
@@ -151,8 +152,8 @@ function drawMetalFrame(ctx: CanvasRenderingContext2D, layout: Layout) {
     const cy = y + 8 + rand() * (h - 16);
     const r = 2 + rand() * 5;
     const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-    rg.addColorStop(0, "rgba(96,70,36,0.85)");
-    rg.addColorStop(1, "rgba(96,70,36,0)");
+    rg.addColorStop(0, "rgba(100,170,220,0.58)");
+    rg.addColorStop(1, "rgba(100,170,220,0)");
     ctx.fillStyle = rg;
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);

@@ -12,10 +12,10 @@ import type { ActiveWormArrow } from "../ui/active-worm-arrow";
 import type { DamageFloaters } from "../ui/damage-floaters";
 import type { TurnCountdownOverlay } from "../ui/turn-countdown";
 import { resolveWormRenderAimPose } from "../critter/worm-render-pose";
+import { renderBackground } from "./background-renderer";
+import { renderHUD } from "./hud-renderer";
 import {
   renderAimHelpers,
-  renderBackground,
-  renderHUD,
   type AimInfo,
 } from "./game-rendering";
 
