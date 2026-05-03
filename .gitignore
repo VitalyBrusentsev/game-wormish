@@ -8,3 +8,4 @@ cloudflare/.env.local
 cloudflare/wrangler.local.toml
 cloudflare/wrangler.production.toml
 cloudflare/.wrangler/
+.codex
