@@ -185,6 +185,7 @@ export function renderGameScene(options: GameSceneRenderOptions) {
     state,
     now,
     activeTeamId: session.activeTeam.id,
+    activeWormFacing: session.activeWorm.facing < 0 ? -1 : 1,
     ...(teamDisplayOrder ? { teamDisplayOrder } : {}),
     getTeamHealth,
     wind: session.wind,

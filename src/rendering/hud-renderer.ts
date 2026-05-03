@@ -17,6 +17,7 @@ export type RenderHudOptions = {
   state: GameState;
   now: number;
   activeTeamId: TeamId;
+  activeWormFacing: -1 | 1;
   teamDisplayOrder?: readonly [TeamId, TeamId];
   activeTeamLabel?: string;
   teamLabels?: Partial<Record<TeamId, string>>;
@@ -78,6 +79,7 @@ export function renderHUD({
   state,
   now,
   activeTeamId,
+  activeWormFacing,
   teamDisplayOrder,
   activeTeamLabel,
   teamLabels,
@@ -126,6 +128,8 @@ export function renderHUD({
     health: getTeamHealth(leftTeamId),
     maxHealth: maxTeamHealth,
     active: activeTeamId === leftTeamId,
+    nowMs: now,
+    activeWormFacing,
     ...(leftStatus ? { networkStatus: leftStatus } : {}),
   });
   drawTeamPanel({
@@ -137,6 +141,8 @@ export function renderHUD({
     health: getTeamHealth(rightTeamId),
     maxHealth: maxTeamHealth,
     active: activeTeamId === rightTeamId,
+    nowMs: now,
+    activeWormFacing,
     ...(rightStatus ? { networkStatus: rightStatus } : {}),
   });
 

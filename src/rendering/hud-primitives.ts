@@ -22,7 +22,7 @@ const HUD_FONT_STACK =
 const HUD_DARK = "rgba(8,28,51,0.88)";
 const HUD_DARKER = "rgba(6,16,30,0.94)";
 const HUD_BORDER = "rgba(95,160,225,0.72)";
-const HUD_INNER_BORDER = "rgba(194,228,255,0.22)";
+const HUD_CENTER_INNER_BORDER = "rgba(194,228,255,0.22)";
 
 export function drawHudText(config: {
   ctx: CanvasRenderingContext2D;
@@ -145,10 +145,6 @@ function fillFramedPanel(
   ctx.lineWidth = 4;
   ctx.strokeStyle = active ? "rgba(116,211,255,0.86)" : HUD_BORDER;
   ctx.stroke();
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = HUD_INNER_BORDER;
-  drawPanelPath(ctx, x + 5, y + 5, w - 10, h - 10, side, Math.max(2, radius - 4));
-  ctx.stroke();
   ctx.restore();
 }
 function teamAccent(teamId: TeamId) {
@@ -208,12 +204,47 @@ function drawRigFallback(ctx: CanvasRenderingContext2D, rig: CritterRig, teamId:
   ctx.restore();
 }
 
+function portraitPulse(nowMs: number) {
+  const breath = Math.sin(nowMs * 0.0048);
+  return {
+    activePulse01: 0.5 + 0.5 * breath,
+    age: nowMs / 1000,
+  };
+}
+
+function applyPortraitBreath(rig: CritterRig, nowMs: number) {
+  const breathDy = Math.sin(nowMs * 0.0042) * 2;
+  const visited = new WeakSet<object>();
+  const shiftY = (p: { x: number; y: number }) => {
+    if (visited.has(p)) return;
+    visited.add(p);
+    p.y += breathDy;
+  };
+
+  shiftY(rig.body.center);
+  shiftY(rig.head.center);
+  if (rig.weapon) {
+    shiftY(rig.weapon.root);
+    shiftY(rig.weapon.muzzle);
+  }
+  if (rig.grenade) shiftY(rig.grenade.center);
+  for (const side of ["left", "right"] as const) {
+    shiftY(rig.arms[side].upper.a);
+    shiftY(rig.arms[side].upper.b);
+    shiftY(rig.arms[side].lower.a);
+    shiftY(rig.arms[side].lower.b);
+  }
+}
+
 function drawPortraitCritter(
   ctx: CanvasRenderingContext2D,
   centerX: number,
   centerY: number,
   size: number,
-  teamId: TeamId
+  teamId: TeamId,
+  active: boolean,
+  nowMs: number,
+  lookAngle: number
 ) {
   const facing = teamId === "Red" ? -1 : 1;
   const rig = computeCritterRig({
@@ -225,9 +256,13 @@ function drawPortraitCritter(
   });
   extendPortraitTail(rig);
 
+  const pulse = active ? portraitPulse(nowMs) : portraitPulse(0);
+  if (active) applyPortraitBreath(rig, nowMs);
+
   ctx.save();
-  ctx.translate(centerX, centerY + size * 0.06);
-  ctx.scale(size / 82, size / 82);
+  ctx.translate(centerX, centerY + size * 0.22);
+  const baseScale = size / 62;
+  ctx.scale(baseScale, baseScale);
   const renderedSprites = renderCritterSprites({
     ctx,
     rig,
@@ -238,11 +273,11 @@ function drawPortraitCritter(
         ctx,
         center: headCenter,
         headRadius: rig.head.r,
-        lookAngle: 0,
-        highlight: false,
-        activePulse01: 0,
+        lookAngle,
+        highlight: active,
+        activePulse01: pulse.activePulse01,
         activeLineScale: 1,
-        age: 0,
+        age: pulse.age,
       });
     },
   });
@@ -250,31 +285,40 @@ function drawPortraitCritter(
   ctx.restore();
 }
 
-function drawPortrait(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, teamId: TeamId) {
+function drawPortrait(config: {
+  ctx: CanvasRenderingContext2D;
+  x: number;
+  y: number;
+  size: number;
+  radius: number;
+  teamId: TeamId;
+  active: boolean;
+  nowMs: number;
+  activeWormFacing: -1 | 1;
+}) {
+  const { ctx, x, y, size, radius, teamId, active, nowMs, activeWormFacing } = config;
   const accent = teamAccent(teamId);
   const cx = x + size / 2;
   const cy = y + size / 2;
+  const lookAngle = activeWormFacing < 0 ? Math.PI : 0;
 
   ctx.save();
-  drawRoundedRect(ctx, x, y, size, size, Math.min(14, size * 0.18));
+  drawRoundedRect(ctx, x, y, size, size, radius);
   const bg = ctx.createLinearGradient(x, y, x, y + size);
   bg.addColorStop(0, "rgba(73,141,200,0.7)");
   bg.addColorStop(1, "rgba(8,20,38,0.86)");
   ctx.fillStyle = bg;
   ctx.fill();
-  ctx.strokeStyle = "rgba(195,230,255,0.34)";
-  ctx.lineWidth = 2;
-  ctx.stroke();
 
   ctx.save();
-  drawRoundedRect(ctx, x + 3, y + 3, size - 6, size - 6, Math.min(12, size * 0.16));
+  drawRoundedRect(ctx, x, y, size, size, radius);
   ctx.clip();
-  drawPortraitCritter(ctx, cx, cy, size, teamId);
+  drawPortraitCritter(ctx, cx, cy, size, teamId, active, nowMs, lookAngle);
   ctx.restore();
 
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = 2;
-  drawRoundedRect(ctx, x + 3, y + 3, size - 6, size - 6, Math.min(12, size * 0.16));
+  ctx.strokeStyle = active ? "rgba(206,242,255,0.88)" : accent;
+  ctx.lineWidth = active ? 3 : 2.5;
+  drawRoundedRect(ctx, x, y, size, size, radius);
   ctx.stroke();
   ctx.restore();
 }
@@ -377,20 +421,34 @@ export function drawTeamPanel(config: {
   health: number;
   maxHealth: number;
   active: boolean;
+  nowMs: number;
+  activeWormFacing: -1 | 1;
   networkStatus?: { text: string; color: string };
 }) {
-  const { ctx, layout, side, teamId, label, health, maxHealth, active, networkStatus } = config;
+  const { ctx, layout, side, teamId, label, health, maxHealth, active, nowMs, activeWormFacing, networkStatus } = config;
   const { x, y, w, h, avatar, compact, scale } = layout;
-  fillFramedPanel(ctx, x, y, w, h, side, compact ? 11 * scale : 16, active);
+  const panelRadius = compact ? 11 * scale : 16;
+  fillFramedPanel(ctx, x, y, w, h, side, panelRadius, active);
 
-  const avatarPad = compact ? 6 * scale : 8;
-  const avatarX = side === "left" ? x + avatarPad : x + w - avatar - avatarPad;
-  const avatarY = y + (h - avatar) / 2;
-  drawPortrait(ctx, avatarX, avatarY, avatar, teamId);
+  const avatarInset = (h - avatar) / 2;
+  const avatarX = side === "left" ? x + avatarInset : x + w - avatar - avatarInset;
+  const avatarY = y + avatarInset;
+  const avatarRadius = Math.max(4, panelRadius - avatarInset);
+  drawPortrait({
+    ctx,
+    x: avatarX,
+    y: avatarY,
+    size: avatar,
+    radius: avatarRadius,
+    teamId,
+    active,
+    nowMs,
+    activeWormFacing,
+  });
 
   const contentPad = compact ? 8 * scale : 18;
   const contentX = side === "left" ? avatarX + avatar + contentPad : x + contentPad;
-  const contentW = Math.max(compact ? 44 : 58, w - avatar - contentPad * 2 - avatarPad * 2);
+  const contentW = Math.max(compact ? 44 : 58, w - avatar - contentPad * 2 - avatarInset * 2);
   const labelX = side === "left" ? contentX : contentX + contentW + (compact ? 4 : 0);
   const labelSize = compact ? 18 * scale : 30;
   const healthLabelReserve = compact ? 31 : 42;
@@ -475,23 +533,31 @@ export function drawCenterWeaponPanel(config: {
   ctx.strokeStyle = HUD_BORDER;
   ctx.stroke();
   ctx.lineWidth = 1.5;
-  ctx.strokeStyle = HUD_INNER_BORDER;
+  ctx.strokeStyle = HUD_CENTER_INNER_BORDER;
   drawCenterPanelPath(ctx, x + 7, y + 7, w - 14, h - 14);
   ctx.stroke();
 
   const windDir = Math.sign(wind) >= 0 ? 1 : -1;
   const windMag01 = Math.min(1, Math.abs(wind) / WORLD.windMax);
   const centerX = x + w / 2;
-  const sockOffsetX = compact ? 31 * scale : 58;
+  const sockOffsetX = compact ? 38 * scale : 76;
   const sockX = centerX + windDir * sockOffsetX;
   const sockY = y + h * 0.5;
-  drawWindsock(ctx, sockX, sockY, windDir as -1 | 1, (compact ? 28 * scale : 46) * Math.max(0.28, windMag01), Math.max(0.18, windMag01), "#d54f45");
+  drawWindsock(
+    ctx,
+    sockX,
+    sockY,
+    windDir as -1 | 1,
+    (compact ? 40 * scale : 62) * Math.max(0.28, windMag01),
+    Math.max(0.18, windMag01),
+    "#d54f45"
+  );
 
-  const textX = x + w * 0.52;
+  const textX = centerX;
   if (compact) {
-    const textW = w - 80 * scale;
-    const teamSize = 13 * scale;
-    const weaponSize = 14 * scale;
+    const textW = w - 100 * scale;
+    const teamSize = 15 * scale;
+    const weaponSize = 12 * scale;
     drawHudText({
       ctx,
       text: truncateHudText(ctx, teamLabel, textW, teamSize, 900),
@@ -513,21 +579,22 @@ export function drawCenterWeaponPanel(config: {
       weight: 900,
     });
   } else {
+    const textW = w - 176;
     drawHudText({
       ctx,
-      text: truncateHudText(ctx, teamLabel, w - 126, 28, 900),
+      text: truncateHudText(ctx, teamLabel, textW, 30, 900),
       x: textX,
-      y: y + 16,
-      size: 28,
+      y: y + 15,
+      size: 30,
       align: "center",
       weight: 900,
     });
     drawHudText({
       ctx,
-      text: truncateHudText(ctx, weaponLabel, w - 126, 32, 900),
+      text: truncateHudText(ctx, weaponLabel, textW, 22, 900),
       x: textX,
-      y: y + 48,
-      size: 32,
+      y: y + 54,
+      size: 22,
       align: "center",
       weight: 900,
     });
