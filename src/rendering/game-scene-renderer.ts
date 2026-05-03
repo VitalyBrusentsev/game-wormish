@@ -170,7 +170,7 @@ export function renderGameScene(options: GameSceneRenderOptions) {
           terrain: session.terrain,
           ...(mobileMapMaxWidthPx !== undefined ? { maxWidthPx: mobileMapMaxWidthPx } : {}),
           ...(topUiOffsetPx > 0 ? { topOffsetPx: topUiOffsetPx } : {}),
-        }) + 16
+        }) + 34
       )
     : undefined;
   const teamDisplayOrder = networkSnapshot.mode === "local" ? singlePlayerTeamOrder : undefined;

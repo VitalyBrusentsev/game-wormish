@@ -657,12 +657,19 @@ Mobile gameplay controls
 
 .mobile-weapon-dock {
   position: absolute;
-  left: 10px;
+  left: 15px;
   top: calc(118px + var(--mobile-top-ui-offset-px, 0px));
   display: flex;
   flex-direction: column;
   gap: 8px;
   pointer-events: auto;
+}
+
+@media (max-width: 759px) {
+  .mobile-weapon-dock {
+    left: 6px;
+    top: calc(92px + var(--mobile-top-ui-offset-px, 0px));
+  }
 }
 
 .mobile-weapon-dock--hidden {

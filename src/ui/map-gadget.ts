@@ -37,10 +37,13 @@ type Layout = {
 };
 
 const HUD_TOP_PADDING_PX = 14;
+const HUD_SIDE_PADDING_PX = 14;
+const MOBILE_HUD_SIDE_PADDING_PX = 6;
 const HUD_TO_GADGET_GAP_PX = 22;
 
-const FRAME_PAD_PX = 10;
-const FRAME_RADIUS_PX = 14;
+const FRAME_PAD_PX = 6;
+const FRAME_RADIUS_PX = 10;
+const MAP_SCALE_FACTOR = 0.85;
 
 const MAP_BG = "rgba(5,6,8,0.72)";
 const MAP_GROUND = COLORS.dirtDark;
@@ -67,14 +70,16 @@ function getLayout({
 }: MapGadgetLayoutOptions): Layout {
   const worldWidth = Math.max(1, terrain.worldRight - terrain.worldLeft);
   const defaultWidth = clamp(viewportWidth * 0.23, 240, MAP_GADGET_WIDTH_PX);
-  const maxWidth = Math.max(80, Math.min(MAP_GADGET_WIDTH_PX, maxWidthPx ?? defaultWidth));
+  const requestedWidth = Math.min(MAP_GADGET_WIDTH_PX, maxWidthPx ?? defaultWidth);
+  const maxWidth = Math.max(80, requestedWidth * MAP_SCALE_FACTOR);
   const scale = maxWidth / worldWidth;
   const mapWidth = maxWidth;
   const mapHeight = Math.max(1, Math.round(terrain.height * scale));
   const outerWidth = mapWidth + FRAME_PAD_PX * 2;
   const outerHeight = mapHeight + FRAME_PAD_PX * 2;
 
-  const x = viewportWidth - HUD_TOP_PADDING_PX - outerWidth;
+  const sidePadding = viewportWidth < 760 ? MOBILE_HUD_SIDE_PADDING_PX : HUD_SIDE_PADDING_PX;
+  const x = viewportWidth - sidePadding - outerWidth;
   const hudHeight = viewportWidth < 760 ? 56 : 96;
   const y = topOffsetPx + HUD_TOP_PADDING_PX + hudHeight + HUD_TO_GADGET_GAP_PX;
   const innerX = x + FRAME_PAD_PX;
