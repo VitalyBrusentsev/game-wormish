@@ -240,18 +240,74 @@ export class MobileControlsOverlay {
     ctx.clearRect(0, 0, this.weaponIcon.width, this.weaponIcon.height);
 
     if (weapon === WeaponType.HandGrenade) {
-      const cx = this.weaponIcon.width * 0.5;
-      const cy = this.weaponIcon.height * 0.55;
-      const r = 11;
-      ctx.fillStyle = "#4e5b64";
+      const cx = this.weaponIcon.width * 0.42;
+      const cy = this.weaponIcon.height * 0.62;
+      const r = 11.5;
+      const now = performance.now() * 0.001;
+
+      ctx.save();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      for (let i = 0; i < 4; i += 1) {
+        const drift = (now * 0.34 + i * 0.23) % 1;
+        const smokeX = cx + 6 + Math.sin(now * 1.8 + i * 1.4) * (2.2 + i * 0.35);
+        const smokeY = cy - r - 9 - drift * 18;
+        const smokeR = 1.9 + drift * 3.2;
+        ctx.globalAlpha = (1 - drift) * 0.34;
+        ctx.fillStyle = "rgba(222,232,238,0.9)";
+        ctx.beginPath();
+        ctx.arc(smokeX, smokeY, smokeR, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = "rgba(198,218,224,0.72)";
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(cx + 1, cy - r - 3);
+      ctx.quadraticCurveTo(cx + 8, cy - r - 12, cx + 15, cy - r - 10);
+      ctx.stroke();
+
+      ctx.strokeStyle = "rgba(255,170,82,0.86)";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(cx + 12, cy - r - 10);
+      ctx.lineTo(cx + 16, cy - r - 10);
+      ctx.stroke();
+
+      const body = ctx.createRadialGradient(cx - 4, cy - 5, 2, cx, cy, r + 3);
+      body.addColorStop(0, "#5c6970");
+      body.addColorStop(0.45, "#2c363b");
+      body.addColorStop(1, "#11181d");
+      ctx.fillStyle = body;
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.45)";
-      ctx.lineWidth = 2;
+
+      ctx.strokeStyle = "rgba(8,12,15,0.92)";
+      ctx.lineWidth = 2.2;
       ctx.stroke();
-      ctx.fillStyle = "#88969f";
-      ctx.fillRect(cx - 2.5, cy - r - 8, 5, 7);
+
+      ctx.strokeStyle = "rgba(190,211,218,0.38)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r - 1.4, Math.PI * 1.05, Math.PI * 1.9);
+      ctx.stroke();
+
+      ctx.fillStyle = "#65737a";
+      ctx.fillRect(cx - 3.2, cy - r - 7, 6.4, 7.5);
+      ctx.strokeStyle = "rgba(9,13,16,0.68)";
+      ctx.lineWidth = 1.4;
+      ctx.strokeRect(cx - 3.2, cy - r - 7, 6.4, 7.5);
+
+      ctx.globalAlpha = 0.86;
+      ctx.fillStyle = "rgba(245,255,255,0.78)";
+      ctx.beginPath();
+      ctx.ellipse(cx - 4.2, cy - 4.6, 2.4, 3.7, 0.72, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
       return;
     }
 

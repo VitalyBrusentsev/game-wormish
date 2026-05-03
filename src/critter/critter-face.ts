@@ -20,8 +20,8 @@ export function renderCritterFace(config: {
   ctx.save();
   ctx.translate(center.x, center.y);
 
-  const eyeR = Math.max(2.2, headRadius * 0.26);
-  const eyeDx = headRadius * 0.42;
+  const eyeR = Math.max(4.4, headRadius * 0.4);
+  const eyeDx = headRadius * 0.52;
   const eyeY = -headRadius * 0.12;
 
   ctx.fillStyle = "#fff";

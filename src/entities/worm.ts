@@ -786,8 +786,8 @@ export class Worm {
         rig.head.center.x + facing * (rig.head.r * 0.18),
         rig.head.center.y - rig.head.r * 0.12
       );
-      const eyeR = Math.max(2.2, rig.head.r * 0.26);
-      const eyeDx = rig.head.r * 0.42;
+      const eyeR = Math.max(4.4, rig.head.r * 0.4);
+      const eyeDx = rig.head.r * 0.52;
       ctx.fillStyle = "#fff";
       ctx.beginPath();
       ctx.arc(-eyeDx, 0, eyeR, 0, Math.PI * 2);
